@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, WebAppInfo,
     BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats,
-    BotCommandScopeDefault,
+    BotCommandScopeDefault, BotCommandScopeChat,
 )
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, ContextTypes, filters
 
@@ -508,7 +508,7 @@ GAME_INFO = {
     "MINES": "/mines — Start a 5×5 Mines room. Tap safe tiles and cash out.",
     "RPS": "/rps rock|paper|scissors — Challenge Vanya.",
     "WORDSEEK": "/wordseek — Find the hidden word.",
-    "WORDGRID": "/wordgrid — Generate a 4×4 word grid.",
+    "WORDGRID": "/wordgrid — Generate an 8×8 word grid.",
     "TAP": "/tap — Reaction-speed challenge.",
     "CRASH": "/crash &lt;amount&gt; — Virtual-coin multiplier game.",
     "JUMBLE": "/jumble — Unscramble the shown word.",
@@ -1175,6 +1175,10 @@ async def callback(update,context):
                 await q.edit_message_text(f"⚠️ Stats error: {html.escape(str(e))}", parse_mode="HTML", reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]]))
             return
         if action == "commands":
+            reveal_line = (
+                "🔐 <code>/revealgrid</code> — Reveal active Wordgrid answer (Owner only)\n"
+                if q.from_user.id == OWNER_ID else ""
+            )
             await q.edit_message_text(
                 "👑 <b>Owner/Sudo Commands</b>\n\n"
                 "📢 <code>/broadcast &lt;text&gt;</code> — Broadcast text\n"
@@ -1185,8 +1189,22 @@ async def callback(update,context):
                 "🔐 <code>/auth</code> — Authorize current group\n"
                 "🔒 <code>/unauth</code> — Revoke current group\n"
                 "📋 <code>/authlist</code> — List authorized groups\n"
-                "📊 <code>/stats</code> — View groups and users",
+                "📊 <code>/stats</code> — View groups and users\n"
+                + reveal_line,
                 parse_mode="HTML", reply_markup=kb([[InlineKeyboardButton("⟵ Back", callback_data="owner:home")]])
+            )
+            return
+        if action == "revealgrid":
+            if q.from_user.id != OWNER_ID:
+                await q.edit_message_text("⛔ <b>Owner only.</b>", parse_mode="HTML")
+                return
+            await q.edit_message_text(
+                "🔐 <b>Wordgrid Answer Reveal</b>\n\n"
+                "Use <code>/revealgrid</code> inside the group where an active Wordgrid game is running.\n\n"
+                "The answer will be sent to your private chat and will not be shown to group members.\n"
+                "👑 <i>Owner only.</i>",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
             return
         if action == "broadcast":
@@ -1229,7 +1247,7 @@ async def callback(update,context):
                 "┃ 🔒 <i>Owner/Sudo access only</i>\n"
                 "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
                 "Choose an owner control below.",
-                parse_mode="HTML", reply_markup=owner_panel_kb()
+                parse_mode="HTML", reply_markup=owner_panel_kb(owner_only=(q.from_user.id == OWNER_ID))
             )
             return
     if data=="chat:start":
@@ -1570,21 +1588,29 @@ async def is_owner_or_sudo(update):
     u = await get_user(uid)
     return bool(u and u.get("is_sudo"))
 
-def owner_panel_kb():
-    return kb([
+def owner_panel_kb(owner_only=False):
+    rows = [
         [InlineKeyboardButton("📢 Broadcast", callback_data="owner:broadcast")],
         [InlineKeyboardButton("👑 Sudo Users", callback_data="owner:sudo"),
          InlineKeyboardButton("🔐 Auth Groups", callback_data="owner:auth")],
         [InlineKeyboardButton("📊 Stats", callback_data="owner:stats"),
          InlineKeyboardButton("📊 Panel Commands", callback_data="owner:commands")],
-        [InlineKeyboardButton("❌ Close", callback_data="owner:close")],
-    ])
+    ]
+    if owner_only:
+        rows.append([InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid")])
+    rows.append([InlineKeyboardButton("❌ Close", callback_data="owner:close")])
+    return kb(rows)
 
 async def owner_panel(update, context):
     """Private owner/sudo control panel. Never expose admin controls to regular users."""
     if not await is_owner_or_sudo(update):
         await update.message.reply_text("⛔ This panel is only available to the owner and sudo users.")
         return
+    owner_only = update.effective_user.id == OWNER_ID
+    extra = (
+        "🔐 /revealgrid — Reveal the active Wordgrid answer (Owner only)\n"
+        if owner_only else ""
+    )
     await update.message.reply_html(
         "╭━━━〔 👑 <b>VANYA OWNER PANEL</b> 〕━━━╮\n"
         "┃ 🔒 <i>Owner/Sudo access only</i>\n"
@@ -1598,8 +1624,9 @@ async def owner_panel(update, context):
         "🔐 /auth — Authorize current group\n"
         "🔒 /unauth — Revoke current group\n"
         "📋 /authlist — View authorized groups\n"
-        "📊 /stats — View groups and users (Owner/Sudo)",
-        reply_markup=owner_panel_kb()
+        "📊 /stats — View groups and users (Owner/Sudo)\n"
+        + extra.rstrip("\n"),
+        reply_markup=owner_panel_kb(owner_only=owner_only)
     )
 
 async def broadcast(update, context):
@@ -1871,9 +1898,13 @@ async def main():
         "unmute": "Unmute a user", "purge": "Delete recent messages",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
-    await app.bot.set_my_commands(command_list, scope=BotCommandScopeDefault())
-    await app.bot.set_my_commands(command_list, scope=BotCommandScopeAllGroupChats())
-    await app.bot.set_my_commands(command_list, scope=BotCommandScopeAllPrivateChats())
+    public_command_list = [c for c in command_list if c.command != "revealgrid"]
+    await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeDefault())
+    await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllGroupChats())
+    await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllPrivateChats())
+    if OWNER_ID:
+        owner_command_list = public_command_list + [BotCommand("revealgrid", "Reveal Wordgrid answer (Owner only)")]
+        await app.bot.set_my_commands(owner_command_list, scope=BotCommandScopeChat(chat_id=OWNER_ID))
 
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
     app.add_handler(ChatMemberHandler(log_bot_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=-1)
