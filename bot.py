@@ -1999,20 +1999,26 @@ async def direct_game_answer(update, context):
 async def mention_chat(update,context):
     if not update.message:
         return
+
     # Count conversational messages toward the daily quest.
     try:
         await progress_quest(update.effective_user.id)
     except Exception:
         pass
-    if update.effective_chat.type == "private":
+
+    chat = update.effective_chat
+    if not chat:
+        return
+
+    text = (update.message.text or "").strip()
+    if not text or len(text) > 1200:
+        return
+
+    if chat.type == "private":
         # Natural DM replies without requiring /chat.
         if not AI_DM_MODE:
             return
-        text = (update.message.text or "").strip()
-        if not text:
-            return
-        # Ignore commands and very long pasted blocks.
-        if text.startswith("/") or len(text) > 1200:
+        if text.startswith("/"):
             return
         await ensure_user(update.effective_user)
         answer = await ai_reply(update.effective_user, text, "private")
@@ -2022,28 +2028,53 @@ async def mention_chat(update,context):
     if not AI_GROUP_MODE:
         return
 
-    text = (update.message.text or "").strip()
-    if not text or len(text) > 1200:
+    # Never let the normal AI chat handler consume word-game answers.
+    wordgrid_active = context.application.bot_data.get("wordgrid_active", {})
+    if chat.id in wordgrid_active or chat.id in WORDSEEK_GAMES:
         return
 
-    # In groups Vanya must be directly addressed. This prevents her from
-    # jumping into two other people chatting with each other.
+    if text.startswith("/"):
+        return
+
+    # Telegram can deliver an @mention as an entity rather than as plain text.
+    # Check both the actual bot username and the legacy Vanya names.
     mentioned = bool(re.search(r"(?<!\w)(?:@?itzvanya|@?vanya)(?!\w)", text, re.I))
-    # Also answer simple greetings in groups, e.g. "hii", "hello",
-    # "hii vanya", "hello vanya", or "vanya hii". Keep the match
-    # intentionally narrow so Vanya does not jump into normal chatter.
+    bot_username = getattr(context.bot, "username", None)
+    if bot_username:
+        mentioned = mentioned or bool(
+            re.search(
+                rf"(?<!\w)@{re.escape(bot_username)}(?!\w)",
+                text,
+                re.I,
+            )
+        )
+    for entity in (update.message.entities or []):
+        if getattr(entity, "type", "") == "mention":
+            mention_text = text[entity.offset:entity.offset + entity.length]
+            if bot_username and mention_text.lstrip("@").lower() == bot_username.lower():
+                mentioned = True
+
     normalized = re.sub(r"\s+", " ", text.lower()).strip()
     greeting = bool(re.fullmatch(
         r"(?:hi+|hello+|hey+)(?:\s+@?(?:vanya|itzvanya))?[\s!.?~]*|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+)[\s!.?~]*",
         normalized,
         re.I,
     ))
+
     replied_to_bot = (
         update.message.reply_to_message is not None
         and update.message.reply_to_message.from_user is not None
         and update.message.reply_to_message.from_user.id == context.bot.id
     )
-    if not (mentioned or greeting or replied_to_bot):
+
+    # Group chat now works without making Vanya an admin:
+    # - reply to Vanya
+    # - mention Vanya
+    # - say hi/hello/hey to Vanya
+    # - or simply send a normal message when group AI is enabled.
+    # This is intentionally not tied to bot-admin status.
+    should_reply = mentioned or greeting or replied_to_bot or AI_GROUP_REPLY_ALL
+    if not should_reply:
         return
 
     await ensure_user(update.effective_user)
@@ -2053,7 +2084,6 @@ async def mention_chat(update,context):
         pass
     group_title = getattr(update.effective_chat, "title", "") or ""
     answer = await ai_reply(update.effective_user, text, "group", group_title)
-    # Use the same premium/custom-emoji renderer for group AI replies.
     await send_vanya_reply(update, answer)
 
 
