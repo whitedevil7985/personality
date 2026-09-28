@@ -305,9 +305,10 @@ def _wordgrid_caption(active, game_over: bool = False) -> str:
         if word.lower() in found:
             lines.append(f"✅ <code>{word}</code> — found ⭕")
         else:
-            # Show the full target word so players know exactly what they are
-            # looking for; only the grid itself hides the locations.
-            lines.append(f"🔎 <code>{word}</code> ({length} letters)")
+            # Keep the answer hidden. Players only get the first letter and
+            # the word length, like a normal word-search clue.
+            clue = f"{word[0]} " + " ".join("_" for _ in range(length - 1))
+            lines.append(f"🔍 <code>{clue}</code> ({length} letters)")
 
     total_points = sum(int(score) for score in points.values())
     lines.extend([
