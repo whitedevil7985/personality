@@ -105,7 +105,11 @@ def _build_grid():
     return grid, words[:], placements
 
 
-def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None) -> BytesIO:
+def _render_grid(
+    grid: List[List[str]],
+    highlighted: Set[Tuple[int, int]] = None,
+    highlighted_word_paths: List[List[Tuple[int, int]]] = None,
+) -> BytesIO:
     # Screenshot-inspired lavender Word Grid design.
     W, H = 900, 1030
     bg = (224, 207, 241)
@@ -117,6 +121,7 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
     highlight_stroke = (58, 145, 86)
 
     highlighted = highlighted or set()
+    highlighted_word_paths = highlighted_word_paths or []
 
     img = Image.new("RGB", (W, H), bg)
     d = ImageDraw.Draw(img)
@@ -137,16 +142,17 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
     )
 
     font = _font(84, bold=True)
+    cell_h = (board_h - gap * (GRID_SIZE - 1)) / GRID_SIZE
+
+    # First draw every cell.
+    cell_boxes = {}
     for r in range(GRID_SIZE):
         for c in range(GRID_SIZE):
             x0 = margin_x + c * (cell + gap)
-            y0 = top + r * (cell / 1.0 + 3)  # evenly packed within the board
-            # Normalize rows to the exact board height for a clean 8x8 grid.
-            y0 = top + r * ((board_h - gap * (GRID_SIZE - 1)) / GRID_SIZE + gap)
-            cell_h = (board_h - gap * (GRID_SIZE - 1)) / GRID_SIZE
+            y0 = top + r * (cell_h + gap)
             x1 = x0 + cell
             y1 = y0 + cell_h
-            is_found = (r, c) in highlighted
+            cell_boxes[(r, c)] = (x0, y0, x1, y1)
             d.rounded_rectangle(
                 (x0, y0, x1, y1),
                 radius=10,
@@ -154,6 +160,49 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
                 outline=inner_stroke,
                 width=2,
             )
+
+    # Draw a very visible green path + circle around every solved letter.
+    # The path makes diagonal/vertical/horizontal solved words obvious even
+    # on small Telegram previews.
+    centers = {}
+    for pos, (x0, y0, x1, y1) in cell_boxes.items():
+        centers[pos] = ((x0 + x1) / 2, (y0 + y1) / 2)
+
+    for pos in highlighted:
+        if pos not in centers:
+            continue
+        cx, cy = centers[pos]
+        radius = min(cell, cell_h) * 0.36
+        d.ellipse(
+            (cx - radius, cy - radius, cx + radius, cy + radius),
+            outline=highlight_stroke,
+            width=10,
+        )
+
+    # Connect consecutive cells that belong to the same solved word.
+    # This is calculated from adjacent highlighted cells, so crossing words
+    # remain supported without changing the puzzle itself.
+    for positions in highlighted_word_paths:
+        points = [centers[p] for p in positions if p in centers]
+        if len(points) >= 2:
+            d.line(points, fill=highlight_stroke, width=12, joint="curve")
+
+    # Re-draw circles on top of the connecting line and put letters above
+    # everything so both the circle and letter stay crisp.
+    for pos in highlighted:
+        if pos not in centers:
+            continue
+        cx, cy = centers[pos]
+        radius = min(cell, cell_h) * 0.36
+        d.ellipse(
+            (cx - radius, cy - radius, cx + radius, cy + radius),
+            outline=highlight_stroke,
+            width=10,
+        )
+
+    for r in range(GRID_SIZE):
+        for c in range(GRID_SIZE):
+            x0, y0, x1, y1 = cell_boxes[(r, c)]
             text = grid[r][c]
             bbox = d.textbbox((0, 0), text, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -164,16 +213,6 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
                 fill=letter,
             )
 
-            # Once a word is found, circle each of its letters so the
-            # solved path stays visibly marked on the grid.
-            if is_found:
-                pad = 8
-                d.ellipse(
-                    (x0 + pad, y0 + pad, x1 - pad, y1 - pad),
-                    outline=highlight_stroke,
-                    width=6,
-                )
-
     title_font = _font(31, bold=True)
     title = "▣ WORD GRID CHALLENGE"
     bbox = d.textbbox((0, 0), title, font=title_font)
@@ -181,7 +220,7 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
     d.text(((W - tw) / 2, 865), title, font=title_font, fill=letter)
 
     bio = BytesIO()
-    bio.name = "wordgrid.png"
+    bio.name = f"wordgrid_{id(bio)}.png"
     img.save(bio, format="PNG", optimize=True)
     bio.seek(0)
     return bio
@@ -193,6 +232,16 @@ def _found_positions(active) -> Set[Tuple[int, int]]:
     for word in active.get("found", set()):
         positions.update(placements.get(word, []))
     return positions
+
+
+def _found_word_paths(active) -> List[List[Tuple[int, int]]]:
+    placements = active.get("placements", {})
+    paths = []
+    for word in active.get("found", set()):
+        path = placements.get(word, [])
+        if path:
+            paths.append(path)
+    return paths
 
 
 def _wordgrid_caption(active, game_over: bool = False) -> str:
@@ -307,7 +356,7 @@ async def send_wordgrid(message, context, user_id=None):
     }
 
     sent = await message.reply_photo(
-        photo=_render_grid(grid),
+        photo=_render_grid(grid, set(), []),
         caption=_wordgrid_caption(active),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
