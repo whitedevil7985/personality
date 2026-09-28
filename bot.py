@@ -383,13 +383,24 @@ async def start(update, context):
 async def profile(update, context):
     await ensure_user(update.effective_user)
     u = await get_user(update.effective_user.id)
+
+    partner_id = u.get("partner")
+    partner_text = "Single"
+    if partner_id:
+        # Telegram's tg://user link opens the linked partner profile/chat
+        # when the user taps the partner ID.
+        partner_text = (
+            f'<a href="tg://user?id={int(partner_id)}">'
+            f'{html.escape(str(partner_id))}</a>'
+        )
+
     await update.message.reply_html(
         f"╭━━━〔 👤 <b>PROFILE</b> 〕━━━╮\n"
         f"┃ <b>{html.escape(u.get('name','User'))}</b>\n"
         f"┃ 💰 Coins: <b>{u.get('coins',0):,}</b>\n"
         f"┃ ⭐ XP: <b>{u.get('xp',0):,}</b>\n"
         f"┃ 🏆 Level: <b>{u.get('level',1)}</b>\n"
-        f"┃ 💕 Partner: <b>{u.get('partner') or 'Single'}</b>\n"
+        f"┃ 💕 Partner: {partner_text}\n"
         f"╰━━━━━━━━━━━━━━━━━━╯",
         reply_markup=kb([
             [developer_button()],
