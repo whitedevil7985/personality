@@ -549,7 +549,34 @@ async def game_info(update, context, key):
 
 # ───────────────────── economy ─────────────────────
 
-async def balance(update, context):
+async def toprich(update, context):
+    """Show the richest users by current coin balance."""
+    await ensure_user(update.effective_user)
+    rows = []
+    cursor = users.find({}, {"_id": 1, "name": 1, "coins": 1}).sort("coins", -1).limit(10)
+    async for u in cursor:
+        rows.append(u)
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [
+        "╭━━━〔 💰 <b>TOP RICH</b> 〕━━━╮",
+        "┃ <i>Richest Vanya players</i>",
+        "╰━━━━━━━━━━━━━━━━━━━━╯",
+        "",
+    ]
+
+    if not rows:
+        lines.append("💸 No players found yet.")
+    else:
+        for index, user in enumerate(rows, 1):
+            medal = medals[index - 1] if index <= 3 else f"<b>{index}.</b>"
+            name = html.escape(str(user.get("name") or "User"))
+            coins = int(user.get("coins", 0) or 0)
+            lines.append(f"{medal} <b>{name}</b> — 💰 <b>{coins:,}</b> coins")
+
+    lines.extend(["", "💎 Ranking is based on total current coins."])
+    await update.message.reply_html("\n".join(lines))
+\nasync def balance(update, context):
     await ensure_user(update.effective_user)
     u=await get_user(update.effective_user.id)
     await update.message.reply_html(f"💰 <b>{u.get('coins',0):,}</b> coins\n⭐ XP: <b>{u.get('xp',0):,}</b>\n🏆 Level: <b>{u.get('level',1)}</b>")
@@ -2183,7 +2210,7 @@ async def main():
     app=Application.builder().bot(ProtectedBot(TOKEN)).build()
     commands={
         "start":start,"help":help_cmd,"profile":profile,"balance":balance,"bal":balance,
-        "daily":daily,"work":work,"give":give,"toprich":leaderboard,"leaderboard":leaderboard,
+        "daily":daily,"work":work,"give":give,"toprich":toprich,"leaderboard":leaderboard,
         "rank":rank,"rob":rob,"protect":protect,"shield":lambda u,c: u.message.reply_text("🛡️ Use /protect to activate a shield."),
         "kill":kill,"revive":revive,"topkill":topkill,
         "propose":propose,"accept":accept,"reject":reject,"divorce":divorce,"marriage":marriage,"couple":couple,"topcouples":topcouples,
