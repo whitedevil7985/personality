@@ -766,16 +766,142 @@ async def protect(update,context):
 
 async def propose(update,context):
     target=await target_user(update)
-    if not target: await update.message.reply_text("Reply to someone: /propose");return
+    if not target:
+        await update.message.reply_text("Reply to someone with /propose 💌")
+        return
+    if not update.effective_user:
+        return
+
     await ensure_user(target)
+    await ensure_user(update.effective_user)
     me=await get_user(update.effective_user.id)
-    if me.get("partner"): await update.message.reply_text("You're already married.");return
-    await users.update_one({"_id":target.id},{"$set":{"pending_proposal":update.effective_user.id}})
-    await update.message.reply_text(f"💍 {target.first_name}, {update.effective_user.first_name} proposed to you!\nReply /accept or /reject")
+    target_user_doc=await get_user(target.id)
+
+    if target.id == update.effective_user.id:
+        await update.message.reply_text("😅 Khud ko propose nahi kar sakte!")
+        return
+    if getattr(target, "is_bot", False):
+        await update.message.reply_text("🤖 Bots ko proposal nahi bhej sakte.")
+        return
+    if me.get("partner"):
+        await update.message.reply_text("💕 You're already married.")
+        return
+    if target_user_doc and target_user_doc.get("partner"):
+        await update.message.reply_text(
+            f"💕 {html.escape(target.first_name or 'They')} is already in a relationship."
+        )
+        return
+    if target_user_doc and target_user_doc.get("pending_proposal"):
+        await update.message.reply_text(
+            f"💌 {html.escape(target.first_name or 'They')} already has a pending proposal."
+        )
+        return
+
+    proposer_name = html.escape(update.effective_user.first_name or "Someone")
+    target_name = html.escape(target.first_name or "there")
+    await users.update_one(
+        {"_id":target.id},
+        {"$set":{"pending_proposal":update.effective_user.id}},
+    )
+
+    await update.message.reply_html(
+        "╭━━━〔 💌 <b>LOVE PROPOSAL</b> 〕━━━╮\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"💖 <a href="tg://user?id={update.effective_user.id}"><b>{proposer_name}</b></a> "
+        f"has a special question for <a href="tg://user?id={target.id}"><b>{target_name}</b></a>…\n\n"
+        "💍 <b>Will you be my partner?</b>\n"
+        "✨ One little choice could change your status here forever.\n\n"
+        "👇 <b>Choose your answer:</b>",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("💖 Accept", callback_data=f"proposal:accept:{target.id}:{update.effective_user.id}"),
+                InlineKeyboardButton("💔 Reject", callback_data=f"proposal:reject:{target.id}:{update.effective_user.id}"),
+            ]
+        ]),
+    )
+
+async def _complete_proposal_callback(q, context, action, target_id, proposer_id):
+    if q.from_user.id != target_id:
+        await q.answer("This proposal is only for the recipient. 💌", show_alert=True)
+        return
+
+    target_doc=await get_user(target_id)
+    if not target_doc or int(target_doc.get("pending_proposal") or 0) != proposer_id:
+        await q.answer("This proposal is no longer active.", show_alert=True)
+        return
+
+    proposer_doc=await get_user(proposer_id)
+    if action == "accept":
+        if target_doc.get("partner") or (proposer_doc and proposer_doc.get("partner")):
+            await users.update_one({"_id":target_id},{"$unset":{"pending_proposal":""}})
+            await q.edit_message_text(
+                "💔 <b>Proposal expired</b>\n\nOne of you is already partnered.",
+                parse_mode="HTML",
+            )
+            return
+
+        await users.update_one(
+            {"_id":target_id},
+            {"$set":{"partner":proposer_id},"$unset":{"pending_proposal":""}},
+        )
+        await users.update_one(
+            {"_id":proposer_id},
+            {"$set":{"partner":target_id}},
+        )
+
+        target_name=html.escape(target_doc.get("name") or "Player")
+        proposer_name=html.escape((proposer_doc or {}).get("name") or "Player")
+        await q.edit_message_text(
+            "╭━━━〔 💞 <b>PROPOSAL ACCEPTED</b> 〕━━━╮\n"
+            "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"💍 <b>{proposer_name}</b> ❤️ <b>{target_name}</b>\n\n"
+            "🎉 Congratulations! You're officially partners now.\n"
+            "✨ Wishing you both lots of happy moments!",
+            parse_mode="HTML",
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=proposer_id,
+                text=(
+                    f"💞 <b>{target_name}</b> accepted your proposal!\n\n"
+                    f"🎉 You and <b>{target_name}</b> are now partners."
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        await q.answer("Proposal accepted! 💞")
+        return
+
+    await users.update_one({"_id":target_id},{"$unset":{"pending_proposal":""}})
+    target_name=html.escape(target_doc.get("name") or "Player")
+    proposer_name=html.escape((proposer_doc or {}).get("name") or "Player")
+    await q.edit_message_text(
+        "╭━━━〔 💔 <b>PROPOSAL DECLINED</b> 〕━━━╮\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"<b>{target_name}</b> has declined <b>{proposer_name}</b>'s proposal.\n\n"
+        "🌷 No hard feelings — maybe next time!",
+        parse_mode="HTML",
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=proposer_id,
+            text=(
+                f"💔 <b>{target_name}</b> declined your proposal.\n\n"
+                "🌷 No hard feelings."
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    await q.answer("Proposal declined 💔")
 
 async def accept(update,context):
-    u=await get_user(update.effective_user.id); proposer=u.get("pending_proposal")
-    if not proposer: await update.message.reply_text("No pending proposal.");return
+    u=await get_user(update.effective_user.id)
+    proposer=u.get("pending_proposal") if u else None
+    if not proposer:
+        await update.message.reply_text("No pending proposal.")
+        return
     await users.update_one({"_id":update.effective_user.id},{"$set":{"partner":proposer},"$unset":{"pending_proposal":""}})
     await users.update_one({"_id":proposer},{"$set":{"partner":update.effective_user.id}})
     await update.message.reply_text("💞 Married! Congratulations!")
@@ -1369,6 +1495,22 @@ async def cleanup_expired_memory():
 async def callback(update,context):
     q=update.callback_query;data=q.data
     await q.answer()
+
+    if data.startswith("proposal:"):
+        parts=data.split(":")
+        if len(parts) == 4:
+            action=parts[1]
+            try:
+                target_id=int(parts[2])
+                proposer_id=int(parts[3])
+            except (TypeError, ValueError):
+                await q.answer("Invalid proposal.", show_alert=True)
+                return
+            await _complete_proposal_callback(
+                q, context, action, target_id, proposer_id
+            )
+            return
+
     if data == "wordgrid:new":
         await send_wordgrid(q.message, context, getattr(q.from_user, "id", None))
         return
