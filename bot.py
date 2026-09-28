@@ -1461,6 +1461,20 @@ async def callback(update,context):
                 reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
             return
+        if action == "coins":
+            await q.edit_message_text(
+                "💰 <b>Coin Control</b>\n\n"
+                "Only Owner/Sudo can use these commands:\n\n"
+                "<code>/addcoins USER_ID AMOUNT</code>\n"
+                "<code>/removecoins USER_ID AMOUNT</code>\n\n"
+                "Example:\n"
+                "<code>/addcoins 123456789 5000</code>\n"
+                "<code>/removecoins 123456789 1000</code>\n\n"
+                "These commands are hidden from normal users and public command menus.",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+            )
+            return
         if action == "broadcast":
             await q.edit_message_text(
                 "📢 <b>Broadcast</b>\n\n"
@@ -1901,6 +1915,7 @@ def owner_panel_kb(owner_only=False, staff_access=False):
         rows.append([InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid")])
     if staff_access:
         rows.append([InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek")])
+        rows.append([InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")])
     rows.append([InlineKeyboardButton("❌ Close", callback_data="owner:close")])
     return kb(rows)
 
@@ -1912,6 +1927,9 @@ async def owner_panel(update, context):
     owner_only = update.effective_user.id == OWNER_ID
     staff_access = await is_owner_or_sudo(update)
     extra = (
+        ("💰 /addcoins <user_id> <amount> — Add virtual coins\n"
+         "💸 /removecoins <user_id> <amount> — Remove virtual coins\n"
+         if staff_access else "") +
         ("🔐 /revealgrid — Reveal the active Wordgrid answer (Owner/Sudo)\n"
          if staff_access else "") +
         ("🔎 /revealwordseek — Reveal the active Wordseek answer (Owner/Sudo)\n"
@@ -1934,6 +1952,90 @@ async def owner_panel(update, context):
         + extra.rstrip("\n"),
         reply_markup=owner_panel_kb(owner_only=owner_only, staff_access=staff_access)
     )
+
+async def _coin_admin_target(update, context, remove=False):
+    """Owner/Sudo utility for adjusting any user's virtual coin balance by ID."""
+    if not await is_owner_or_sudo(update):
+        await update.message.reply_text("⛔ Owner/Sudo only.")
+        return
+
+    command = "removecoins" if remove else "addcoins"
+    if len(context.args) < 2:
+        await update.message.reply_html(
+            f"Usage: <code>/{command} &lt;user_id&gt; &lt;amount&gt;</code>\n"
+            f"Example: <code>/{command} 123456789 500</code>"
+        )
+        return
+
+    try:
+        target_id = int(context.args[0])
+        amount = int(context.args[1])
+    except (TypeError, ValueError):
+        await update.message.reply_text("⚠️ User ID aur amount number mein do.")
+        return
+
+    if target_id <= 0 or amount <= 0:
+        await update.message.reply_text("⚠️ User ID aur amount 0 se zyada hona chahiye.")
+        return
+
+    target = await get_user(target_id)
+    if not target:
+        await users.update_one(
+            {"_id": target_id},
+            {"$setOnInsert": {
+                "name": f"User {target_id}",
+                "coins": 0,
+                "xp": 0,
+                "level": 1,
+                "warnings": 0,
+                "partner": None,
+                "pending_proposal": None,
+                "chat_history": [],
+                "memory": [],
+                "memories": [],
+                "is_sudo": False,
+            }},
+            upsert=True,
+        )
+        target = await get_user(target_id)
+
+    current = int((target or {}).get("coins", 0) or 0)
+
+    if remove:
+        actual = min(amount, max(0, current))
+        if actual <= 0:
+            await update.message.reply_text(
+                f"💰 User <code>{target_id}</code> ke paas remove karne ke liye coins nahi hain.",
+                parse_mode="HTML",
+            )
+            return
+        await add_coins(target_id, -actual)
+        new_balance = current - actual
+        action_text = f"removed <b>{actual:,}</b> coins"
+    else:
+        actual = amount
+        await add_coins(target_id, actual)
+        new_balance = current + actual
+        action_text = f"added <b>{actual:,}</b> coins"
+
+    name = html.escape(str((target or {}).get("name") or f"User {target_id}"))
+    await update.message.reply_html(
+        "╭━━━〔 💰 <b>COIN CONTROL</b> 〕━━━╮\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"👤 <b>{name}</b>\n"
+        f"🆔 <code>{target_id}</code>\n"
+        f"✅ {action_text}\n"
+        f"💰 New balance: <b>{new_balance:,}</b> coins"
+    )
+
+
+async def addcoins_admin(update, context):
+    await _coin_admin_target(update, context, remove=False)
+
+
+async def removecoins_admin(update, context):
+    await _coin_admin_target(update, context, remove=True)
+
 
 async def broadcast(update, context):
     """Broadcast a text or any Telegram message to started users and known groups."""
@@ -2221,7 +2323,7 @@ async def main():
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
         "scribble":scribble,"answer":answer,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
-        "owner":owner_panel,"panel":owner_panel,"broadcast":broadcast,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
+        "owner":owner_panel,"panel":owner_panel,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,
     }
     for name,fn in commands.items():
@@ -2257,7 +2359,7 @@ async def main():
         "wordscramble": "Play Wordscramble", "words": "Play Wordscramble", "hack": "Play Hack puzzle",
         "scribble": "Open Scribble", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
-        "panel": "Open owner panel", "broadcast": "Broadcast a message", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
+        "panel": "Open owner panel", "broadcast": "Broadcast a message", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
@@ -2266,7 +2368,7 @@ async def main():
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
     # into any public command scope.
-    public_command_list = [c for c in command_list if c.command not in {"addemoji"}]
+    public_command_list = [c for c in command_list if c.command not in {"addemoji", "addcoins", "removecoins"}]
 
     # Clear previously registered public command menus first. This prevents
     # Telegram from retaining a stale /revealgrid entry after code updates.
