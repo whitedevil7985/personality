@@ -807,8 +807,8 @@ async def propose(update,context):
     await update.message.reply_html(
         "╭━━━〔 💌 <b>LOVE PROPOSAL</b> 〕━━━╮\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"💖 <a href="tg://user?id={update.effective_user.id}"><b>{proposer_name}</b></a> "
-        f"has a special question for <a href="tg://user?id={target.id}"><b>{target_name}</b></a>…\n\n"
+        f'💖 <a href="tg://user?id={update.effective_user.id}"><b>{proposer_name}</b></a> '
+        f'has a special question for <a href="tg://user?id={target.id}"><b>{target_name}</b></a>…\n\n'
         "💍 <b>Will you be my partner?</b>\n"
         "✨ One little choice could change your status here forever.\n\n"
         "👇 <b>Choose your answer:</b>",
