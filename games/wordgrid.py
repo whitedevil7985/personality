@@ -114,7 +114,6 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
     inner = (238, 226, 250)
     inner_stroke = (211, 191, 231)
     letter = (59, 43, 91)
-    highlight = (204, 239, 212)
     highlight_stroke = (58, 145, 86)
 
     highlighted = highlighted or set()
@@ -151,9 +150,9 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
             d.rounded_rectangle(
                 (x0, y0, x1, y1),
                 radius=10,
-                fill=highlight if is_found else inner,
-                outline=highlight_stroke if is_found else inner_stroke,
-                width=4 if is_found else 2,
+                fill=inner,
+                outline=inner_stroke,
+                width=2,
             )
             text = grid[r][c]
             bbox = d.textbbox((0, 0), text, font=font)
@@ -164,6 +163,16 @@ def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None
                 font=font,
                 fill=letter,
             )
+
+            # Once a word is found, circle each of its letters so the
+            # solved path stays visibly marked on the grid.
+            if is_found:
+                pad = 8
+                d.ellipse(
+                    (x0 + pad, y0 + pad, x1 - pad, y1 - pad),
+                    outline=highlight_stroke,
+                    width=6,
+                )
 
     title_font = _font(31, bold=True)
     title = "▣ WORD GRID CHALLENGE"
