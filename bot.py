@@ -34,7 +34,7 @@ from games.uno import uno as uno_legacy, unojoin, uno_cb
 from games.ludo import ludo as ludo_legacy, ludojoin, ludo_cb
 from games.chess import chess_cmd, chessjoin, chess_cb
 from games.mines import mines, mines_cb
-from games.wordseek import wordseek, answer as wordseek_answer
+from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek
 from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_wordgrid
 from games.crash import crash
 from games.charades import charades
@@ -1317,6 +1317,19 @@ async def callback(update,context):
                 reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
             return
+        if action == "revealwordseek":
+            if q.from_user.id != OWNER_ID:
+                await q.edit_message_text("⛔ <b>Owner only.</b>", parse_mode="HTML")
+                return
+            await q.edit_message_text(
+                "🔎 <b>Wordseek Answer Reveal</b>\n\n"
+                "Use <code>/revealwordseek</code> inside the group where an active Wordseek game is running.\n\n"
+                "The answer will be sent to your private chat and will not be shown to group members.\n"
+                "👑 <i>Owner only.</i>",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+            )
+            return
         if action == "broadcast":
             await q.edit_message_text(
                 "📢 <b>Broadcast</b>\n\n"
@@ -1707,7 +1720,10 @@ def owner_panel_kb(owner_only=False):
          InlineKeyboardButton("📊 Panel Commands", callback_data="owner:commands")],
     ]
     if owner_only:
-        rows.append([InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid")])
+        rows.append([
+            InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid"),
+            InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek"),
+        ])
     rows.append([InlineKeyboardButton("❌ Close", callback_data="owner:close")])
     return kb(rows)
 
@@ -1719,6 +1735,7 @@ async def owner_panel(update, context):
     owner_only = update.effective_user.id == OWNER_ID
     extra = (
         "🔐 /revealgrid — Reveal the active Wordgrid answer (Owner only)\n"
+        "🔎 /revealwordseek — Reveal the active Wordseek answer (Owner only)\n"
         if owner_only else ""
     )
     await update.message.reply_html(
@@ -1979,6 +1996,7 @@ async def main():
     # /revealgrid is intentionally registered outside the public command map:
     # the handler exists, but Telegram must never advertise it to normal users.
     app.add_handler(CommandHandler("revealgrid", reveal_wordgrid))
+    app.add_handler(CommandHandler("revealwordseek", reveal_wordseek))
 
     # Register the full command list with Telegram so typing "/" in ANY
     # group/private chat shows Vanya's available commands (like the
@@ -2026,7 +2044,10 @@ async def main():
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllGroupChats())
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllPrivateChats())
     if OWNER_ID:
-        owner_command_list = public_command_list + [BotCommand("revealgrid", "Reveal Wordgrid answer (Owner only)")]
+        owner_command_list = public_command_list + [
+            BotCommand("revealgrid", "Reveal Wordgrid answer (Owner only)"),
+            BotCommand("revealwordseek", "Reveal Wordseek answer (Owner only)"),
+        ]
         await app.bot.set_my_commands(owner_command_list, scope=BotCommandScopeChat(chat_id=OWNER_ID))
 
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
