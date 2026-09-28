@@ -447,7 +447,6 @@ CATEGORIES = {
 "/unmute — Unmute a user",
 "/purge — Delete replied message",
 "/broadcast &lt;text&gt; or reply to any message — Owner/Sudo broadcast",
-"/revealgrid — DM the current Wordgrid answer (Owner/Sudo only)",
 ]),
 "chat": ("💬 <b>Chat With Me</b> 💬", [
 "/chat &lt;text&gt; — Chat with Vanya in DM",
