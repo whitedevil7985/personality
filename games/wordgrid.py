@@ -281,27 +281,38 @@ def _found_word_paths(active) -> List[List[Tuple[int, int]]]:
 
 
 def _wordgrid_caption(active, game_over: bool = False) -> str:
-    found = active.get("found", set())
-    words_list = active.get("words_list", [])
-    total = len(words_list)
+    found = set(active.get("found", set()))
     points = active.get("points", {})
+
+    # Always use the actual target list stored for this game. This prevents
+    # a broken/legacy state from producing "Found: 0/0" or an empty word list.
+    word_defs = list(active.get("word_defs") or [])
+    if not word_defs:
+        words_list = list(active.get("words_list") or [])
+        word_defs = [(w, len(w)) for w in words_list]
+    if not word_defs:
+        word_defs = list(WORD_POOL[:7])
+
+    total = len(word_defs)
 
     lines = [
         "🎮 <b>Word grid challenge</b> 🎮",
         "",
-        "find these words:",
+        "🔍 <b>Find these words:</b>",
     ]
-    word_defs = active.get("word_defs") or [(w, len(w)) for w in words_list]
+
     for word, length in word_defs:
         if word.lower() in found:
-            lines.append(f"✅ <code>{word}</code> ({length})")
+            lines.append(f"✅ <code>{word}</code> — found ⭕")
         else:
-            lines.append(f"<code>{word[0]}</code> " + "_ " * (length - 1) + f"({length})")
+            # Show the full target word so players know exactly what they are
+            # looking for; only the grid itself hides the locations.
+            lines.append(f"🔎 <code>{word}</code> ({length} letters)")
 
     total_points = sum(int(score) for score in points.values())
     lines.extend([
         "",
-        f"🔎 <b>Found:</b> {len(found)}/{total}",
+        f"🔎 <b>Words found:</b> {len(found)}/{total}",
         f"⭐ <b>Points scored:</b> {total_points}",
     ])
 
