@@ -20,7 +20,7 @@ from config import (
     AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
     MEMORY_DAYS, SUDO_IDS, LOGGER_CHAT_ID
 )
-from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, get_game_leaderboard
+from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
 
 # ───────────────────── modular games ─────────────────────
 from games.rps import rps
@@ -1204,13 +1204,64 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         await _append_history(user.id,text_value,fallback)
         return fallback
 
+_CUSTOM_EMOJI_CACHE = {}
+_CUSTOM_EMOJI_CACHE_AT = 0.0
+
+async def _load_custom_emoji_map():
+    global _CUSTOM_EMOJI_CACHE, _CUSTOM_EMOJI_CACHE_AT
+    now = time.monotonic()
+    if _CUSTOM_EMOJI_CACHE and now - _CUSTOM_EMOJI_CACHE_AT < 300:
+        return _CUSTOM_EMOJI_CACHE
+    try:
+        _CUSTOM_EMOJI_CACHE = await get_custom_emoji_map()
+        _CUSTOM_EMOJI_CACHE_AT = now
+    except Exception as exc:
+        print(f"[CustomEmoji] {type(exc).__name__}: {exc}")
+    return _CUSTOM_EMOJI_CACHE
+
+
+async def _premiumize_text(text_value):
+    """Turn normal emoji characters into Telegram custom-emoji entities.
+
+    The bot owner must first save one or more custom emoji with /addemoji.
+    The regular emoji remains as the fallback alt text.
+    """
+    text_value = str(text_value or "")
+    mapping = await _load_custom_emoji_map()
+    if not mapping:
+        return html.escape(text_value), False
+
+    escaped = html.escape(text_value)
+    # Prefer longer alternatives first so multi-codepoint emoji are safe.
+    for alt in sorted(mapping, key=len, reverse=True):
+        ids = mapping.get(alt) or []
+        if not ids or alt not in escaped:
+            continue
+        eid = html.escape(random.choice(ids), quote=True)
+        escaped = escaped.replace(
+            alt,
+            f'<tg-emoji emoji-id="{eid}">{html.escape(alt)}</tg-emoji>'
+        )
+    return escaped, True
+
+
 async def send_vanya_reply(update, text_value):
     if AI_DISCLOSURE and update.effective_chat.type=="private":
         u=await get_user(update.effective_user.id)
         if not u.get("ai_disclosure_sent"):
-            await update.effective_chat.send_message("💜 Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days.")
+            disclosure, has_custom = await _premiumize_text(
+                "💜 Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
+            )
+            if has_custom:
+                await update.effective_chat.send_message(disclosure, parse_mode="HTML")
+            else:
+                await update.effective_chat.send_message(html.unescape(disclosure))
             await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
-    await update.message.reply_text(text_value)
+    rendered, has_custom = await _premiumize_text(text_value)
+    if has_custom:
+        await update.message.reply_text(rendered, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text_value)
 
 async def cleanup_expired_memory():
     cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
@@ -1822,6 +1873,53 @@ async def broadcast(update, context):
         parse_mode="HTML",
     )
 
+async def addemoji(update, context):
+    """Owner-only helper: save custom emoji IDs from a replied Telegram message."""
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⛔ Owner only.")
+        return
+
+    target = update.message.reply_to_message
+    if not target:
+        await update.message.reply_text(
+            "Reply to a message containing your premium/custom emoji, then send /addemoji."
+        )
+        return
+
+    entities = list(target.entities or []) + list(target.caption_entities or [])
+    custom = [e for e in entities if getattr(e, "type", "") == "custom_emoji" and getattr(e, "custom_emoji_id", None)]
+    if not custom:
+        await update.message.reply_text(
+            "❌ Is message mein custom/premium emoji entity nahi mila. Telegram se premium emoji send karke us message ko reply karo."
+        )
+        return
+
+    saved = 0
+    seen = set()
+    for entity in custom:
+        eid = str(entity.custom_emoji_id)
+        if eid in seen:
+            continue
+        seen.add(eid)
+        alt = "✨"
+        try:
+            stickers = await context.bot.get_custom_emoji_stickers([eid])
+            if stickers and getattr(stickers[0], "emoji", None):
+                alt = stickers[0].emoji
+        except Exception:
+            pass
+        await save_custom_emoji(eid, alt, update.effective_user.id)
+        saved += 1
+
+    global _CUSTOM_EMOJI_CACHE, _CUSTOM_EMOJI_CACHE_AT
+    _CUSTOM_EMOJI_CACHE = {}
+    _CUSTOM_EMOJI_CACHE_AT = 0.0
+    await update.message.reply_text(
+        f"✅ Saved {saved} premium/custom emoji for Vanya chat replies.\n"
+        "Ab Vanya normal emoji ko automatically custom animated emoji mein use kar sakti hai."
+    )
+
+
 async def addsudo(update, context):
     if update.effective_user.id != OWNER_ID:
         await update.message.reply_text("Owner only.")
@@ -1998,7 +2096,7 @@ async def main():
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
         "scribble":scribble,"answer":answer,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
-        "owner":owner_panel,"panel":owner_panel,"broadcast":broadcast,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
+        "owner":owner_panel,"panel":owner_panel,"broadcast":broadcast,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,
     }
     for name,fn in commands.items():
@@ -2034,7 +2132,7 @@ async def main():
         "wordscramble": "Play Wordscramble", "words": "Play Wordscramble", "hack": "Play Hack puzzle",
         "scribble": "Open Scribble", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
-        "panel": "Open owner panel", "broadcast": "Broadcast a message", "addsudo": "Add a sudo user",
+        "panel": "Open owner panel", "broadcast": "Broadcast a message", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
@@ -2043,7 +2141,7 @@ async def main():
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
     # into any public command scope.
-    public_command_list = list(command_list)
+    public_command_list = [c for c in command_list if c.command not in {"addemoji"}]
 
     # Clear previously registered public command menus first. This prevents
     # Telegram from retaining a stale /revealgrid entry after code updates.
@@ -2056,6 +2154,7 @@ async def main():
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllPrivateChats())
     if OWNER_ID:
         owner_command_list = public_command_list + [
+            BotCommand("addemoji", "Save premium custom emoji"),
             BotCommand("revealgrid", "Reveal Wordgrid answer (Owner only)"),
             BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)"),
         ]
