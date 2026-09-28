@@ -1231,15 +1231,12 @@ def _is_emoji_codepoint(ch):
 
 
 def _strip_non_custom_emoji(text_value):
-    """Remove ordinary Unicode emoji so Vanya never sends regular emoji."""
+    """Remove plain Unicode emoji while leaving normal text untouched."""
     out = []
     i = 0
     value = str(text_value or "")
     while i < len(value):
         ch = value[i]
-        # Preserve zero-width joiner, variation selector and skin-tone
-        # modifiers only when they are part of an emoji sequence; the whole
-        # sequence is removed by deleting its emoji starter below.
         if _is_emoji_codepoint(ch):
             i += 1
             while i < len(value):
@@ -1252,8 +1249,6 @@ def _strip_non_custom_emoji(text_value):
                     continue
                 break
             continue
-        # Remove standalone variation selectors left behind by stripped
-        # sequences, but keep normal text untouched.
         if ord(ch) in (0xFE0E, 0xFE0F):
             i += 1
             continue
@@ -1263,35 +1258,41 @@ def _strip_non_custom_emoji(text_value):
 
 
 async def _premiumize_text(text_value):
-    """Render only saved Telegram custom/premium emoji.
+    """Allow only saved Telegram custom/premium emoji in Vanya replies.
 
-    Normal Unicode emoji are removed unless an identical alternative emoji has
-    been saved by the Owner with /addemoji. In saved cases the Unicode
-    character is replaced by a Telegram custom-emoji entity.
+    OWNER_ID being Premium does not automatically give the bot access to the
+    owner's emoji library. The Owner must provide custom emoji IDs via
+    /addemoji. Every ordinary Unicode emoji is removed unless its exact
+    fallback emoji has a saved Telegram custom-emoji ID.
     """
     text_value = str(text_value or "")
     mapping = await _load_custom_emoji_map()
 
-    # First replace known saved emoji with their Telegram custom-emoji
-    # entities, so they are not stripped as ordinary Unicode emoji.
-    rendered = html.escape(text_value)
-    replaced_count = 0
-    for alt in sorted(mapping, key=len, reverse=True):
+    # Protect known custom-emoji alternatives with placeholders first.
+    placeholders = {}
+    cleaned = text_value
+    for index, alt in enumerate(sorted(mapping, key=len, reverse=True)):
         ids = mapping.get(alt) or []
-        if not ids or alt not in rendered:
+        if not ids or alt not in cleaned:
             continue
-        eid = html.escape(random.choice(ids), quote=True)
-        rendered = rendered.replace(
-            alt,
-            f'<tg-emoji emoji-id="{eid}">{html.escape(alt)}</tg-emoji>'
+        token = f"__VANYA_CUSTOM_EMOJI_{index}__"
+        placeholders[token] = (alt, random.choice(ids))
+        cleaned = cleaned.replace(alt, token)
+
+    # Strip every remaining ordinary Unicode emoji.
+    cleaned = _strip_non_custom_emoji(cleaned)
+
+    # Restore only the saved custom/premium emoji entities.
+    rendered = html.escape(cleaned)
+    replaced_count = 0
+    for token, (alt, eid) in placeholders.items():
+        rendered_token = (
+            f'<tg-emoji emoji-id="{html.escape(str(eid), quote=True)}">'
+            f'{html.escape(alt)}</tg-emoji>'
         )
+        rendered = rendered.replace(html.escape(token), rendered_token)
         replaced_count += 1
 
-    # Strip only the remaining plain Unicode emoji from outside custom
-    # entities. The tags/attributes themselves contain no emoji.
-    rendered = _strip_non_custom_emoji(rendered)
-
-    # If there are no saved premium emoji, Vanya sends plain text only.
     return rendered, replaced_count > 0
 
 
