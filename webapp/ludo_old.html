@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Ludo • Vanya</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#f7f0e2;--ink:#553a29;--muted:#8a705a;--card:#fffaf1;--line:#ead8bd;--green:#77d493;--yellow:#ffc343;--red:#ff766c;--blue:#79b6ee}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;min-height:100%;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:linear-gradient(#eef8df,#f8efe0);color:var(--ink)}
+body{overflow-x:hidden}.app{max-width:520px;margin:0 auto;min-height:100vh;padding:18px 14px 26px;position:relative}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.brand{display:flex;align-items:center;gap:9px;background:#fffaf2;border:1px solid var(--line);border-radius:24px;padding:8px 15px;font-weight:900;font-size:18px;box-shadow:0 4px 14px #7a5b3414}.brand .dot{width:11px;height:11px;border-radius:50%;background:#70d28e;box-shadow:0 0 0 4px #70d28e22}.code,.iconbtn{background:#fffaf2;border:1px solid var(--line);border-radius:18px;padding:9px 12px;font-weight:800;box-shadow:0 4px 14px #7a5b3414}.iconbtn{font-size:18px;min-width:45px}.room{display:flex;gap:8px;align-items:center}.lock{font-size:20px}.hero{background:#fffaf2;border:1px solid var(--line);border-radius:24px;padding:18px;box-shadow:0 8px 26px #7a5b3412;text-align:center}.hero h1{margin:0 0 5px;font-size:29px}.hero p{margin:0;color:var(--muted);font-weight:700}.choose{margin-top:16px;font-size:15px;font-weight:900;letter-spacing:.3px}.crown{font-size:29px;display:block;margin-bottom:-4px}.corners{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:11px}.color{border:3px solid;border-radius:25px;padding:12px 9px 11px;background:#fffdf7;min-height:135px;box-shadow:inset 0 0 0 1px #fff,0 6px 16px #79552a15}.color .plus{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;margin:auto;font-size:42px;line-height:1;background:#fff;border:1px solid #e5dccd}.color strong{display:block;font-size:18px;margin-top:6px}.color small{font-weight:900}.green{border-color:var(--green)}.green .plus{color:#55c778}.yellow{border-color:var(--yellow)}.yellow .plus{color:#e5a918}.red{border-color:var(--red)}.red .plus{color:#ed5e54}.blue{border-color:var(--blue)}.blue .plus{color:#5d9fe0}.color.selected{box-shadow:0 0 0 4px #ffffff,0 0 0 8px #d3a84b80,0 10px 22px #76501e22;transform:translateY(-2px)}
+.actionbar{display:flex;gap:8px;justify-content:center;background:#fffaf2;border:1px solid var(--line);border-radius:22px;padding:9px;margin-top:13px;font-weight:900}.actionbar button{border:0;background:transparent;color:var(--muted);font-weight:900;padding:3px 10px}.bottom{background:#fffaf2;border:1px solid var(--line);border-radius:28px;margin-top:10px;padding:10px;box-shadow:0 8px 22px #76501e12}.status{display:flex;align-items:center;justify-content:space-between;padding:3px 8px 10px;font-weight:900}.status span:last-child{font-size:12px}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btn{border:0;border-radius:21px;padding:15px 13px;font-size:16px;font-weight:950;cursor:pointer}.btn.secondary{background:#fff;border:1px solid #e5d5bc;color:var(--ink)}.btn.primary{background:linear-gradient(#bdf1c7,#a6dfb0);color:white;text-shadow:0 1px 1px #6b9e73}.btn:disabled{opacity:.45}.hint{font-size:12px;color:var(--muted);text-align:center;margin-top:10px;font-weight:700}
+#game{display:none}.boardwrap{background:#fffaf2;border:1px solid var(--line);padding:10px;border-radius:28px;box-shadow:0 10px 30px #76501e18}.board{width:100%;aspect-ratio:1;display:grid;grid-template-columns:repeat(15,1fr);grid-template-rows:repeat(15,1fr);background:#fff;border:4px solid #e7d0ad;border-radius:17px;overflow:hidden;position:relative}.cell{border:1px solid #dfcfb6;position:relative;display:grid;place-items:center;font-size:11px}.homeR{background:#ffd5cf}.homeG{background:#d7f4da}.homeY{background:#fff0bd}.homeB{background:#d5e9fb}.track{background:#fffdf8}.safe:after{content:'★';color:#b28a55;font-size:10px}.center{background:conic-gradient(from 45deg,var(--yellow) 0 25%,var(--green) 0 50%,var(--blue) 0 75%,var(--red) 0);}.token{width:6.8%;height:6.8%;border-radius:50%;border:2px solid #fff;box-shadow:0 2px 4px #0003;z-index:3}.t-red{background:#ef665b}.t-green{background:#65ca80}.t-yellow{background:#f5bb37}.t-blue{background:#68a9e6}.dicepanel{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}.turn{font-weight:950}.dice{width:64px;height:64px;border-radius:18px;background:white;border:1px solid var(--line);display:grid;place-items:center;font-size:34px;box-shadow:0 5px 15px #76501e1a}.roll{flex:1}.score{display:flex;gap:6px;margin-top:10px}.pill{flex:1;padding:9px 5px;background:#fffaf2;border:1px solid var(--line);border-radius:15px;text-align:center;font-size:11px;font-weight:900}.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#2f2a24;color:#fff;padding:11px 16px;border-radius:18px;font-weight:800;font-size:13px;display:none;z-index:99;max-width:90%;text-align:center}.modal{position:fixed;inset:0;background:#1d2a35aa;display:none;align-items:center;justify-content:center;padding:22px;z-index:100}.modalbox{background:#fffaf2;border-radius:25px;padding:20px;max-width:380px;width:100%;box-shadow:0 20px 60px #0005;text-align:center}.modalbox h2{margin-top:0}.modalbox button{width:100%;margin-top:8px}.footer{margin-top:12px;text-align:center;color:#9a8269;font-size:11px;font-weight:800}
+</style>
+</head>
+<body>
+<div class="app">
+<section id="lobby">
+  <div class="top"><div class="brand"><span class="dot"></span> LUDO</div><div class="room"><div class="code" id="roomCode">7IYB7D　▣</div><button class="iconbtn" onclick="help()">?</button></div></div>
+  <div class="hero">
+    <div class="lock">🔒</div><div style="font-weight:900;font-size:16px">Private room</div><div id="seatText" style="font-size:12px;color:#8a705a;font-weight:800">1/4 seated</div>
+    <div class="crown">♛</div><div class="choose">Choose your color</div><div style="font-weight:950;font-size:28px;margin-top:1px">Pick your corner</div>
+    <div class="corners">
+      <button class="color green" data-color="green" onclick="chooseColor('green')"><div class="plus">＋</div><strong>Green</strong><small style="color:#55bd72">Choose</small></button>
+      <button class="color yellow" data-color="yellow" onclick="chooseColor('yellow')"><div class="plus">＋</div><strong>Yellow</strong><small style="color:#db9f19">Choose</small></button>
+      <button class="color red" data-color="red" onclick="chooseColor('red')"><div class="plus">＋</div><strong>You</strong><small style="color:#e55a51">Your color</small></button>
+      <button class="color blue" data-color="blue" onclick="chooseColor('blue')"><div class="plus">＋</div><strong>Blue</strong><small style="color:#5998d2">Choose</small></button>
+    </div>
+  </div>
+  <div class="actionbar"><button onclick="addBot()">♙＋ Add bot</button><span>│</span><button onclick="invite()">⌯ Invite friend</button></div>
+  <div class="bottom"><div class="status"><span>⚑ <span id="needed">One more player needed</span></span><span>Minimum 2 players</span></div><div class="buttons"><button class="btn secondary" onclick="addBot()">♙＋ Add bot</button><button class="btn primary" id="startBtn" onclick="startGame()">▶ Start match</button></div><div class="hint" id="hint">Pick a color, invite friends or add a bot, then start the live match.</div></div>
+  <div class="footer">Vanya Ludo • Telegram Mini App</div>
+</section>
+<section id="game">
+  <div class="top"><button class="iconbtn" onclick="leaveGame()">×</button><div class="brand"><span class="dot"></span> LUDO</div><button class="iconbtn" onclick="help()">?</button></div>
+  <div class="boardwrap"><div class="board" id="board"></div></div>
+  <div class="score" id="score"></div>
+  <div class="dicepanel"><div><div class="turn" id="turn">Your turn</div><div style="font-size:12px;color:#8a705a;font-weight:800" id="gameMsg">Roll the dice</div></div><div class="dice" id="dice">⚀</div><button class="btn primary roll" id="rollBtn" onclick="rollDice()">🎲 Roll dice</button></div>
+</section>
+<div id="chatbox" style="display:none;background:#fffaf2;border:1px solid var(--line);border-radius:22px;margin-top:10px;padding:10px">
+  <div id="chatlog" style="max-height:130px;overflow:auto;font-size:12px;font-weight:700"></div>
+  <div style="display:flex;gap:7px;margin-top:8px"><input id="chatinput" placeholder="Chat with players…" style="flex:1;border:1px solid var(--line);border-radius:15px;padding:11px;background:#fff"><button class="btn secondary" style="padding:10px 14px" onclick="sendChat()">Send</button></div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+<div class="modal" id="modal"><div class="modalbox"><h2>🎲 Ludo</h2><p>Choose a color, add a bot and start. Roll 6 to bring a token out. Reach the center to win.</p><button class="btn primary" onclick="closeModal()">Got it</button></div></div>
+<script>
+const tg=window.Telegram?.WebApp;
+if(tg){tg.ready();tg.expand();try{tg.setHeaderColor('#17222d');tg.setBackgroundColor('#f7f0e2')}catch(e){}}
+const faces=['','⚀','⚁','⚂','⚃','⚄','⚅'];
+const colors=['green','yellow','red','blue'];
+let ws=null, room='', state=null, selected='red', botUsername='ItzVanyaBot', myId='', pendingCreate=false;
+const q=new URLSearchParams(location.search);
+room=(q.get('room')||'').toUpperCase();
+const tgUser=tg?.initDataUnsafe?.user;
+myId=String(tgUser?.id||'');
+function toast(s){const x=document.getElementById('toast');x.textContent=s;x.style.display='block';clearTimeout(window.tt);window.tt=setTimeout(()=>x.style.display='none',2200)}
+function chooseColor(c){selected=c;document.querySelectorAll('.color').forEach(x=>x.classList.toggle('selected',x.dataset.color===c));if(ws?.readyState===1)ws.send(JSON.stringify({type:'color',color:c}))}
+chooseColor('red');
+function setHint(t){document.getElementById('hint').textContent=t}
+async function init(){
+  try{const c=await fetch('/api/config');const j=await c.json();botUsername=j.bot_username||botUsername}catch(e){}
+  if(!room){pendingCreate=true;const r=await fetch('/api/rooms',{method:'POST'});const j=await r.json();room=j.room}
+  document.getElementById('roomCode').textContent=room+'  ▣';
+  connect();
+}
+function connect(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const initData=encodeURIComponent(tg?.initData||'');
+  ws=new WebSocket(`${proto}://${location.host}/ws/ludo/${encodeURIComponent(room)}?initData=${initData}`);
+  ws.onopen=()=>{ws.send(JSON.stringify({type:'join',name:tgUser?.first_name||'Player',color:selected}));setHint('Connected • Invite friends with the room link or add a bot.')};
+  ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='error'){toast(d.message);return} if(d.type==='state'){if(d.you)myId=String(d.you);state=d;renderState(d);if(d.event==='roll')renderEvent(d)} else if(d.type==='chat'){addChat(d.name,d.text)}};
+  ws.onclose=()=>setHint('Reconnecting…');
+}
+function send(obj){if(ws?.readyState===1)ws.send(JSON.stringify(obj));}
+function invite(){
+  const link=`https://t.me/${botUsername}?start=ludo_${room}`;
+  if(navigator.clipboard)navigator.clipboard.writeText(link).catch(()=>{});
+  if(tg?.openTelegramLink)tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('🎲 Join my Vanya Ludo room: '+room)}`);
+  else toast('Invite link copied: '+link);
+}
+function addBot(){send({type:'add_bot'})}
+function startGame(){send({type:'start'})}
+function renderState(d){
+  document.getElementById('seatText').textContent=`${d.players.length}/4 seated`;
+  const mine=d.players.find(p=>p.id===myId)||d.players.find(p=>!p.bot&&p.name===tgUser?.first_name);
+  if(mine){selected=mine.color;document.querySelectorAll('.color').forEach(x=>x.classList.toggle('selected',x.dataset.color===selected))}
+  document.getElementById('startBtn').disabled=d.players.length<2||d.started;
+  document.getElementById('needed').textContent=d.players.length<2?'One more player needed':(d.started?'Match live':d.players.length<4?'Ready to start':'Room full');
+  document.getElementById('hint').textContent=d.started?'Live multiplayer • everyone in this room sees the same board.':'Invite friends or add a bot, then start the match.';
+  if(d.started){document.getElementById('lobby').style.display='none';document.getElementById('game').style.display='block';document.getElementById('chatbox').style.display='block';}
+  renderBoard(d);renderScore(d);updateTurn(d);
+}
+function renderBoard(d){
+  const b=document.getElementById('board');
+  b.innerHTML='';
+  for(let r=0;r<15;r++)for(let c=0;c<15;c++){const cell=document.createElement('div');cell.className='cell track';if(r<6&&c<6)cell.className='cell homeG';else if(r<6&&c>8)cell.className='cell homeY';else if(r>8&&c<6)cell.className='cell homeR';else if(r>8&&c>8)cell.className='cell homeB';if(r>=6&&r<=8&&c>=6&&c<=8)cell.className='cell center';if((r===6&&c===1)||(r===1&&c===8)||(r===8&&c===13)||(r===13&&c===6))cell.classList.add('safe');b.appendChild(cell)}
+  const path=[];for(let c=0;c<15;c++)path.push([6,c]);for(let r=1;r<15;r++)path.push([r,14]);for(let c=13;c>=0;c--)path.push([14,c]);for(let r=13;r>=1;r--)path.push([r,0]);
+  const layer=document.createElement('div');layer.className='token-layer';layer.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:10';b.appendChild(layer);
+  for(const p of d.players){const arr=d.positions[p.id]||[-1,-1,-1,-1];arr.forEach((pos,i)=>{const el=document.createElement('div');el.className='token t-'+p.color;el.title=p.name;if(pos<0){const spots={green:[[18,18],[36,18],[18,36],[36,36]],yellow:[[64,18],[82,18],[64,36],[82,36]],red:[[18,64],[36,64],[18,82],[36,82]],blue:[[64,64],[82,64],[64,82],[82,82]]};const xy=spots[p.color][i];el.style.left=xy[0]+'%';el.style.top=xy[1]+'%'}else{const [r,c]=path[pos%path.length];el.style.left=((c+.5)*100/15)+'%';el.style.top=((r+.5)*100/15)+'%'}el.style.position='absolute';el.style.transform='translate(-50%,-50%)';layer.appendChild(el)})}
+  if(d.last_roll)document.getElementById('dice').textContent=faces[d.last_roll];
+}
+function renderScore(d){const s=document.getElementById('score');s.innerHTML='';for(const p of d.players){const arr=d.positions[p.id]||[];const x=document.createElement('div');x.className='pill';x.innerHTML=`<span style="color:var(--${p.color})">●</span> ${escapeHtml(p.name)} · ${arr.filter(v=>v===56).length}/4`;s.appendChild(x)}}
+function updateTurn(d){const cur=d.players[d.turn];const mine=cur&&((cur.id===myId)||(!myId&&cur.name===tgUser?.first_name));document.getElementById('turn').textContent=d.winner?`${d.winner===myId?'🏆 You win!':'🏆 Match finished'}`:(mine?'Your turn':`${cur?.name||'Player'}'s turn`);document.getElementById('gameMsg').textContent=d.winner?'Game over':(mine?'Roll the dice':'Waiting for the other player');document.getElementById('rollBtn').disabled=!mine||!!d.winner}
+function renderEvent(d){if(d.result==='need_six')toast(`${d.player===myId?'You':(d.players?.find?.(x=>x.id===d.player)?.name||'Player')} need a 6 to enter`);if(d.winner)toast('🏆 Winner!')}
+function leaveGame(){try{ws?.close()}catch(e){}location.href='/ludo'}
+function help(){document.getElementById('modal').style.display='flex'}function closeModal(){document.getElementById('modal').style.display='none'}
+function rollDice(){send({type:'roll'})}
+function addChat(name,text){const log=document.getElementById('chatlog');const p=document.createElement('div');p.style.marginBottom='5px';p.innerHTML=`<b>${escapeHtml(name)}</b>: ${escapeHtml(text)}`;log.appendChild(p);log.scrollTop=log.scrollHeight}
+function sendChat(){const x=document.getElementById('chatinput');const t=x.value.trim();if(t){send({type:'chat',text:t});x.value=''}}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+init().catch(e=>toast('Unable to connect to Ludo server'));
+</script></body></html>

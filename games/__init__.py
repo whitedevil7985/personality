@@ -1,0 +1,1 @@
+"""Vanya modular game package."""
