@@ -19,7 +19,7 @@ from config import (
     AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
     MEMORY_DAYS, SUDO_IDS, LOGGER_CHAT_ID
 )
-from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games
+from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, get_game_leaderboard
 
 # ───────────────────── modular games ─────────────────────
 from games.rps import rps
@@ -412,7 +412,8 @@ CATEGORIES = {
 "/daily — Claim your daily cash reward",
 "/work — Work for coins",
 "/give &lt;amount&gt; — Transfer coins (reply to a user)",
-"/toprich or /leaderboard — Richest players",
+"/toprich — Richest players",
+"/leaderboard — Game points & wins leaderboard",
 "/rank — Check your XP rank",
 "/spin — Daily virtual-coin spin",
 "/quest — Daily quest progress",
@@ -576,13 +577,108 @@ async def work(update, context):
     await add_coins(update.effective_user.id,reward);await add_xp(update.effective_user.id,20)
     await update.message.reply_text(f"💼 You {random.choice(jobs)}.\n💰 +{reward} coins • ⭐ +20 XP")
 
+LEADERBOARD_GAMES = [
+    ("All games", "ALL"), ("UNO", "UNO"), ("Ludo", "LUDO"), ("Chess", "CHESS"),
+    ("RPS", "RPS"), ("Mines", "MINES"), ("Slots", "SLOTS"), ("Bet", "BET"),
+    ("Tap", "TAP"), ("Wordgrid", "WORDGRID"), ("Wordseek", "WORDSEEK"),
+    ("Dice", "DICE"), ("Coinflip", "COINFLIP"), ("Card", "CARD"),
+    ("Jumble", "JUMBLE"), ("Wordchain", "WORDCHAIN"), ("Wordscramble", "WORDS"),
+    ("Crash", "CRASH"), ("Charades", "CHARADES"), ("Hack", "HACK"), ("Scribble", "SCRIBBLE"),
+]
+
+def _leaderboard_since(period):
+    now = datetime.now(timezone.utc)
+    p = str(period).lower()
+    if p == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if p == "week":
+        return now - timedelta(days=7)
+    return now - timedelta(days=30)
+
+def _leaderboard_label(options, key, fallback):
+    return next((label for label, value in options if value == key), fallback)
+
+def leaderboard_kb(period="today", scope="global", game="ALL", picker=False):
+    period = period if period in ("today", "week", "month") else "today"
+    scope = scope if scope in ("global", "group") else "global"
+    game = game.upper()
+    if picker:
+        rows = []
+        for i in range(0, len(LEADERBOARD_GAMES), 2):
+            pair = LEADERBOARD_GAMES[i:i+2]
+            rows.append([
+                InlineKeyboardButton(
+                    ("✅ " if value == game else "") + label,
+                    callback_data=f"lb|g|{period}|{scope}|{value}"
+                )
+                for label, value in pair
+            ])
+        rows.append([InlineKeyboardButton("⟵ Back", callback_data=f"lb|v|{period}|{scope}|{game}")])
+        return kb(rows)
+    return kb([
+        [
+            InlineKeyboardButton("☀️ Today" + (" ✓" if period == "today" else ""), callback_data=f"lb|p|today|{scope}|{game}"),
+            InlineKeyboardButton("🗓 Week" + (" ✓" if period == "week" else ""), callback_data=f"lb|p|week|{scope}|{game}"),
+            InlineKeyboardButton("🌙 Month" + (" ✓" if period == "month" else ""), callback_data=f"lb|p|month|{scope}|{game}"),
+        ],
+        [
+            InlineKeyboardButton("🌍 Global" + (" ✓" if scope == "global" else ""), callback_data=f"lb|s|{period}|global|{game}"),
+            InlineKeyboardButton("🏠 Group" + (" ✓" if scope == "group" else ""), callback_data=f"lb|s|{period}|group|{game}"),
+        ],
+        [InlineKeyboardButton(f"🎮 Game: {_leaderboard_label(LEADERBOARD_GAMES, game, 'All games')} ▼", callback_data=f"lb|menu|{period}|{scope}|{game}")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"lb|v|{period}|{scope}|{game}")],
+        [InlineKeyboardButton("⌂ Home", callback_data="home")],
+    ])
+
+async def _render_leaderboard(update_or_query, context, period="today", scope="global", game="ALL"):
+    is_query = hasattr(update_or_query, "edit_message_text")
+    query = update_or_query if is_query else None
+    update = None if is_query else update_or_query
+    chat = query.message.chat if query and query.message else update.effective_chat
+    chat_id = chat.id if chat else None
+    if scope == "group" and (not chat or chat.type == "private"):
+        message = "🏠 <b>Group leaderboard</b> group chat ke andar open karo."
+        markup = leaderboard_kb(period, "global", game)
+        if query:
+            await query.edit_message_text(message, parse_mode="HTML", reply_markup=markup)
+        else:
+            await update.message.reply_html(message, reply_markup=markup)
+        return
+
+    rows = await get_game_leaderboard(
+        game=game,
+        scope=scope,
+        chat_id=chat_id if scope == "group" else None,
+        since=_leaderboard_since(period),
+        limit=10,
+    )
+    title = "🏆 <b>Vanya Games Leaderboard</b>"
+    group_name = html.escape(getattr(chat, "title", "") or "This group") if scope == "group" else "Global"
+    period_name = {"today": "Today", "week": "Week", "month": "Month"}[period]
+    game_name = _leaderboard_label(LEADERBOARD_GAMES, game, "All games")
+    lines = [
+        title,
+        f"<i>Scope: {group_name}  |  Period: {period_name}</i>",
+        "",
+    ]
+    if rows:
+        for i, row in enumerate(rows, 1):
+            lines.append(
+                f"{i}. {html.escape(str(row['name']))} - "
+                f"{row['points']:,} Points ({row['wins']} Wins)"
+            )
+    else:
+        lines.append("🎮 No completed results for this filter yet.")
+    lines.extend(["", f"🎮 <b>Game: {html.escape(game_name)}</b>"])
+    text_value = "\n".join(lines)
+    markup = leaderboard_kb(period, scope, game)
+    if query:
+        await query.edit_message_text(text_value, parse_mode="HTML", reply_markup=markup)
+    else:
+        await update.message.reply_html(text_value, reply_markup=markup)
+
 async def leaderboard(update, context):
-    rows=[]
-    i=1
-    async for u in await top_users(10):
-        rows.append(f"{i}. {html.escape(u.get('name','User'))} — 💰 {u.get('coins',0):,}")
-        i+=1
-    await update.message.reply_html("🏆 <b>Vanya Leaderboard</b>\n\n" + ("\n".join(rows) or "No players yet."))
+    await _render_leaderboard(update, context, "today", "global", "ALL")
 
 async def give(update, context):
     if not update.message.reply_to_message:
@@ -1134,6 +1230,21 @@ async def callback(update,context):
     await q.answer()
     if data == "wordgrid:new":
         await send_wordgrid(q.message, context, getattr(q.from_user, "id", None))
+        return
+    if data.startswith("lb|"):
+        parts = data.split("|")
+        action = parts[1] if len(parts) > 1 else "v"
+        period = parts[2] if len(parts) > 2 else "today"
+        scope = parts[3] if len(parts) > 3 else "global"
+        game = parts[4].upper() if len(parts) > 4 else "ALL"
+        if action == "menu":
+            await q.edit_message_text(
+                "🎮 <b>Select game</b>\n\nChoose which game's points and wins you want to see:",
+                parse_mode="HTML",
+                reply_markup=leaderboard_kb(period, scope, game, picker=True)
+            )
+            return
+        await _render_leaderboard(q, context, period, scope, game)
         return
     if data.startswith("world:"):
         tab=data.split(":",1)[1]
