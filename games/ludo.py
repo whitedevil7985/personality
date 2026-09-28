@@ -39,6 +39,7 @@ async def ludo_cb(q,gid):
     if uid!=g["players"][g["turn"]]:await q.answer("Wait for your turn.",show_alert=True);return
     roll=random.randint(1,6);g["pos"][uid]=min(24,g["pos"][uid]+roll)
     if g["pos"][uid]>=24:
+        await add_coins(uid, 500)
         await record_game_result(uid, "LUDO", 500, True, q.message.chat_id if q.message else None)
         await q.edit_message_text(f"🏆 <b>{q.from_user.first_name}</b> won Ludo!\n\n{ludo_board(g)}\n\n⭐ +500 points!",parse_mode="HTML");ludo_games.pop(gid,None);return
     g["turn"]=(g["turn"]+1)%len(g["players"])
