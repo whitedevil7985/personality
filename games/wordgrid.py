@@ -9,16 +9,21 @@ from config import OWNER_ID, SUDO_IDS
 from db import get_user
 
 GRID_SIZE = 8
-WORDS = [
-    ("ANT", 3),
-    ("LID", 3),
-    ("OAK", 3),
-    ("RAY", 3),
-    ("MINT", 4),
-    ("GREEN", 5),
-    ("PURPLE", 6),
-]
-DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
+WORD_POOL = [
+    ("APPLE", 5), ("BRAIN", 5), ("CLOUD", 5), ("DREAM", 5),
+    ("EAGLE", 5), ("FLAME", 5), ("GRAPE", 5), ("HEART", 5),
+    ("HOUSE", 5), ("JUICE", 5), ("KNIFE", 5), ("LEMON", 5),
+    ("MANGO", 5), ("MUSIC", 5), ("OCEAN", 5), ("PEACH", 5),
+    ("PIZZA", 5), ("PLANT", 5), ("QUEEN", 5), ("RIVER", 5),
+    ("ROBOT", 5), ("SMILE", 5), ("SPACE", 5), ("STORM", 5),
+    ("SWEET", 5), ("TIGER", 5), ("TRAIN", 5), ("WATER", 5),
+    ("WORLD", 5), ("ZEBRA", 5), ("ANT", 3), ("LID", 3),
+    ("OAK", 3), ("RAY", 3), ("MINT", 4), ("GREEN", 5),
+    ("PURPLE", 6), ("LIGHT", 5), ("MAGIC", 5), ("NIGHT", 5),
+    ("PARTY", 5), ("QUICK", 5), ("SHINE", 5), ("THUNDER", 7),
+    ("SUNSET", 6), ("WINTER", 6), ("SUMMER", 6), ("FOREST", 6),
+    ("FLOWER", 6), ("GALAXY", 6), ("CASTLE", 6), ("DRAGON", 6),
+]DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
 
 
 def _font(size: int, bold: bool = False):
@@ -67,8 +72,34 @@ def _place_word(grid: List[List[str]], word: str):
     return positions
 
 
-def _build_grid():
-    words = [w for w, _ in WORDS]
+def _next_word_defs(context, count: int = 7):
+    """Take fresh target words without repeating until the pool is exhausted."""
+    state = context.application.bot_data
+    queue = state.setdefault("wordgrid_word_queue", [])
+
+    if len(queue) < count:
+        all_words = list(WORD_POOL)
+        used = set(state.setdefault("wordgrid_cycle_used", []))
+        remaining = [item for item in all_words if item[0] not in used]
+
+        # Start a fresh cycle only after every pool word has been used.
+        if len(remaining) < count:
+            state["wordgrid_cycle_used"] = []
+            used = set()
+            remaining = all_words[:]
+
+        random.shuffle(remaining)
+        queue.extend(remaining)
+
+    selected = queue[:count]
+    del queue[:count]
+    state.setdefault("wordgrid_cycle_used", []).extend(word for word, _ in selected)
+    return selected
+
+
+def _build_grid(word_defs=None):
+    word_defs = list(word_defs or WORD_POOL[:7])
+    words = [w for w, _ in word_defs]
     for _ in range(100):
         grid = [["" for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         random.shuffle(words)
@@ -255,7 +286,8 @@ def _wordgrid_caption(active, game_over: bool = False) -> str:
         "",
         "find these words:",
     ]
-    for word, length in WORDS:
+    word_defs = active.get("word_defs") or [(w, len(w)) for w in words_list]
+    for word, length in word_defs:
         if word.lower() in found:
             lines.append(f"✅ <code>{word}</code> ({length})")
         else:
@@ -294,64 +326,44 @@ async def _refresh_wordgrid_message(context, chat_id: int, active, game_over: bo
     from telegram import InputMediaPhoto
 
     caption = _wordgrid_caption(active, game_over=game_over)
-    photo = _render_grid(
-        active["grid"],
-        _found_positions(active),
-        _found_word_paths(active),
-    )
-    photo.seek(0)
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 New Grid", callback_data="wordgrid:new")],
     ])
 
-    try:
-        # Update the existing top grid message in-place so solved letters
-        # become circled without moving the game board.
-        await context.bot.edit_message_media(
-            chat_id=chat_id,
-            message_id=message_id,
-            media=InputMediaPhoto(
-                media=photo,
-                caption=caption,
-                parse_mode="HTML",
-            ),
-            reply_markup=markup,
-        )
-        return
-    except Exception as exc:
-        # Some Telegram/client combinations can reject replacing uploaded
-        # media in-place. Never let that hide the solved state or points.
-        print(f"[WordgridRefresh] edit_message_media failed: {type(exc).__name__}: {exc}")
+    # Telegram clients can keep showing the old uploaded photo even when
+    # editMessageMedia succeeds. Replace the board with a fresh message so
+    # the circles are guaranteed to be visible.
+    new_photo = _render_grid(
+        active["grid"],
+        _found_positions(active),
+        _found_word_paths(active),
+    )
+    new_photo.seek(0)
 
     try:
-        # Re-render a brand-new stream for the fallback upload. The failed
-        # edit may have consumed the original BytesIO stream.
-        replacement_photo = _render_grid(
-            active["grid"],
-            _found_positions(active),
-            _found_word_paths(active),
-        )
-        replacement_photo.seek(0)
         replacement = await context.bot.send_photo(
             chat_id=chat_id,
-            photo=replacement_photo,
+            photo=new_photo,
             caption=caption,
             parse_mode="HTML",
             reply_markup=markup,
-            reply_to_message_id=message_id,
-            allow_sending_without_reply=True,
         )
         active["message_id"] = replacement.message_id
+
         try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
-        except Exception:
-            pass
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=message_id,
+            )
+        except Exception as exc:
+            print(f"[WordgridRefresh] old grid delete failed: {type(exc).__name__}: {exc}")
     except Exception as exc:
         print(f"[WordgridRefresh] replacement send failed: {type(exc).__name__}: {exc}")
 
 
 async def send_wordgrid(message, context, user_id=None):
-    grid, words, placements = _build_grid()
+    word_defs = _next_word_defs(context, 7)
+    grid, words, placements = _build_grid(word_defs)
     chat_id = getattr(getattr(message, "chat", None), "id", None)
     if chat_id is None:
         return
@@ -362,6 +374,7 @@ async def send_wordgrid(message, context, user_id=None):
         "created_by": user_id,
         "grid": grid,
         "words_list": words[:],
+        "word_defs": word_defs[:],
         "placements": {word.lower(): positions for word, positions in placements.items()},
         "points": {},
         "message_id": None,
