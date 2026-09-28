@@ -5,12 +5,28 @@ from games.common import kb, safe_name
 from config import OWNER_ID
 from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
 
-WORDS = ["VANYA", "DELHI", "ARCADE", "CHAT", "FRIEND"]
+WORDS = [
+    "VANYA", "DELHI", "ARCADE", "CHAT", "FRIEND",
+    "MUSIC", "RAIN", "MAGIC", "SMILE", "DREAM",
+    "APPLE", "MANGO", "RIVER", "CLOUD", "HEART",
+    "TIGER", "SPACE", "ROBOT", "PARTY", "NIGHT",
+    "SUMMER", "WINTER", "FLOWER", "FOREST", "GALAXY",
+]
 WORDSEEK_GAMES = {}
+WORDSEEK_QUEUE = []
+
+
+def _next_wordseek_word():
+    """Return a fresh Wordseek word without repetition until the pool resets."""
+    global WORDSEEK_QUEUE
+    if not WORDSEEK_QUEUE:
+        WORDSEEK_QUEUE = WORDS[:]
+        random.shuffle(WORDSEEK_QUEUE)
+    return WORDSEEK_QUEUE.pop()
 
 
 async def wordseek(update, context):
-    answer = random.choice(WORDS)
+    answer = _next_wordseek_word()
     scrambled = "".join(random.sample(answer, len(answer)))
     chat_id = update.effective_chat.id
     WORDSEEK_GAMES[chat_id] = {
