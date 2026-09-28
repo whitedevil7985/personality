@@ -83,6 +83,22 @@ class ProtectedBot(Bot):
             )
         return kwargs
 
+    async def edit_message_text(self, *args, **kwargs):
+        # Editing messages must NOT receive protect_content; that parameter is
+        # not accepted by editMessageText. Only custom-emoji rendering is done.
+        if kwargs.get("text") is not None:
+            kwargs["text"], kwargs["parse_mode"] = await self._render_custom_emoji(
+                kwargs["text"], kwargs.get("parse_mode")
+            )
+        return await super().edit_message_text(*args, **kwargs)
+
+    async def edit_message_caption(self, *args, **kwargs):
+        if kwargs.get("caption") is not None:
+            kwargs["caption"], kwargs["parse_mode"] = await self._render_custom_emoji(
+                kwargs["caption"], kwargs.get("parse_mode")
+            )
+        return await super().edit_message_caption(*args, **kwargs)
+
     async def send_message(self, *args, **kwargs):
         return await super().send_message(
             *args, **await self._prepare_message_kwargs(kwargs)
