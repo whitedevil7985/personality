@@ -85,6 +85,10 @@ def _next_word_defs(context, count: int = 7):
 
         # Start a fresh cycle only after every pool word has been used.
         if len(remaining) < count:
+            # The current cycle is exhausted. Drop any leftover queue entries
+            # from the old cycle before starting a completely fresh cycle so
+            # no word can be selected twice during the transition.
+            queue.clear()
             state["wordgrid_cycle_used"] = []
             used = set()
             remaining = all_words[:]
