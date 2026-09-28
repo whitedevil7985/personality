@@ -1287,7 +1287,7 @@ async def callback(update,context):
         if action == "commands":
             reveal_line = (
                 "🔐 <code>/revealgrid</code> — Reveal active Wordgrid answer (Owner only)\n"
-                if q.from_user.id == OWNER_ID else ""
+                if await is_owner_or_sudo(update) else ""
             )
             await q.edit_message_text(
                 "👑 <b>Owner/Sudo Commands</b>\n\n"
@@ -1318,14 +1318,14 @@ async def callback(update,context):
             )
             return
         if action == "revealwordseek":
-            if q.from_user.id != OWNER_ID:
-                await q.edit_message_text("⛔ <b>Owner only.</b>", parse_mode="HTML")
+            if not await is_owner_or_sudo(update):
+                await q.edit_message_text("⛔ <b>Owner/Sudo only.</b>", parse_mode="HTML")
                 return
             await q.edit_message_text(
                 "🔎 <b>Wordseek Answer Reveal</b>\n\n"
                 "Use <code>/revealwordseek</code> inside the group where an active Wordseek game is running.\n\n"
                 "The answer will be sent to your private chat and will not be shown to group members.\n"
-                "👑 <i>Owner only.</i>",
+                "👑 <i>Owner/Sudo only.</i>",
                 parse_mode="HTML",
                 reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
@@ -1711,7 +1711,7 @@ async def is_owner_or_sudo(update):
     u = await get_user(uid)
     return bool(u and u.get("is_sudo"))
 
-def owner_panel_kb(owner_only=False):
+def owner_panel_kb(owner_only=False, staff_access=False):
     rows = [
         [InlineKeyboardButton("📢 Broadcast", callback_data="owner:broadcast")],
         [InlineKeyboardButton("👑 Sudo Users", callback_data="owner:sudo"),
@@ -1720,10 +1720,9 @@ def owner_panel_kb(owner_only=False):
          InlineKeyboardButton("📊 Panel Commands", callback_data="owner:commands")],
     ]
     if owner_only:
-        rows.append([
-            InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid"),
-            InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek"),
-        ])
+        rows.append([InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid")])
+    if staff_access:
+        rows.append([InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek")])
     rows.append([InlineKeyboardButton("❌ Close", callback_data="owner:close")])
     return kb(rows)
 
@@ -1828,6 +1827,14 @@ async def addsudo(update, context):
         await update.message.reply_text("Reply to a user: /addsudo")
         return
     await users.update_one({"_id": target.id}, {"$set": {"is_sudo": True}}, upsert=True)
+    try:
+        current = [BotCommand(c.command, c.description) for c in await context.bot.get_my_commands(scope=BotCommandScopeDefault())]
+        await context.bot.set_my_commands(
+            current + [BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)")],
+            scope=BotCommandScopeChat(chat_id=target.id),
+        )
+    except Exception:
+        pass
     await update.message.reply_text(f"👑 {target.first_name} added as sudo.")
 
 async def delsudo(update, context):
@@ -2046,9 +2053,14 @@ async def main():
     if OWNER_ID:
         owner_command_list = public_command_list + [
             BotCommand("revealgrid", "Reveal Wordgrid answer (Owner only)"),
-            BotCommand("revealwordseek", "Reveal Wordseek answer (Owner only)"),
+            BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)"),
         ]
         await app.bot.set_my_commands(owner_command_list, scope=BotCommandScopeChat(chat_id=OWNER_ID))
+        for sudo_id in SUDO_IDS:
+            await app.bot.set_my_commands(
+                public_command_list + [BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)")],
+                scope=BotCommandScopeChat(chat_id= sudo_id),
+            )
 
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
     app.add_handler(ChatMemberHandler(log_bot_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=-1)
