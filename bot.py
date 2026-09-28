@@ -2661,6 +2661,41 @@ async def answer(update, context):
     await wordseek_answer(update, context)
 
 
+async def chatstatus(update, context):
+    """Diagnose Telegram group-message access without requiring bot admin rights."""
+    if not update.effective_chat or update.effective_chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("ℹ️ /chatstatus group mein use karo.")
+        return
+
+    try:
+        me = await context.bot.get_me()
+        privacy_ok = bool(getattr(me, "can_read_all_group_messages", False))
+    except Exception as exc:
+        await update.message.reply_text(f"⚠️ Telegram status check failed: {exc}")
+        return
+
+    try:
+        member = await context.bot.get_chat_member(
+            update.effective_chat.id,
+            context.bot.id,
+        )
+        bot_admin = getattr(member, "status", "") in ("administrator", "creator")
+    except Exception:
+        bot_admin = False
+
+    access = "✅ ALL GROUP MESSAGES" if privacy_ok or bot_admin else "❌ NORMAL MESSAGES NOT DELIVERED"
+    privacy = "🟢 Privacy disabled" if privacy_ok else "🔴 Privacy enabled"
+    admin = "🟢 Bot is admin" if bot_admin else "⚪ Bot is not admin"
+
+    await update.message.reply_html(
+        "🧪 <b>Vanya Group Chat Status</b>\n\n"
+        f"{access}\n"
+        f"{privacy}\n"
+        f"{admin}\n\n"
+        "<i>For non-admin groups, Telegram requires Group Privacy to be disabled. "
+        "After disabling it in @BotFather, remove Vanya from the group and add her again.</i>"
+    )
+
 async def ping(update, context):
     """Show bot response latency and a simple service status."""
     started = time.perf_counter()
@@ -2692,7 +2727,7 @@ async def main():
         "wordchain":wordchain,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
         "scribble":scribble,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
-        "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,
+        "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,
     }
     for name,fn in commands.items():
         app.add_handler(CommandHandler(name,fn))
@@ -2731,7 +2766,7 @@ async def main():
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
-        "unmute": "Unmute a user", "purge": "Delete recent messages",
+        "unmute": "Unmute a user", "purge": "Delete recent messages", "chatstatus": "Check group chat access",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
