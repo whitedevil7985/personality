@@ -585,7 +585,7 @@ async def toprich(update, context):
             coins = int(user.get("coins", 0) or 0)
             lines.append(f"{medal} <b>{name}</b> — 💰 <b>{coins:,}</b> coins")
 
-    lines.extend(["", "💎 Ranking is based on total current coins."])
+    lines.extend(["", "💎 All game winnings and other Vanya coin rewards are included in this balance."])
     await update.message.reply_html("\n".join(lines))
 
 async def balance(update, context):
