@@ -26,7 +26,7 @@ from games.rps import rps
 from games.dice import dice
 from games.coinflip import coinflip
 from games.slots import slots
-from games.card import card, cardjoin, cardstart, cardcancel, card_cb
+from games.card import card, cardjoin, cardstart, cardcancel, card_cb, cardjoin, cardstart, cardcancel, card_cb
 from games.jumble import jumble
 from games.tap import tap, tap_cb
 from games.bet import bet
@@ -516,7 +516,7 @@ GAME_INFO = {
     "WORDCHAIN": "/wordchain <word> — Continue the chain.",
     "WORDS": "/wordscramble — Unscramble a word.",
     "HACK": "/hack — Fictional puzzle mini-game.",
-    "CARD": "/card — Draw a card.",
+    "CARD": "/card — Create a 2–4 player Card Match; cards are dealt by DM and played in the group for 4 rounds.",
     "CHESS": "/chess — Create a chess room\n/chessjoin — Join.",
     "SCRIBBLE": "/scribble — Open the social scribble room.",
     "BET": "/bet &lt;amount&gt; — Simple virtual-coin wager.",
@@ -2021,7 +2021,7 @@ async def main():
         "propose": "Propose to another user", "accept": "Accept a proposal", "reject": "Reject a proposal",
         "divorce": "End a marriage", "marriage": "View marriage status", "couple": "Pair group players", "topcouples": "View group couples",
         "rps": "Play rock paper scissors", "dice": "Roll a dice", "coinflip": "Flip a coin",
-        "slots": "Spin the slot machine", "card": "Draw a card", "jumble": "Unscramble a word",
+        "slots": "Spin the slot machine", "card": "Create a 2-4 player Card Match", "cardjoin": "Join the Card Match", "cardstart": "Start the Card Match", "cardcancel": "Cancel the Card Match", "jumble": "Unscramble a word",
         "tap": "Play the tap challenge", "bet": "Place a virtual coin bet", "card": "Create a 2-4 player Card Match", "cardjoin": "Join the Card Match", "cardstart": "Start the Card Match", "cardcancel": "Cancel the Card Match", "uno": "Create an UNO room",
         "unojoin": "Join an UNO room", "ludo": "Open Ludo", "ludojoin": "Join a Ludo room",
         "chess": "Open Chess Mini App", "chessjoin": "Join a chess room", "chat": "Chat with Vanya",
@@ -2031,7 +2031,7 @@ async def main():
         "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid",
         "crash": "Play Crash", "charades": "Play Charades", "wordchain": "Play Wordchain",
         "wordscramble": "Play Wordscramble", "words": "Play Wordscramble", "hack": "Play Hack puzzle",
-        "scribble": "Open Scribble", "card": "Create Card Match", "cardjoin": "Join Card Match", "cardstart": "Start Card Match", "cardcancel": "Cancel Card Match", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
+        "scribble": "Open Scribble", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
         "panel": "Open owner panel", "broadcast": "Broadcast a message", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
