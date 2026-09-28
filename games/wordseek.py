@@ -25,21 +25,38 @@ def _next_wordseek_word():
     return WORDSEEK_QUEUE.pop()
 
 
-async def wordseek(update, context):
-    answer = _next_wordseek_word()
-    scrambled = "".join(random.sample(answer, len(answer)))
+def _scramble_word(answer: str) -> str:
+    """Shuffle letters while trying not to return the original word."""
+    if len(answer) < 2:
+        return answer
+    letters = list(answer)
+    for _ in range(8):
+        random.shuffle(letters)
+        scrambled = "".join(letters)
+        if scrambled != answer:
+            return scrambled
+    return "".join(letters)
+
+
+async def _start_wordseek_round(update, answer: str, prefix: str = "🔎 <b>Wordseek</b>"):
     chat_id = update.effective_chat.id
+    scrambled = _scramble_word(answer)
     WORDSEEK_GAMES[chat_id] = {
         "answer": answer,
         "found": False,
         "created_by": update.effective_user.id if update.effective_user else None,
     }
     await update.message.reply_text(
-        "🔎 <b>Wordseek</b>: find the hidden word from these letters:\n\n"
+        f"{prefix}: find the hidden word from these letters:\n\n"
         f"<code>{scrambled}</code>\n\n"
         "Reply with <code>/answer &lt;word&gt;</code>",
         parse_mode="HTML",
     )
+
+
+async def wordseek(update, context):
+    answer = _next_wordseek_word()
+    await _start_wordseek_round(update, answer)
 
 
 async def answer(update, context):
@@ -69,6 +86,15 @@ async def answer(update, context):
         "🎉 <b>Correct!</b> You found the Wordseek word!\n"
         "⭐ +50 XP  •  💰 +50 coins  •  🏆 +50 points",
         parse_mode="HTML",
+    )
+
+    # Automatically start the next round in the same chat so players can
+    # continue solving without sending /wordseek again.
+    next_answer = _next_wordseek_word()
+    await _start_wordseek_round(
+        update,
+        next_answer,
+        prefix="➡️ <b>Next Wordseek</b>",
     )
 
 
