@@ -26,7 +26,7 @@ from games.rps import rps
 from games.dice import dice
 from games.coinflip import coinflip
 from games.slots import slots
-from games.card import card
+from games.card import card, cardjoin, cardstart, cardcancel, card_cb
 from games.jumble import jumble
 from games.tap import tap, tap_cb
 from games.bet import bet
@@ -1516,6 +1516,9 @@ async def callback(update,context):
             parse_mode="HTML",
             reply_markup=kb([[InlineKeyboardButton("🎮 Back to Arena",callback_data=f"game:{key}" if key!="ARCADE" else "cat:games")], [InlineKeyboardButton("⌂ Home",callback_data="home")]]))
         return
+    if data.startswith("card:"):
+        await card_cb(q, data.split(":"))
+        return
     if data.startswith("mine:"):
         await mines_cb(q, data.split(":"));return
     if data.startswith("tap:"):
@@ -1989,7 +1992,7 @@ async def main():
         "kill":kill,"revive":revive,"topkill":topkill,
         "propose":propose,"accept":accept,"reject":reject,"divorce":divorce,"marriage":marriage,"couple":couple,"topcouples":topcouples,
         "rps":rps,"dice":dice,"coinflip":coinflip,"slots":slots,"card":card,"jumble":jumble,
-        "tap":tap,"bet":bet,"uno":uno,"unojoin":unojoin,"ludo":ludo,"ludojoin":ludojoin,
+        "tap":tap,"bet":bet,"card":card,"cardjoin":cardjoin,"cardstart":cardstart,"cardcancel":cardcancel,"uno":uno,"unojoin":unojoin,"ludo":ludo,"ludojoin":ludojoin,
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
@@ -2019,7 +2022,7 @@ async def main():
         "divorce": "End a marriage", "marriage": "View marriage status", "couple": "Pair group players", "topcouples": "View group couples",
         "rps": "Play rock paper scissors", "dice": "Roll a dice", "coinflip": "Flip a coin",
         "slots": "Spin the slot machine", "card": "Draw a card", "jumble": "Unscramble a word",
-        "tap": "Play the tap challenge", "bet": "Place a virtual coin bet", "uno": "Create an UNO room",
+        "tap": "Play the tap challenge", "bet": "Place a virtual coin bet", "card": "Create a 2-4 player Card Match", "cardjoin": "Join the Card Match", "cardstart": "Start the Card Match", "cardcancel": "Cancel the Card Match", "uno": "Create an UNO room",
         "unojoin": "Join an UNO room", "ludo": "Open Ludo", "ludojoin": "Join a Ludo room",
         "chess": "Open Chess Mini App", "chessjoin": "Join a chess room", "chat": "Chat with Vanya",
         "gchat": "Send a game chat message", "persona": "Change chat persona", "memory": "View saved memory",
@@ -2028,7 +2031,7 @@ async def main():
         "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid",
         "crash": "Play Crash", "charades": "Play Charades", "wordchain": "Play Wordchain",
         "wordscramble": "Play Wordscramble", "words": "Play Wordscramble", "hack": "Play Hack puzzle",
-        "scribble": "Open Scribble", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
+        "scribble": "Open Scribble", "card": "Create Card Match", "cardjoin": "Join Card Match", "cardstart": "Start Card Match", "cardcancel": "Cancel Card Match", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
         "panel": "Open owner panel", "broadcast": "Broadcast a message", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
