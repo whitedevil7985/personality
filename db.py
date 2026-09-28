@@ -18,6 +18,7 @@ users = db.users
 groups = db.groups
 games = db.games
 game_stats = db.game_stats
+custom_emojis = db.custom_emojis
 
 async def ensure_user(user):
     if not user:
@@ -121,3 +122,31 @@ async def get_game_leaderboard(game="ALL", scope="global", chat_id=None, since=N
             "games": int(row.get("games", 0)),
         })
     return rows
+
+
+async def save_custom_emoji(emoji_id, alternative, added_by=None):
+    """Persist a Telegram custom emoji ID and its regular fallback emoji."""
+    if not emoji_id:
+        return
+    await custom_emojis.update_one(
+        {"_id": str(emoji_id)},
+        {"$set": {
+            "emoji_id": str(emoji_id),
+            "alternative": str(alternative or "✨")[:8],
+            "added_by": int(added_by) if added_by is not None else None,
+            "updated_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+
+
+async def get_custom_emoji_map(limit=100):
+    """Return {regular_emoji: [custom_emoji_id, ...]} for Vanya replies."""
+    result = {}
+    cursor = custom_emojis.find({}).sort("updated_at", -1).limit(max(1, int(limit)))
+    async for row in cursor:
+        alt = str(row.get("alternative") or "✨")
+        eid = str(row.get("emoji_id") or row.get("_id") or "")
+        if eid:
+            result.setdefault(alt, []).append(eid)
+    return result
