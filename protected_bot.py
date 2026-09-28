@@ -163,6 +163,18 @@ class ProtectedBot(Bot):
             kwargs[markup_key] = await cls._prepare_markup(kwargs[markup_key])
         return kwargs
 
+    async def edit_message_text(self, *args, **kwargs):
+        return await super().edit_message_text(*args, **await self._protect_and_render(kwargs))
+
+    async def edit_message_caption(self, *args, **kwargs):
+        return await super().edit_message_caption(*args, **await self._protect_and_render(kwargs, text_key="caption"))
+
+    async def answer_callback_query(self, *args, **kwargs):
+        # Callback popups are also outgoing bot text; convert their emoji.
+        if kwargs.get("text") is not None:
+            kwargs["text"], _ = await self._render_custom_emoji(kwargs["text"], None)
+        return await super().answer_callback_query(*args, **self._protected(kwargs))
+
     async def send_message(self, *args, **kwargs):
         return await super().send_message(*args, **await self._protect_and_render(kwargs))
 
