@@ -1473,7 +1473,10 @@ async def callback(update,context):
                 "┃ 🔒 <i>Owner/Sudo access only</i>\n"
                 "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
                 "Choose an owner control below.",
-                parse_mode="HTML", reply_markup=owner_panel_kb(owner_only=(q.from_user.id == OWNER_ID))
+                parse_mode="HTML", reply_markup=owner_panel_kb(
+                    owner_only=(q.from_user.id == OWNER_ID),
+                    staff_access=await is_owner_or_sudo(update),
+                )
             )
             return
     if data=="chat:start":
