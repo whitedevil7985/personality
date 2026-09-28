@@ -49,7 +49,7 @@ async def _start_wordseek_round(update, answer: str, prefix: str = "🔎 <b>Word
     await update.message.reply_text(
         f"{prefix}: find the hidden word from these letters:\n\n"
         f"<code>{scrambled}</code>\n\n"
-        "Reply with <code>/answer &lt;word&gt;</code>",
+        "✏️ Bas answer ka <b>word type</b> karke send karo.",
         parse_mode="HTML",
     )
 
@@ -68,11 +68,13 @@ async def answer(update, context):
     if game.get("found"):
         await update.message.reply_text("👀 Wordseek is already solved. Start a new one with /wordseek.")
         return
-    if not context.args:
-        await update.message.reply_text("Usage: /answer <word>")
-        return
-
-    guess = "".join(context.args).strip().upper()
+    if context.args:
+        guess = "".join(context.args).strip().upper()
+    else:
+        guess = (update.message.text or "").strip().upper()
+        if not guess or guess.startswith("/"):
+            await update.message.reply_text("✏️ Bas shuffled word solve karke <b>word type</b> karo.", parse_mode="HTML")
+            return
     if guess != game["answer"]:
         await update.message.reply_text("❌ Not quite 😅 Try again!")
         return
