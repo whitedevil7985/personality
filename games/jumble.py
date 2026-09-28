@@ -7,4 +7,7 @@ WORDS=["telegram","galaxy","phantom","python","diamond","rainbow","vanya","drago
 
 async def jumble(update,context):
     w=random.choice(WORDS);sh=list(w);random.shuffle(sh)
+    reward=25
+    await add_coins(update.effective_user.id,reward)
+    await record_game_result(update.effective_user.id, "JUMBLE", reward, True, update.effective_chat.id)
     await update.message.reply_text(f"🔤 Unscramble: <b>{''.join(sh)}</b>\nReply with the answer.",parse_mode="HTML")
