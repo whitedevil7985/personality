@@ -1633,6 +1633,40 @@ async def callback(update,context):
     if data.startswith("chess:") or data.startswith("resign:"):
         await chess_cb(q,data.split(":"));return
 
+async def capture_owner_custom_emojis(update, context):
+    """Learn the owner's Telegram custom/premium emoji IDs automatically."""
+    user = update.effective_user
+    message = update.effective_message
+    if not user or user.id != OWNER_ID or not message:
+        return
+
+    entities = list(message.entities or []) + list(message.caption_entities or [])
+    saved = set()
+    for entity in entities:
+        if getattr(entity, "type", "") != "custom_emoji":
+            continue
+        eid = getattr(entity, "custom_emoji_id", None)
+        if not eid or str(eid) in saved:
+            continue
+        saved.add(str(eid))
+        alternative = "✨"
+        try:
+            stickers = await context.bot.get_custom_emoji_stickers([str(eid)])
+            if stickers and getattr(stickers[0], "emoji", None):
+                alternative = stickers[0].emoji
+        except Exception:
+            pass
+        await save_custom_emoji(str(eid), alternative, user.id)
+
+    if saved:
+        try:
+            from protected_bot import ProtectedBot
+            ProtectedBot._emoji_cache = {}
+            ProtectedBot._emoji_cache_at = 0.0
+        except Exception:
+            pass
+
+
 async def chat(update,context):
     text = " ".join(context.args).strip()
     if not text:
@@ -2217,6 +2251,7 @@ async def main():
                 scope=BotCommandScopeChat(chat_id= sudo_id),
             )
 
+    app.add_handler(MessageHandler(filters.ALL, capture_owner_custom_emojis, block=False), group=-2)
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
     app.add_handler(ChatMemberHandler(log_bot_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=-1)
     app.add_handler(CallbackQueryHandler(callback))
