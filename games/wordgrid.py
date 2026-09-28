@@ -459,15 +459,13 @@ async def wordgrid(update, context):
 
 
 async def wordgrid_answer(update, context):
-    if not context.args:
-        await update.message.reply_text("Usage: /answer <word>")
-        return
     chat_id = update.effective_chat.id
     active = context.application.bot_data.get("wordgrid_active", {}).get(chat_id)
     if not active:
-        await update.message.reply_text("No active Wordgrid game here. Start one with /wordgrid")
         return
 
+    # WordGrid answers are now plain text only. The old /answer command is
+    # intentionally ignored so users cannot get a usage prompt.
     if context.args:
         guess = "".join(context.args).strip().lower()
     else:
