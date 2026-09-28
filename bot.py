@@ -1416,23 +1416,35 @@ async def callback(update,context):
                 await q.edit_message_text(f"⚠️ Stats error: {html.escape(str(e))}", parse_mode="HTML", reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]]))
             return
         if action == "commands":
-            reveal_line = (
-                "🔐 <code>/revealgrid</code> — Reveal active Wordgrid answer (Owner/Sudo)\n"
-                if await is_owner_or_sudo(update) else ""
-            )
+            if not await is_owner_or_sudo(update):
+                await q.edit_message_text("⛔ <b>Owner/Sudo only.</b>", parse_mode="HTML")
+                return
+            lines = [
+                "👑 <b>Owner/Sudo Commands</b>",
+                "",
+                "📢 <code>/broadcast</code> — Broadcast text/media",
+                "💰 <code>/addcoins USER_ID AMOUNT</code> — Add coins",
+                "💸 <code>/removecoins USER_ID AMOUNT</code> — Remove coins",
+                "👑 <code>/sudolist</code> — List sudo users",
+                "🔐 <code>/auth</code> — Authorize current group",
+                "🔒 <code>/unauth</code> — Unauthorize current group",
+                "📋 <code>/authlist</code> — List authorized groups",
+                "📊 <code>/stats</code> — View bot statistics",
+                "🔐 <code>/revealgrid</code> — Reveal Wordgrid answer",
+                "🔎 <code>/revealwordseek</code> — Reveal Wordseek answer",
+            ]
+            if update.effective_user.id == OWNER_ID:
+                lines += [
+                    "",
+                    "👑 <b>Owner-only</b>",
+                    "➕ <code>/addsudo</code> — Add sudo user",
+                    "➖ <code>/delsudo</code> — Remove sudo user",
+                    "🎨 <code>/addemoji</code> — Save premium custom emoji",
+                ]
             await q.edit_message_text(
-                "👑 <b>Owner/Sudo Commands</b>\n\n"
-                "📢 <code>/broadcast &lt;text&gt;</code> — Broadcast text\n"
-                "📎 Reply to any message + <code>/broadcast</code> — Broadcast media/content\n"
-                "👑 <code>/sudolist</code> — List sudo users\n"
-                "➕ <code>/addsudo</code> — Owner only\n"
-                "➖ <code>/delsudo</code> — Owner only\n"
-                "🔐 <code>/auth</code> — Authorize current group\n"
-                "🔒 <code>/unauth</code> — Revoke current group\n"
-                "📋 <code>/authlist</code> — List authorized groups\n"
-                "📊 <code>/stats</code> — View groups and users\n"
-                + reveal_line,
-                parse_mode="HTML", reply_markup=kb([[InlineKeyboardButton("⟵ Back", callback_data="owner:home")]])
+                "\n".join(lines),
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
             return
         if action == "revealgrid":
@@ -1457,6 +1469,33 @@ async def callback(update,context):
                 "Use <code>/revealwordseek</code> inside the group where an active Wordseek game is running.\n\n"
                 "The answer will be sent to your private chat and will not be shown to group members.\n"
                 "👑 <i>Owner/Sudo only.</i>",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+            )
+            return
+        if action == "addsudo":
+            await q.edit_message_text(
+                "➕ <b>Add Sudo</b>\n\n"
+                "Reply to a user's message and send <code>/addsudo</code>."
+                "\nOnly the Owner can add sudo users.",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+            )
+            return
+        if action == "delsudo":
+            await q.edit_message_text(
+                "➖ <b>Remove Sudo</b>\n\n"
+                "Reply to a sudo user's message and send <code>/delsudo</code>."
+                "\nOnly the Owner can remove sudo users.",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+            )
+            return
+        if action == "addemoji":
+            await q.edit_message_text(
+                "🎨 <b>Premium Emoji</b>\n\n"
+                "Send your Premium/custom emoji to Vanya, then reply to that emoji message with <code>/addemoji</code>."
+                "\nOnly the Owner can save emoji IDs.",
                 parse_mode="HTML",
                 reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
@@ -1896,6 +1935,37 @@ async def reject(update, context):
     await users.update_one({"_id": update.effective_user.id}, {"$unset": {"pending_proposal": ""}})
     await update.message.reply_text("💔 Proposal declined. No hard feelings.")
 
+STAFF_COMMANDS = {
+    "owner": "Open Owner/Sudo panel",
+    "ownerpanel": "Open Owner/Sudo panel",
+    "panel": "Open Owner/Sudo panel",
+    "devpanel": "Open Owner/Sudo panel",
+    "broadcast": "Broadcast text/media",
+    "addcoins": "Add coins by user ID",
+    "removecoins": "Remove coins by user ID",
+    "sudolist": "List sudo users",
+    "auth": "Authorize current group",
+    "unauth": "Unauthorize current group",
+    "authlist": "List authorized groups",
+    "stats": "View bot statistics",
+    "revealgrid": "Reveal Wordgrid answer",
+    "revealwordseek": "Reveal Wordseek answer",
+    "addemoji": "Save premium custom emoji",
+    "addsudo": "Add sudo user",
+    "delsudo": "Remove sudo user",
+}
+OWNER_ONLY_COMMANDS = {"addsudo", "delsudo", "addemoji"}
+
+
+def staff_command_objects(owner=False):
+    items = []
+    for command, description in STAFF_COMMANDS.items():
+        if not owner and command in OWNER_ONLY_COMMANDS:
+            continue
+        items.append(BotCommand(command, description))
+    return items
+
+
 async def is_owner_or_sudo(update):
     uid = update.effective_user.id if update.effective_user else 0
     if uid == OWNER_ID or uid in SUDO_IDS:
@@ -1916,6 +1986,11 @@ def owner_panel_kb(owner_only=False, staff_access=False):
     if staff_access:
         rows.append([InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek")])
         rows.append([InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")])
+        rows.append([InlineKeyboardButton("📢 Broadcast", callback_data="owner:broadcast")])
+    if owner_only:
+        rows.append([InlineKeyboardButton("➕ Add Sudo", callback_data="owner:addsudo"),
+                     InlineKeyboardButton("➖ Del Sudo", callback_data="owner:delsudo")])
+        rows.append([InlineKeyboardButton("🎨 Premium Emoji", callback_data="owner:addemoji")])
     rows.append([InlineKeyboardButton("❌ Close", callback_data="owner:close")])
     return kb(rows)
 
@@ -2208,9 +2283,10 @@ async def addsudo(update, context):
         return
     await users.update_one({"_id": target.id}, {"$set": {"is_sudo": True}}, upsert=True)
     try:
-        current = [BotCommand(c.command, c.description) for c in await context.bot.get_my_commands(scope=BotCommandScopeDefault())]
+        # A newly added sudo immediately receives the complete Sudo command set.
+        current_public = [c for c in await context.bot.get_my_commands(scope=BotCommandScopeDefault()) if c.command not in STAFF_COMMANDS]
         await context.bot.set_my_commands(
-            current + [BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)")],
+            current_public + staff_command_objects(owner=False),
             scope=BotCommandScopeChat(chat_id=target.id),
         )
     except Exception:
@@ -2419,7 +2495,7 @@ async def main():
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
     # into any public command scope.
-    public_command_list = [c for c in command_list if c.command not in {"owner", "ownerpanel", "panel", "devpanel", "addemoji", "addcoins", "removecoins"}]
+    public_command_list = [c for c in command_list if c.command not in STAFF_COMMANDS and c.command not in {"addemoji"}]
 
     # Clear previously registered public command menus first. This prevents
     # Telegram from retaining a stale /revealgrid entry after code updates.
@@ -2431,18 +2507,13 @@ async def main():
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllGroupChats())
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllPrivateChats())
     if OWNER_ID:
-        owner_command_list = public_command_list + [
-            BotCommand("addemoji", "Save premium custom emoji"),
-            BotCommand("revealgrid", "Reveal Wordgrid answer (Owner only)"),
-            BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)"),
-        ]
-        await app.bot.set_my_commands(owner_command_list, scope=BotCommandScopeChat(chat_id=OWNER_ID))
+        await app.bot.set_my_commands(
+            public_command_list + staff_command_objects(owner=True),
+            scope=BotCommandScopeChat(chat_id=OWNER_ID),
+        )
         for sudo_id in SUDO_IDS:
             await app.bot.set_my_commands(
-                public_command_list + [
-                    BotCommand("revealgrid", "Reveal Wordgrid answer (Owner/Sudo)"),
-                    BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)")
-                ],
+                public_command_list + staff_command_objects(owner=False),
                 scope=BotCommandScopeChat(chat_id=sudo_id),
             )
 
