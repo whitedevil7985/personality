@@ -486,14 +486,16 @@ async def wordgrid_answer(update, context):
     points[user_id] = int(points.get(user_id, 0)) + word_points
     active["last_finder"] = user_id
 
-    from db import add_coins, add_xp
+    from db import add_coins, add_xp, record_game_result
     await add_coins(user_id, 40)
     await add_xp(user_id, 20)
+    await record_game_result(user_id, "WORDGRID", word_points, False, chat_id)
 
     remaining = len(active["words"] - active["found"])
     if remaining == 0:
         completion_bonus = 50
         points[user_id] += completion_bonus
+        await record_game_result(user_id, "WORDGRID", completion_bonus, True, chat_id)
         await add_coins(user_id, 100)
         await add_xp(user_id, 50)
         await _refresh_wordgrid_message(
