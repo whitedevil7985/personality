@@ -5,7 +5,8 @@ from typing import List, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from config import OWNER_ID
+from config import OWNER_ID, SUDO_IDS
+from db import get_user
 
 GRID_SIZE = 8
 WORDS = [
@@ -195,9 +196,15 @@ async def reveal_wordgrid(update, context):
     In groups, the answer is sent to the requesting admin's DM so regular
     group members never see the solution.
     """
-    if not update.effective_user or update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Owner only.")
+    if not update.effective_user:
+        await update.message.reply_text("⛔ Owner/Sudo only.")
         return
+    uid = update.effective_user.id
+    if uid != OWNER_ID and uid not in SUDO_IDS:
+        user = await get_user(uid)
+        if not user or not user.get("is_sudo"):
+            await update.message.reply_text("⛔ Owner/Sudo only.")
+            return
 
     chat_id = update.effective_chat.id if update.effective_chat else None
     active = context.application.bot_data.get("wordgrid_active", {}).get(chat_id)
@@ -209,14 +216,14 @@ async def reveal_wordgrid(update, context):
     answer_text = (
         "🔐 <b>Wordgrid Answer</b>\n\n"
         + " • ".join(words)
-        + "\n\n👑 This answer is visible only to the Owner."
+        + "\n\n🔒 This answer is visible only to the Owner/Sudo staff member who requested it."
     )
 
     if update.effective_chat.type in ("group", "supergroup"):
         try:
             await context.bot.send_message(
                 chat_id=update.effective_user.id,
-                text=f"📩 <b>Answer for {getattr(update.effective_chat, 'title', 'this group')}</b>\n\n" + " • ".join(words),
+                text=f"📩 <b>Answer for {getattr(update.effective_chat, 'title', 'this group')}</b>\n\n🔐 " + " • ".join(words),
                 parse_mode="HTML",
             )
             await update.message.reply_text("✅ Answer sent to your private chat.")
