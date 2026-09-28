@@ -1494,7 +1494,6 @@ async def cleanup_expired_memory():
 
 async def callback(update,context):
     q=update.callback_query;data=q.data
-    await q.answer()
 
     if data.startswith("proposal:"):
         parts=data.split(":")
@@ -1510,6 +1509,8 @@ async def callback(update,context):
                 q, context, action, target_id, proposer_id
             )
             return
+
+    await q.answer()
 
     if data == "wordgrid:new":
         await send_wordgrid(q.message, context, getattr(q.from_user, "id", None))
