@@ -1419,29 +1419,20 @@ async def callback(update,context):
             if not await is_owner_or_sudo(update):
                 await q.edit_message_text("⛔ <b>Owner/Sudo only.</b>", parse_mode="HTML")
                 return
+
             lines = [
                 "👑 <b>Owner/Sudo Commands</b>",
-                "🎛 <code>/owner</code> / <code>/panel</code> — Open this panel",
                 "",
-                "📢 <code>/broadcast</code> — Broadcast text/media",
-                "💰 <code>/addcoins USER_ID AMOUNT</code> — Add coins",
-                "💸 <code>/removecoins USER_ID AMOUNT</code> — Remove coins",
-                "👑 <code>/sudolist</code> — List sudo users",
-                "🔐 <code>/auth</code> — Authorize current group",
-                "🔒 <code>/unauth</code> — Unauthorize current group",
-                "📋 <code>/authlist</code> — List authorized groups",
-                "📊 <code>/stats</code> — View bot statistics",
-                "🔐 <code>/revealgrid</code> — Reveal Wordgrid answer",
-                "🔎 <code>/revealwordseek</code> — Reveal Wordseek answer",
             ]
-            if update.effective_user.id == OWNER_ID:
-                lines += [
-                    "",
-                    "👑 <b>Owner-only</b>",
-                    "➕ <code>/addsudo</code> — Add sudo user",
-                    "➖ <code>/delsudo</code> — Remove sudo user",
-                    "🎨 <code>/addemoji</code> — Save premium custom emoji",
-                ]
+            for command, description in STAFF_COMMANDS.items():
+                if command in {"owner", "ownerpanel", "panel", "devpanel"}:
+                    continue
+                if update.effective_user.id != OWNER_ID and command in OWNER_ONLY_COMMANDS:
+                    continue
+                lines.append(
+                    f"• <code>/{command}</code> — {html.escape(description)}"
+                )
+
             await q.edit_message_text(
                 "\n".join(lines),
                 parse_mode="HTML",
@@ -1995,59 +1986,47 @@ def owner_panel_kb(owner_only=False, staff_access=False):
     return kb(rows)
 
 async def owner_panel(update, context):
-    """Private Owner/Sudo control panel with a safe fallback if a panel render fails."""
+    """Private Owner/Sudo panel showing the complete staff command set."""
     if not update.effective_user:
         return
 
-    try:
-        allowed = await is_owner_or_sudo(update)
-    except Exception as exc:
-        print(f"[OwnerPanelAuth] {type(exc).__name__}: {exc}")
-        allowed = False
-
-    if not allowed:
-        await update.message.reply_text("⛔ This panel is only available to the owner and sudo users.")
+    if not await is_owner_or_sudo(update):
+        await update.effective_message.reply_text("⛔ Owner/Sudo only.")
         return
 
     owner_only = update.effective_user.id == OWNER_ID
-    staff_access = True
 
-    extra = (
-        "💰 /addcoins <user_id> <amount> — Add virtual coins\n"
-        "💸 /removecoins <user_id> <amount> — Remove virtual coins\n"
-        "🔐 /revealgrid — Reveal the active Wordgrid answer (Owner/Sudo)\n"
-        "🔎 /revealwordseek — Reveal the active Wordseek answer (Owner/Sudo)"
-    )
+    visible_commands = []
+    for command, description in STAFF_COMMANDS.items():
+        if command in {"ownerpanel", "panel", "devpanel"}:
+            continue
+        if not owner_only and command in OWNER_ONLY_COMMANDS:
+            continue
+        visible_commands.append(f"• <code>/{command}</code> — {html.escape(description)}")
 
     panel_text = (
         "╭━━━〔 👑 <b>VANYA OWNER PANEL</b> 〕━━━╮\n"
         "┃ 🔒 <i>Owner/Sudo access only</i>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        "Manage Vanya controls from here.\n\n"
-        "<b>Commands:</b>\n"
-        "📢 /broadcast — Send content to started users & known groups\n"
-        "👑 /addsudo — Add sudo (Owner only)\n"
-        "👑 /delsudo — Remove sudo (Owner only)\n"
-        "👥 /sudolist — View sudo users\n"
-        "🔐 /auth — Authorize a group\n"
-        "🔒 /unauth — Revoke group authorization\n"
-        "📋 /authlist — View authorized chats\n"
-        "📊 /stats — View groups and users (Owner/Sudo)\n"
-        + extra
+        "<b>Available Staff Commands</b>\n"
+        + "\n".join(visible_commands)
+        + "\n\n"
+        "🎛 <b>Use the buttons below for the main controls.</b>"
     )
 
     try:
-        await update.message.reply_html(
+        await update.effective_message.reply_html(
             panel_text,
             reply_markup=owner_panel_kb(
                 owner_only=owner_only,
-                staff_access=staff_access,
+                staff_access=True,
             ),
         )
     except Exception as exc:
-        # A broken/unsupported markup must never make /owner appear dead.
         print(f"[OwnerPanelRender] {type(exc).__name__}: {exc}")
-        await update.message.reply_html(panel_text)
+        await update.effective_message.reply_html(panel_text)
+
+
 
 async def owner_panel_command(update, context):
     """Dedicated Owner/Sudo entrypoint for /owner, /panel and aliases."""
