@@ -7,6 +7,7 @@ from db import add_coins, add_xp, record_game_result
 
 RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 SUITS = ["♠️", "♥️", "♦️", "♣️"]
+MIN_PLAYERS = 2
 MAX_PLAYERS = 4
 TOTAL_ROUNDS = 4
 HAND_SIZE = 5
@@ -45,7 +46,7 @@ def _room_markup(room_id, room):
                     callback_data=f"card:join:{room_id}",
                 )
             ])
-        if len(room["players"]) >= 2:
+        if len(room["players"]) >= MIN_PLAYERS:
             rows.append([
                 InlineKeyboardButton(
                     "▶️ Start 4 Rounds",
@@ -67,7 +68,7 @@ def _room_text(room):
         "┃ <i>Private cards • Group gameplay</i> ✦",
         "╰━━━━━━━━━━━━━━━━━━━━╯",
         "",
-        f"👥 Players: <b>{len(room['players'])}/{MAX_PLAYERS}</b>",
+        f"👥 Players: <b>{len(room['players'])}/{MAX_PLAYERS}</b>  •  Minimum: <b>{MIN_PLAYERS}</b>",
     ]
     for i, uid in enumerate(room["players"], 1):
         lines.append(f"{i}. {html.escape(room['names'].get(uid, 'Player'))}")
@@ -188,7 +189,7 @@ async def cardstart(update, context):
         await update.message.reply_text("⛔ Sirf host game start kar sakta hai.")
         return
 
-    if len(room["players"]) < 2:
+    if len(room["players"]) < MIN_PLAYERS:
         await update.message.reply_text("👥 Minimum 2 players chahiye.")
         return
 
@@ -288,7 +289,7 @@ async def _start_round(bot, room_id, room):
             parse_mode="HTML",
         )
 
-    if len(room["players"]) < 2:
+    if len(room["players"]) < MIN_PLAYERS:
         CARD_ROOMS.pop(room_id, None)
         await bot.send_message(
             chat_id=room["group_id"],
