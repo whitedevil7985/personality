@@ -2,7 +2,7 @@ import html
 import random
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
-from db import ensure_user, get_user, add_coins, add_xp, users
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
 
 async def wordseek(update, context):
     words = ["VANYA", "DELHI", "ARCADE", "CHAT", "FRIEND"]
@@ -17,3 +17,4 @@ async def answer(update, context):
         return
     await update.message.reply_text("🎉 Nice guess! If that was your Wordseek answer, you've got it. +50 XP!")
     await add_xp(update.effective_user.id, 50)
+    await record_game_result(update.effective_user.id, "WORDSEEK", 50, True, update.effective_chat.id)
