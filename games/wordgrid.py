@@ -329,7 +329,7 @@ def _wordgrid_caption(active, game_over: bool = False) -> str:
 
     lines.extend([
         "",
-        "💡 <b>How to play:</b> Find the hidden words and send <code>/answer WORD</code>.",
+        "💡 <b>How to play:</b> Grid me word dhundo aur bas <b>word type karke send</b> karo.",
         "✨ Words can be horizontal, vertical, or diagonal.",
     ])
     return "\n".join(lines)
