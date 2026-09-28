@@ -2009,6 +2009,13 @@ async def main():
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     public_command_list = [c for c in command_list if c.command != "revealgrid"]
+
+    # Clear previously registered public command menus first. This prevents
+    # Telegram from retaining a stale /revealgrid entry after code updates.
+    await app.bot.delete_my_commands(scope=BotCommandScopeDefault())
+    await app.bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
+    await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
+
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeDefault())
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllGroupChats())
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllPrivateChats())
