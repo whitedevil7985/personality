@@ -1920,38 +1920,59 @@ def owner_panel_kb(owner_only=False, staff_access=False):
     return kb(rows)
 
 async def owner_panel(update, context):
-    """Private owner/sudo control panel. Never expose admin controls to regular users."""
-    if not await is_owner_or_sudo(update):
+    """Private Owner/Sudo control panel with a safe fallback if a panel render fails."""
+    if not update.effective_user:
+        return
+
+    try:
+        allowed = await is_owner_or_sudo(update)
+    except Exception as exc:
+        print(f"[OwnerPanelAuth] {type(exc).__name__}: {exc}")
+        allowed = False
+
+    if not allowed:
         await update.message.reply_text("⛔ This panel is only available to the owner and sudo users.")
         return
+
     owner_only = update.effective_user.id == OWNER_ID
-    staff_access = await is_owner_or_sudo(update)
+    staff_access = True
+
     extra = (
-        ("💰 /addcoins <user_id> <amount> — Add virtual coins\n"
-         "💸 /removecoins <user_id> <amount> — Remove virtual coins\n"
-         if staff_access else "") +
-        ("🔐 /revealgrid — Reveal the active Wordgrid answer (Owner/Sudo)\n"
-         if staff_access else "") +
-        ("🔎 /revealwordseek — Reveal the active Wordseek answer (Owner/Sudo)\n"
-         if staff_access else "")
+        "💰 /addcoins <user_id> <amount> — Add virtual coins\n"
+        "💸 /removecoins <user_id> <amount> — Remove virtual coins\n"
+        "🔐 /revealgrid — Reveal the active Wordgrid answer (Owner/Sudo)\n"
+        "🔎 /revealwordseek — Reveal the active Wordseek answer (Owner/Sudo)"
     )
-    await update.message.reply_html(
+
+    panel_text = (
         "╭━━━〔 👑 <b>VANYA OWNER PANEL</b> 〕━━━╮\n"
         "┃ 🔒 <i>Owner/Sudo access only</i>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        "Manage broadcast, sudo users and authorized groups from here.\n\n"
+        "Manage Vanya controls from here.\n\n"
         "<b>Commands:</b>\n"
         "📢 /broadcast — Send content to started users & known groups\n"
         "👑 /addsudo — Add sudo (Owner only)\n"
         "👑 /delsudo — Remove sudo (Owner only)\n"
         "👥 /sudolist — View sudo users\n"
-        "🔐 /auth — Authorize current group\n"
-        "🔒 /unauth — Revoke current group\n"
-        "📋 /authlist — View authorized groups\n"
+        "🔐 /auth — Authorize a group\n"
+        "🔒 /unauth — Revoke group authorization\n"
+        "📋 /authlist — View authorized chats\n"
         "📊 /stats — View groups and users (Owner/Sudo)\n"
-        + extra.rstrip("\n"),
-        reply_markup=owner_panel_kb(owner_only=owner_only, staff_access=staff_access)
+        + extra
     )
+
+    try:
+        await update.message.reply_html(
+            panel_text,
+            reply_markup=owner_panel_kb(
+                owner_only=owner_only,
+                staff_access=staff_access,
+            ),
+        )
+    except Exception as exc:
+        # A broken/unsupported markup must never make /owner appear dead.
+        print(f"[OwnerPanelRender] {type(exc).__name__}: {exc}")
+        await update.message.reply_html(panel_text)
 
 async def _coin_admin_target(update, context, remove=False):
     """Owner/Sudo utility for adjusting any user's virtual coin balance by ID."""
