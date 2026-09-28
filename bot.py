@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
+from protected_bot import ProtectedBot
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, WebAppInfo,
     BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats,
@@ -1984,7 +1985,7 @@ async def ping(update, context):
 async def main():
     await cleanup_expired_memory()
     web_runner = await start_web_server()
-    app=Application.builder().token(TOKEN).build()
+    app=Application.builder().bot(ProtectedBot(TOKEN)).build()
     commands={
         "start":start,"help":help_cmd,"profile":profile,"balance":balance,"bal":balance,
         "daily":daily,"work":work,"give":give,"toprich":leaderboard,"leaderboard":leaderboard,
