@@ -1974,6 +1974,36 @@ async def owner_panel(update, context):
         print(f"[OwnerPanelRender] {type(exc).__name__}: {exc}")
         await update.message.reply_html(panel_text)
 
+async def owner_panel_command(update, context):
+    """Dedicated Owner/Sudo entrypoint for /owner, /panel and aliases."""
+    if not update.effective_message or not update.effective_user:
+        return
+    try:
+        allowed = await is_owner_or_sudo(update)
+    except Exception as exc:
+        print(f"[OwnerPanelCommand] auth error: {type(exc).__name__}: {exc}")
+        allowed = False
+
+    if not allowed:
+        await update.effective_message.reply_text(
+            "⛔ Owner/Sudo only."
+        )
+        return
+
+    try:
+        # Call the renderer after the permission check. Keeping this separate
+        # from the command registration makes /owner robust against any stale
+        # handler references after a deployment.
+        await owner_panel(update, context)
+    except Exception as exc:
+        print(f"[OwnerPanelCommand] render error: {type(exc).__name__}: {exc}")
+        await update.effective_message.reply_html(
+            "👑 <b>Vanya Owner Panel</b>\n\n"
+            "✅ Access confirmed.\n"
+            "Use /broadcast, /addcoins, /removecoins, /revealgrid or /revealwordseek."
+        )
+
+
 async def _coin_admin_target(update, context, remove=False):
     """Owner/Sudo utility for adjusting any user's virtual coin balance by ID."""
     if not await is_owner_or_sudo(update):
@@ -2344,7 +2374,7 @@ async def main():
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
         "scribble":scribble,"answer":answer,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
-        "owner":owner_panel,"panel":owner_panel,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
+        "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,
     }
     for name,fn in commands.items():
@@ -2380,7 +2410,7 @@ async def main():
         "wordscramble": "Play Wordscramble", "words": "Play Wordscramble", "hack": "Play Hack puzzle",
         "scribble": "Open Scribble", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
-        "panel": "Open owner panel", "broadcast": "Broadcast a message", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
+        "panel": "Open owner panel", "ownerpanel": "Open owner panel", "devpanel": "Open owner panel", "broadcast": "Broadcast a message", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
@@ -2389,7 +2419,7 @@ async def main():
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
     # into any public command scope.
-    public_command_list = [c for c in command_list if c.command not in {"addemoji", "addcoins", "removecoins"}]
+    public_command_list = [c for c in command_list if c.command not in {"owner", "ownerpanel", "panel", "devpanel", "addemoji", "addcoins", "removecoins"}]
 
     # Clear previously registered public command menus first. This prevents
     # Telegram from retaining a stale /revealgrid entry after code updates.
