@@ -35,7 +35,7 @@ from games.uno import uno as uno_legacy, unojoin, uno_cb
 from games.ludo import ludo as ludo_legacy, ludojoin, ludo_cb
 from games.chess import chess_cmd, chessjoin, chess_cb
 from games.mines import mines, mines_cb
-from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek
+from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek, WORDSEEK_GAMES
 from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_wordgrid
 from games.crash import crash
 from games.charades import charades
@@ -1771,6 +1771,25 @@ async def gchat(update,context):
     name=html.escape(update.effective_user.first_name or "Player")
     await update.message.reply_html(f"💬 <b>{name}</b>  ›  {html.escape(text)}")
 
+async def direct_game_answer(update, context):
+    """Treat plain text as an answer while a word game is active in the chat."""
+    if not update.message or not update.message.text:
+        return
+
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if chat_id is None:
+        return
+
+    wordgrid_active = context.application.bot_data.get("wordgrid_active", {})
+    if chat_id in wordgrid_active:
+        await wordgrid_answer(update, context)
+        return
+
+    if chat_id in WORDSEEK_GAMES:
+        await wordseek_answer(update, context)
+        return
+
+
 async def mention_chat(update,context):
     if not update.message:
         return
@@ -2504,7 +2523,11 @@ async def main():
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
     app.add_handler(ChatMemberHandler(log_bot_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=-1)
     app.add_handler(CallbackQueryHandler(callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,mention_chat))
+
+    # Word games accept a plain typed word. This handler runs before Vanya's
+    # normal chat handler and only does anything when a word game is active.
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, direct_game_answer), group=0)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mention_chat), group=1)
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
