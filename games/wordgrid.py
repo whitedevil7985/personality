@@ -1,6 +1,6 @@
 import random
 from io import BytesIO
-from typing import List, Tuple
+from typing import Dict, List, Set, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -39,7 +39,7 @@ def _font(size: int, bold: bool = False):
         return ImageFont.load_default()
 
 
-def _place_word(grid: List[List[str]], word: str) -> bool:
+def _place_word(grid: List[List[str]], word: str):
     options = []
     for row in range(GRID_SIZE):
         for col in range(GRID_SIZE):
@@ -55,37 +55,57 @@ def _place_word(grid: List[List[str]], word: str) -> bool:
                 ):
                     options.append((row, col, dr, dc))
     if not options:
-        return False
+        return None
+
     row, col, dr, dc = random.choice(options)
+    positions = []
     for i, ch in enumerate(word):
-        grid[row + dr * i][col + dc * i] = ch
-    return True
+        rr = row + dr * i
+        cc = col + dc * i
+        grid[rr][cc] = ch
+        positions.append((rr, cc))
+    return positions
 
 
-def _build_grid() -> Tuple[List[List[str]], List[str]]:
+def _build_grid():
     words = [w for w, _ in WORDS]
     for _ in range(100):
         grid = [["" for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         random.shuffle(words)
-        if all(_place_word(grid, word) for word in words):
+        placements = {}
+        ok = True
+        for word in words:
+            positions = _place_word(grid, word)
+            if positions is None:
+                ok = False
+                break
+            placements[word] = positions
+
+        if ok:
             for r in range(GRID_SIZE):
                 for c in range(GRID_SIZE):
                     if not grid[r][c]:
                         grid[r][c] = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-            return grid, words[:]
+            return grid, words[:], placements
+
     # Very safe fallback: place words on rows, then fill blanks.
     grid = [["" for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    placements = {}
     for r, word in enumerate(words[:GRID_SIZE]):
+        positions = []
         for c, ch in enumerate(word[:GRID_SIZE]):
             grid[r][c] = ch
+            positions.append((r, c))
+        placements[word] = positions
+
     for r in range(GRID_SIZE):
         for c in range(GRID_SIZE):
             if not grid[r][c]:
                 grid[r][c] = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    return grid, words[:]
+    return grid, words[:], placements
 
 
-def _render_grid(grid: List[List[str]]) -> BytesIO:
+def _render_grid(grid: List[List[str]], highlighted: Set[Tuple[int, int]] = None) -> BytesIO:
     # Screenshot-inspired lavender Word Grid design.
     W, H = 900, 1030
     bg = (224, 207, 241)
@@ -94,6 +114,10 @@ def _render_grid(grid: List[List[str]]) -> BytesIO:
     inner = (238, 226, 250)
     inner_stroke = (211, 191, 231)
     letter = (59, 43, 91)
+    highlight = (204, 239, 212)
+    highlight_stroke = (58, 145, 86)
+
+    highlighted = highlighted or set()
 
     img = Image.new("RGB", (W, H), bg)
     d = ImageDraw.Draw(img)
@@ -123,12 +147,13 @@ def _render_grid(grid: List[List[str]]) -> BytesIO:
             cell_h = (board_h - gap * (GRID_SIZE - 1)) / GRID_SIZE
             x1 = x0 + cell
             y1 = y0 + cell_h
+            is_found = (r, c) in highlighted
             d.rounded_rectangle(
                 (x0, y0, x1, y1),
                 radius=10,
-                fill=inner,
-                outline=inner_stroke,
-                width=2,
+                fill=highlight if is_found else inner,
+                outline=highlight_stroke if is_found else inner_stroke,
+                width=4 if is_found else 2,
             )
             text = grid[r][c]
             bbox = d.textbbox((0, 0), text, font=font)
@@ -153,8 +178,80 @@ def _render_grid(grid: List[List[str]]) -> BytesIO:
     return bio
 
 
+def _found_positions(active) -> Set[Tuple[int, int]]:
+    positions = set()
+    placements = active.get("placements", {})
+    for word in active.get("found", set()):
+        positions.update(placements.get(word, []))
+    return positions
+
+
+def _wordgrid_caption(active, game_over: bool = False) -> str:
+    found = active.get("found", set())
+    words_list = active.get("words_list", [])
+    total = len(words_list)
+    points = active.get("points", {})
+
+    lines = [
+        "🎮 <b>Word grid challenge</b> 🎮",
+        "",
+        "find these words:",
+    ]
+    for word, length in WORDS:
+        if word.lower() in found:
+            lines.append(f"✅ <code>{word}</code> ({length})")
+        else:
+            lines.append(f"<code>{word[0]}</code> " + "_ " * (length - 1) + f"({length})")
+
+    my_id = active.get("last_finder")
+    my_points = int(points.get(my_id, 0)) if my_id else 0
+    lines.extend([
+        "",
+        f"🔎 <b>Found:</b> {len(found)}/{total}",
+        f"⭐ <b>Your points:</b> {my_points}",
+    ])
+
+    if game_over:
+        leaderboard = sorted(points.items(), key=lambda item: item[1], reverse=True)
+        lines.extend(["", "🏁 <b>GAME OVER</b>"])
+        if leaderboard:
+            lines.append("<b>Final points:</b>")
+            for index, (uid, score) in enumerate(leaderboard[:5], 1):
+                lines.append(f"{index}. <a href=\"tg://user?id={uid}\">Player {uid}</a> — <b>{score} pts</b>")
+        lines.append("")
+        lines.append("✅ All hidden words have been found!")
+
+    lines.extend([
+        "",
+        "💡 <b>How to play:</b> Find the hidden words and send <code>/answer WORD</code>.",
+        "✨ Words can be horizontal, vertical, or diagonal.",
+    ])
+    return "\n".join(lines)
+
+
+async def _refresh_wordgrid_message(context, chat_id: int, active, game_over: bool = False):
+    message_id = active.get("message_id")
+    if not message_id:
+        return
+
+    from telegram import InputMediaPhoto
+
+    await context.bot.edit_message_media(
+        chat_id=chat_id,
+        message_id=message_id,
+        media=InputMediaPhoto(
+            media=_render_grid(active["grid"], _found_positions(active)),
+            caption=_wordgrid_caption(active, game_over=game_over),
+            parse_mode="HTML",
+        ),
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 New Grid", callback_data="wordgrid:new")],
+        ]) if not game_over else None,
+    )
+
+
 async def send_wordgrid(message, context, user_id=None):
-    grid, words = _build_grid()
+    grid, words, placements = _build_grid()
     chat_id = getattr(getattr(message, "chat", None), "id", None)
     if chat_id is None:
         return
@@ -165,29 +262,21 @@ async def send_wordgrid(message, context, user_id=None):
         "created_by": user_id,
         "grid": grid,
         "words_list": words[:],
+        "placements": {word.lower(): positions for word, positions in placements.items()},
+        "points": {},
+        "message_id": None,
+        "last_finder": None,
     }
 
-    lines = [
-        "🎮 <b>Word grid challenge</b> 🎮",
-        "",
-        "find these words:",
-    ]
-    for word, length in WORDS:
-        lines.append(f"<code>{word[0]}</code> " + "_ " * (length - 1) + f"({length})")
-    lines.extend([
-        "",
-        "💡 <b>How to play:</b> Find the hidden words and send <code>/answer WORD</code>.",
-        "✨ Words can be horizontal, vertical, or diagonal.",
-    ])
-
-    await message.reply_photo(
+    sent = await message.reply_photo(
         photo=_render_grid(grid),
-        caption="\n".join(lines),
+        caption=_wordgrid_caption(active),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 New Grid", callback_data="wordgrid:new")],
         ]),
     )
+    active["message_id"] = sent.message_id
 
 
 async def reveal_wordgrid(update, context):
@@ -258,14 +347,43 @@ async def wordgrid_answer(update, context):
         return
 
     active["found"].add(guess)
+    user_id = update.effective_user.id
+    word_points = len(guess) * 10
+    points = active.setdefault("points", {})
+    points[user_id] = int(points.get(user_id, 0)) + word_points
+    active["last_finder"] = user_id
+
     from db import add_coins, add_xp
-    await add_coins(update.effective_user.id, 40)
-    await add_xp(update.effective_user.id, 20)
+    await add_coins(user_id, 40)
+    await add_xp(user_id, 20)
 
     remaining = len(active["words"] - active["found"])
     if remaining == 0:
-        await add_coins(update.effective_user.id, 100)
-        await add_xp(update.effective_user.id, 50)
-        await update.message.reply_text("🏆 <b>Wordgrid complete!</b>\n\nAll hidden words found. Bonus: +100 coins +50 XP!", parse_mode="HTML")
+        completion_bonus = 50
+        points[user_id] += completion_bonus
+        await add_coins(user_id, 100)
+        await add_xp(user_id, 50)
+        await _refresh_wordgrid_message(
+            context,
+            chat_id,
+            active,
+            game_over=True,
+        )
+        total_points = points[user_id]
+        await update.message.reply_text(
+            f"🏆 <b>Wordgrid GAME OVER!</b>\n\n"
+            f"✅ <b>{guess.upper()}</b> found!\n"
+            f"⭐ Word points: +{word_points}\n"
+            f"🎁 Completion bonus: +{completion_bonus}\n"
+            f"💎 <b>Your total: {total_points} points</b>\n\n"
+            f"🪙 Bonus rewards: +100 coins +50 XP",
+            parse_mode="HTML",
+        )
     else:
-        await update.message.reply_text(f"✅ <b>{guess.upper()}</b> found! +40 coins +20 XP\n🔎 {remaining} word(s) left.", parse_mode="HTML")
+        await _refresh_wordgrid_message(context, chat_id, active)
+        await update.message.reply_text(
+            f"✅ <b>{guess.upper()}</b> found!\n"
+            f"⭐ +{word_points} points | +40 coins | +20 XP\n"
+            f"🔎 {remaining} word(s) left.",
+            parse_mode="HTML",
+        )
