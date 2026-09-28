@@ -5,6 +5,8 @@ from typing import List, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from config import OWNER_ID
+
 GRID_SIZE = 8
 WORDS = [
     ("ANT", 3),
@@ -28,7 +30,12 @@ def _font(size: int, bold: bool = False):
             return ImageFont.truetype(path, size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    # Railway/slim images may not ship system TTF fonts. Pillow 10+
+    # supports a scalable built-in fallback; keep the letters readable.
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def _place_word(grid: List[List[str]], word: str) -> bool:
@@ -105,7 +112,7 @@ def _render_grid(grid: List[List[str]]) -> BytesIO:
         width=5,
     )
 
-    font = _font(72, bold=True)
+    font = _font(84, bold=True)
     for r in range(GRID_SIZE):
         for c in range(GRID_SIZE):
             x0 = margin_x + c * (cell + gap)
@@ -183,18 +190,13 @@ async def send_wordgrid(message, context, user_id=None):
 
 
 async def reveal_wordgrid(update, context):
-    """Reveal the current Wordgrid answer to Owner/Sudo only.
+    """Reveal the current Wordgrid answer to the Owner only.
 
     In groups, the answer is sent to the requesting admin's DM so regular
     group members never see the solution.
     """
-    try:
-        from bot import is_owner_or_sudo
-    except Exception:
-        await update.message.reply_text("⛔ Permission check unavailable.")
-        return
-    if not await is_owner_or_sudo(update):
-        await update.message.reply_text("⛔ Owner/Sudo only.")
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⛔ Owner only.")
         return
 
     chat_id = update.effective_chat.id if update.effective_chat else None
@@ -207,7 +209,7 @@ async def reveal_wordgrid(update, context):
     answer_text = (
         "🔐 <b>Wordgrid Answer</b>\n\n"
         + " • ".join(words)
-        + "\n\n👑 This answer is visible only to Owner/Sudo."
+        + "\n\n👑 This answer is visible only to the Owner."
     )
 
     if update.effective_chat.type in ("group", "supergroup"):
