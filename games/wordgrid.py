@@ -1,6 +1,6 @@
 import random
 from io import BytesIO
-from typing import Dict, List, Set, Tuple
+from typing import List, Set, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -203,12 +203,11 @@ def _wordgrid_caption(active, game_over: bool = False) -> str:
         else:
             lines.append(f"<code>{word[0]}</code> " + "_ " * (length - 1) + f"({length})")
 
-    my_id = active.get("last_finder")
-    my_points = int(points.get(my_id, 0)) if my_id else 0
+    total_points = sum(int(score) for score in points.values())
     lines.extend([
         "",
         f"🔎 <b>Found:</b> {len(found)}/{total}",
-        f"⭐ <b>Your points:</b> {my_points}",
+        f"⭐ <b>Points scored:</b> {total_points}",
     ])
 
     if game_over:
@@ -246,7 +245,7 @@ async def _refresh_wordgrid_message(context, chat_id: int, active, game_over: bo
         ),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 New Grid", callback_data="wordgrid:new")],
-        ]) if not game_over else None,
+        ]),
     )
 
 
