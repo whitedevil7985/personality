@@ -468,7 +468,12 @@ async def wordgrid_answer(update, context):
         await update.message.reply_text("No active Wordgrid game here. Start one with /wordgrid")
         return
 
-    guess = "".join(context.args).strip().lower()
+    if context.args:
+        guess = "".join(context.args).strip().lower()
+    else:
+        guess = (update.message.text or "").strip().lower()
+        if not guess or guess.startswith("/"):
+            return
     if guess not in active["words"]:
         await update.message.reply_text("❌ That word isn't in this grid. Try again!")
         return
