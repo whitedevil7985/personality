@@ -294,7 +294,12 @@ async def _refresh_wordgrid_message(context, chat_id: int, active, game_over: bo
     from telegram import InputMediaPhoto
 
     caption = _wordgrid_caption(active, game_over=game_over)
-    photo = _render_grid(active["grid"], _found_positions(active))
+    photo = _render_grid(
+        active["grid"],
+        _found_positions(active),
+        _found_word_paths(active),
+    )
+    photo.seek(0)
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 New Grid", callback_data="wordgrid:new")],
     ])
@@ -319,9 +324,17 @@ async def _refresh_wordgrid_message(context, chat_id: int, active, game_over: bo
         print(f"[WordgridRefresh] edit_message_media failed: {type(exc).__name__}: {exc}")
 
     try:
+        # Re-render a brand-new stream for the fallback upload. The failed
+        # edit may have consumed the original BytesIO stream.
+        replacement_photo = _render_grid(
+            active["grid"],
+            _found_positions(active),
+            _found_word_paths(active),
+        )
+        replacement_photo.seek(0)
         replacement = await context.bot.send_photo(
             chat_id=chat_id,
-            photo=photo,
+            photo=replacement_photo,
             caption=caption,
             parse_mode="HTML",
             reply_markup=markup,
