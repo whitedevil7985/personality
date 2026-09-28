@@ -2,7 +2,7 @@ import html
 import random
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
-from db import ensure_user, get_user, add_coins, add_xp, users
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
 try:
     import chess
 except Exception:
@@ -58,5 +58,6 @@ async def chess_cb(q,parts):
         g["selected"].pop(uid,None);await q.answer("Illegal move.",show_alert=True);return
     b.push(move);g["selected"].pop(uid,None)
     if b.is_checkmate():
-        await q.edit_message_text(f"♚ <b>CHECKMATE!</b> {q.from_user.first_name} wins.",parse_mode="HTML");chess_games.pop(gid,None);return
+        await record_game_result(uid, "CHESS", 750, True, q.message.chat_id if q.message else None)
+        await q.edit_message_text(f"♚ <b>CHECKMATE!</b> {q.from_user.first_name} wins.\n\n⭐ +750 points!",parse_mode="HTML");chess_games.pop(gid,None);return
     await q.edit_message_reply_markup(reply_markup=chess_kb(gid));await q.answer("Move played.")
