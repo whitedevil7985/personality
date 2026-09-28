@@ -57,10 +57,17 @@ async def answer(update, context):
 
 
 async def reveal_wordseek(update, context):
-    """Owner-only Wordseek answer reveal; never exposes the answer to groups."""
-    if not update.effective_user or update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("⛔ Owner only.")
+    """Owner/Sudo Wordseek answer reveal; never exposes the answer to groups."""
+    if not update.effective_user:
+        await update.message.reply_text("⛔ Owner/Sudo only.")
         return
+    uid = update.effective_user.id
+    if uid != OWNER_ID:
+        from db import get_user
+        u = await get_user(uid)
+        if uid not in getattr(__import__("config"), "SUDO_IDS", set()) and not (u and u.get("is_sudo")):
+            await update.message.reply_text("⛔ Owner/Sudo only.")
+            return
 
     chat_id = update.effective_chat.id if update.effective_chat else None
     game = WORDSEEK_GAMES.get(chat_id)
