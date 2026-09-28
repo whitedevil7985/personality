@@ -17,6 +17,7 @@ db = client[MONGO_DB]
 users = db.users
 groups = db.groups
 games = db.games
+game_stats = db.game_stats
 
 async def ensure_user(user):
     if not user:
@@ -66,3 +67,57 @@ async def add_xp(uid, amount):
 
 async def top_users(limit=10):
     return users.find().sort("coins", -1).limit(limit)
+
+
+async def record_game_result(uid, game, points=0, won=False, chat_id=None):
+    """Store one completed game result for leaderboard aggregation."""
+    if not uid or not game:
+        return
+    try:
+        points = max(0, int(points))
+    except (TypeError, ValueError):
+        points = 0
+    await game_stats.insert_one({
+        "uid": int(uid),
+        "game": str(game).upper(),
+        "points": points,
+        "wins": 1 if won else 0,
+        "chat_id": int(chat_id) if chat_id is not None else None,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+
+async def get_game_leaderboard(game="ALL", scope="global", chat_id=None, since=None, limit=10):
+    """Aggregate leaderboard points and wins for a period and scope."""
+    match = {}
+    if since is not None:
+        match["created_at"] = {"$gte": since}
+    if str(game).upper() != "ALL":
+        match["game"] = str(game).upper()
+    if str(scope).lower() == "group":
+        if chat_id is None:
+            return []
+        match["chat_id"] = int(chat_id)
+
+    pipeline = [
+        {"$match": match},
+        {"$group": {
+            "_id": "$uid",
+            "points": {"$sum": "$points"},
+            "wins": {"$sum": "$wins"},
+            "games": {"$sum": 1},
+        }},
+        {"$sort": {"points": -1, "wins": -1, "games": -1, "_id": 1}},
+        {"$limit": max(1, int(limit))},
+    ]
+    rows = []
+    async for row in game_stats.aggregate(pipeline):
+        user = await get_user(row["_id"])
+        rows.append({
+            "uid": row["_id"],
+            "name": (user or {}).get("name") or f"User {row['_id']}",
+            "points": int(row.get("points", 0)),
+            "wins": int(row.get("wins", 0)),
+            "games": int(row.get("games", 0)),
+        })
+    return rows
