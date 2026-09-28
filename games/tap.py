@@ -2,7 +2,7 @@ import html
 import random
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
-from db import ensure_user, get_user, add_coins, add_xp, users
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
 
 async def tap(update,context):
     n=random.randint(1,100)
@@ -14,4 +14,5 @@ async def tap_cb(q,data):
     if int(uid)!=q.from_user.id:
         await q.answer("This tap challenge isn't yours.",show_alert=True);return
     reward=random.randint(20,100);await add_coins(q.from_user.id,reward)
+    await record_game_result(q.from_user.id, "TAP", reward, True, q.message.chat_id if q.message else None)
     await q.edit_message_text(f"⚡ <b>FAST!</b>\n💰 +{reward} coins",parse_mode="HTML")
