@@ -2,7 +2,7 @@ import html
 import random
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
-from db import ensure_user, get_user, add_coins, add_xp, users
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
 
 async def mines(update, context):
     await ensure_user(update.effective_user)
@@ -41,6 +41,7 @@ async def mines_cb(q, data):
             return
         reward = safe * 100
         await add_coins(uid, reward)
+        await record_game_result(uid, "MINES", reward, True, q.message.chat_id if q.message else None)
         await users.update_one({"_id": uid}, {"$set": {"mines_active": False}})
         await q.edit_message_text(f"💰 Cashed out <b>+{reward:,} coins</b> from Mines!", parse_mode="HTML")
         return
@@ -51,6 +52,7 @@ async def mines_cb(q, data):
         await q.answer("Already opened.", show_alert=False)
         return
     if pos in mines_set:
+        await record_game_result(uid, "MINES", 0, False, q.message.chat_id if q.message else None)
         await users.update_one({"_id": uid}, {"$set": {"mines_active": False}})
         await q.edit_message_text("💥 <b>BOOM!</b> You hit a mine. Round over.", parse_mode="HTML")
         return
