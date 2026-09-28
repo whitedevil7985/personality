@@ -1967,7 +1967,7 @@ async def main():
         "rps":rps,"dice":dice,"coinflip":coinflip,"slots":slots,"card":card,"jumble":jumble,
         "tap":tap,"bet":bet,"uno":uno,"unojoin":unojoin,"ludo":ludo,"ludojoin":ludojoin,
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
-        "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"revealgrid":reveal_wordgrid,"crash":crash,"charades":charades,
+        "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
         "scribble":scribble,"answer":answer,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel,"panel":owner_panel,"broadcast":broadcast,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
@@ -1975,6 +1975,10 @@ async def main():
     }
     for name,fn in commands.items():
         app.add_handler(CommandHandler(name,fn))
+
+    # /revealgrid is intentionally registered outside the public command map:
+    # the handler exists, but Telegram must never advertise it to normal users.
+    app.add_handler(CommandHandler("revealgrid", reveal_wordgrid))
 
     # Register the full command list with Telegram so typing "/" in ANY
     # group/private chat shows Vanya's available commands (like the
@@ -1996,7 +2000,7 @@ async def main():
         "gchat": "Send a game chat message", "persona": "Change chat persona", "memory": "View saved memory",
         "remember": "Save something to memory", "forgetme": "Clear your saved memory", "games": "Open Games",
         "spin": "Spin for a reward", "achievements": "View achievements", "quest": "View quests",
-        "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid", "revealgrid": "Reveal Wordgrid answer (Owner/Sudo only)",
+        "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid",
         "crash": "Play Crash", "charades": "Play Charades", "wordchain": "Play Wordchain",
         "wordscramble": "Play Wordscramble", "words": "Play Wordscramble", "hack": "Play Hack puzzle",
         "scribble": "Open Scribble", "answer": "Answer the current game", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
@@ -2008,7 +2012,9 @@ async def main():
         "unmute": "Unmute a user", "purge": "Delete recent messages",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
-    public_command_list = [c for c in command_list if c.command != "revealgrid"]
+    # /revealgrid is not part of command_list at all, so it cannot leak
+    # into any public command scope.
+    public_command_list = list(command_list)
 
     # Clear previously registered public command menus first. This prevents
     # Telegram from retaining a stale /revealgrid entry after code updates.
