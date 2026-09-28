@@ -1634,37 +1634,43 @@ async def callback(update,context):
         await chess_cb(q,data.split(":"));return
 
 async def capture_owner_custom_emojis(update, context):
-    """Learn the owner's Telegram custom/premium emoji IDs automatically."""
+    """Automatically save real custom-emoji IDs from the Owner's messages."""
     user = update.effective_user
     message = update.effective_message
     if not user or user.id != OWNER_ID or not message:
         return
 
-    entities = list(message.entities or []) + list(message.caption_entities or [])
-    saved = set()
-    for entity in entities:
-        if getattr(entity, "type", "") != "custom_emoji":
-            continue
-        eid = getattr(entity, "custom_emoji_id", None)
-        if not eid or str(eid) in saved:
-            continue
-        saved.add(str(eid))
-        alternative = "✨"
-        try:
-            stickers = await context.bot.get_custom_emoji_stickers([str(eid)])
-            if stickers and getattr(stickers[0], "emoji", None):
-                alternative = stickers[0].emoji
-        except Exception:
-            pass
-        await save_custom_emoji(str(eid), alternative, user.id)
+    pairs = []
+    try:
+        for entity, value in (message.parse_entities() or {}).items():
+            if getattr(entity, "type", "") == "custom_emoji" and getattr(entity, "custom_emoji_id", None):
+                pairs.append((str(entity.custom_emoji_id), str(value)))
+    except Exception as exc:
+        print(f"[CustomEmojiCapture] {type(exc).__name__}: {exc}")
 
-    if saved:
-        try:
-            from protected_bot import ProtectedBot
-            ProtectedBot._emoji_cache = {}
-            ProtectedBot._emoji_cache_at = 0.0
-        except Exception:
-            pass
+    try:
+        for entity, value in (message.parse_caption_entities() or {}).items():
+            if getattr(entity, "type", "") == "custom_emoji" and getattr(entity, "custom_emoji_id", None):
+                pairs.append((str(entity.custom_emoji_id), str(value)))
+    except Exception:
+        pass
+
+    if not pairs:
+        return
+
+    seen = set()
+    for eid, alternative in pairs:
+        if eid in seen:
+            continue
+        seen.add(eid)
+        await save_custom_emoji(eid, alternative, user.id)
+
+    try:
+        from protected_bot import ProtectedBot
+        ProtectedBot._emoji_cache = {}
+        ProtectedBot._emoji_cache_at = 0.0
+    except Exception:
+        pass
 
 
 async def chat(update,context):
