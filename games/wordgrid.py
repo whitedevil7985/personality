@@ -244,18 +244,48 @@ async def _refresh_wordgrid_message(context, chat_id: int, active, game_over: bo
 
     from telegram import InputMediaPhoto
 
-    await context.bot.edit_message_media(
-        chat_id=chat_id,
-        message_id=message_id,
-        media=InputMediaPhoto(
-            media=_render_grid(active["grid"], _found_positions(active)),
-            caption=_wordgrid_caption(active, game_over=game_over),
+    caption = _wordgrid_caption(active, game_over=game_over)
+    photo = _render_grid(active["grid"], _found_positions(active))
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 New Grid", callback_data="wordgrid:new")],
+    ])
+
+    try:
+        # Update the existing top grid message in-place so solved letters
+        # become circled without moving the game board.
+        await context.bot.edit_message_media(
+            chat_id=chat_id,
+            message_id=message_id,
+            media=InputMediaPhoto(
+                media=photo,
+                caption=caption,
+                parse_mode="HTML",
+            ),
+            reply_markup=markup,
+        )
+        return
+    except Exception as exc:
+        # Some Telegram/client combinations can reject replacing uploaded
+        # media in-place. Never let that hide the solved state or points.
+        print(f"[WordgridRefresh] edit_message_media failed: {type(exc).__name__}: {exc}")
+
+    try:
+        replacement = await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=photo,
+            caption=caption,
             parse_mode="HTML",
-        ),
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 New Grid", callback_data="wordgrid:new")],
-        ]),
-    )
+            reply_markup=markup,
+            reply_to_message_id=message_id,
+            allow_sending_without_reply=True,
+        )
+        active["message_id"] = replacement.message_id
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            pass
+    except Exception as exc:
+        print(f"[WordgridRefresh] replacement send failed: {type(exc).__name__}: {exc}")
 
 
 async def send_wordgrid(message, context, user_id=None):
