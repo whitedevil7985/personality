@@ -411,17 +411,24 @@ async def wordgrid_answer(update, context):
         await update.message.reply_text(
             f"🏆 <b>Wordgrid GAME OVER!</b>\n\n"
             f"✅ <b>{guess.upper()}</b> found!\n"
+            f"⭕ All solved words are circled on the grid.\n"
+            f"🔎 <b>Words found:</b> {len(active['found'])}/{len(active['words'])}\n"
             f"⭐ Word points: +{word_points}\n"
             f"🎁 Completion bonus: +{completion_bonus}\n"
-            f"💎 <b>Your total: {total_points} points</b>\n\n"
+            f"💎 <b>Your total game points: {total_points}</b>\n\n"
             f"🪙 Bonus rewards: +100 coins +50 XP",
             parse_mode="HTML",
         )
     else:
         await _refresh_wordgrid_message(context, chat_id, active)
+        found_count = len(active["found"])
+        player_points = int(points.get(user_id, 0))
         await update.message.reply_text(
             f"✅ <b>{guess.upper()}</b> found!\n"
-            f"⭐ +{word_points} points | +40 coins | +20 XP\n"
-            f"🔎 {remaining} word(s) left.",
+            f"⭕ Grid updated — solved letters are now circled.\n"
+            f"🔎 <b>Words found:</b> {found_count}/{len(active['words'])}\n"
+            f"⭐ <b>Your points:</b> {player_points} (+{word_points})\n"
+            f"🪙 +40 coins | +20 XP\n"
+            f"📌 <b>{remaining}</b> word(s) left.",
             parse_mode="HTML",
         )
