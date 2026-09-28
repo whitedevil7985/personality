@@ -2,7 +2,7 @@ import html
 import random
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
-from db import ensure_user, get_user, add_coins, add_xp, users
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
 UNO_COLORS=["R","G","B","Y"]
 UNO_NAMES={"R":"🔴","G":"🟢","B":"🔵","Y":"🟡"}
 uno_games={}
@@ -60,6 +60,7 @@ async def uno_cb(q,parts):
             await q.answer("Match the color or value.",show_alert=True);return
         g["top"]=g["hands"][uid].pop(i);g["turn"]=(g["turn"]+1)%len(g["players"])
         if not g["hands"][uid]:
-            await q.edit_message_text(f"🏆 <b>{html.escape(g['names'][uid])}</b> won UNO!",parse_mode="HTML");uno_games.pop(gid,None);return
+            await record_game_result(uid, "UNO", 500, True, q.message.chat_id if q.message else None)
+            await q.edit_message_text(f"🏆 <b>{html.escape(g['names'][uid])}</b> won UNO!\n\n⭐ +500 points!",parse_mode="HTML");uno_games.pop(gid,None);return
     await q.answer("Move played!")
     await q.edit_message_text(f"🃏 <b>UNO</b>\nTop: {uno_name(g['top'])}\nCards: {len(g['hands'][uid])}\nTurn: {g['names'][g['players'][g['turn']]]}",parse_mode="HTML",reply_markup=uno_markup(gid,uid))
