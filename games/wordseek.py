@@ -73,7 +73,6 @@ async def answer(update, context):
     else:
         guess = (update.message.text or "").strip().upper()
         if not guess or guess.startswith("/"):
-            await update.message.reply_text("✏️ Bas shuffled word solve karke <b>word type</b> karo.", parse_mode="HTML")
             return
     if guess != game["answer"]:
         await update.message.reply_text("❌ Not quite 😅 Try again!")
