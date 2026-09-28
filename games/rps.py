@@ -2,7 +2,7 @@ import html
 import random
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
-from db import ensure_user, get_user, add_coins, add_xp, users
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
 rps_choices=['rock','paper','scissors']
 
 async def rps(update,context):
@@ -13,4 +13,5 @@ async def rps(update,context):
     win=(choice=="rock" and bot=="scissors") or (choice=="paper" and bot=="rock") or (choice=="scissors" and bot=="paper")
     result="🏆 You win!" if win else ("🤝 Draw!" if choice==bot else "😈 Bot wins!")
     if win: await add_coins(update.effective_user.id,100)
+    await record_game_result(update.effective_user.id, "RPS", 100 if win else 0, win, update.effective_chat.id)
     await update.message.reply_text(f"🪨 {choice}  vs  {bot}\n{result}")
