@@ -1389,7 +1389,7 @@ async def callback(update,context):
             return
         if action == "commands":
             reveal_line = (
-                "🔐 <code>/revealgrid</code> — Reveal active Wordgrid answer (Owner only)\n"
+                "🔐 <code>/revealgrid</code> — Reveal active Wordgrid answer (Owner/Sudo)\n"
                 if await is_owner_or_sudo(update) else ""
             )
             await q.edit_message_text(
@@ -1408,14 +1408,14 @@ async def callback(update,context):
             )
             return
         if action == "revealgrid":
-            if q.from_user.id != OWNER_ID:
-                await q.edit_message_text("⛔ <b>Owner only.</b>", parse_mode="HTML")
+            if not await is_owner_or_sudo(update):
+                await q.edit_message_text("⛔ <b>Owner/Sudo only.</b>", parse_mode="HTML")
                 return
             await q.edit_message_text(
                 "🔐 <b>Wordgrid Answer Reveal</b>\n\n"
                 "Use <code>/revealgrid</code> inside the group where an active Wordgrid game is running.\n\n"
                 "The answer will be sent to your private chat and will not be shown to group members.\n"
-                "👑 <i>Owner only.</i>",
+                "🔒 <i>Owner/Sudo only.</i>",
                 parse_mode="HTML",
                 reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
@@ -1866,7 +1866,7 @@ def owner_panel_kb(owner_only=False, staff_access=False):
         [InlineKeyboardButton("📊 Stats", callback_data="owner:stats"),
          InlineKeyboardButton("📊 Panel Commands", callback_data="owner:commands")],
     ]
-    if owner_only:
+    if staff_access:
         rows.append([InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid")])
     if staff_access:
         rows.append([InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek")])
@@ -1879,10 +1879,12 @@ async def owner_panel(update, context):
         await update.message.reply_text("⛔ This panel is only available to the owner and sudo users.")
         return
     owner_only = update.effective_user.id == OWNER_ID
+    staff_access = await is_owner_or_sudo(update)
     extra = (
-        "🔐 /revealgrid — Reveal the active Wordgrid answer (Owner only)\n"
-        "🔎 /revealwordseek — Reveal the active Wordseek answer (Owner only)\n"
-        if owner_only else ""
+        ("🔐 /revealgrid — Reveal the active Wordgrid answer (Owner/Sudo)\n"
+         if staff_access else "") +
+        ("🔎 /revealwordseek — Reveal the active Wordseek answer (Owner/Sudo)\n"
+         if staff_access else "")
     )
     await update.message.reply_html(
         "╭━━━〔 👑 <b>VANYA OWNER PANEL</b> 〕━━━╮\n"
@@ -1899,7 +1901,7 @@ async def owner_panel(update, context):
         "📋 /authlist — View authorized groups\n"
         "📊 /stats — View groups and users (Owner/Sudo)\n"
         + extra.rstrip("\n"),
-        reply_markup=owner_panel_kb(owner_only=owner_only)
+        reply_markup=owner_panel_kb(owner_only=owner_only, staff_access=staff_access)
     )
 
 async def broadcast(update, context):
@@ -2253,8 +2255,11 @@ async def main():
         await app.bot.set_my_commands(owner_command_list, scope=BotCommandScopeChat(chat_id=OWNER_ID))
         for sudo_id in SUDO_IDS:
             await app.bot.set_my_commands(
-                public_command_list + [BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)")],
-                scope=BotCommandScopeChat(chat_id= sudo_id),
+                public_command_list + [
+                    BotCommand("revealgrid", "Reveal Wordgrid answer (Owner/Sudo)"),
+                    BotCommand("revealwordseek", "Reveal Wordseek answer (Owner/Sudo)")
+                ],
+                scope=BotCommandScopeChat(chat_id=sudo_id),
             )
 
     app.add_handler(MessageHandler(filters.ALL, capture_owner_custom_emojis, block=False), group=-2)
