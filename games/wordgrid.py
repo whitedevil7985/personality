@@ -23,7 +23,8 @@ WORD_POOL = [
     ("PARTY", 5), ("QUICK", 5), ("SHINE", 5), ("THUNDER", 7),
     ("SUNSET", 6), ("WINTER", 6), ("SUMMER", 6), ("FOREST", 6),
     ("FLOWER", 6), ("GALAXY", 6), ("CASTLE", 6), ("DRAGON", 6),
-]DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
+]
+DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
 
 
 def _font(size: int, bold: bool = False):
