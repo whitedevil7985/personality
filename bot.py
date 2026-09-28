@@ -1043,30 +1043,7 @@ async def is_admin(update):
         return False
 
 
-async def bot_can_moderate(update):
-    """Check whether Vanya itself has the Telegram permissions needed for moderation."""
-    chat = update.effective_chat
-    if not chat or chat.type == "private":
-        return False
-    try:
-        member = await chat.get_member(context.bot.id) if False else None
-    except Exception:
-        member = None
-
-    try:
-        # PTB exposes the bot ID through the active bot object.
-        bot_member = await update.get_bot().get_chat_member(chat.id, update.get_bot().id)
-        if bot_member.status == "creator":
-            return True
-        if bot_member.status != "administrator":
-            return False
-        perms = getattr(bot_member, "can_restrict_members", False)
-        return bool(perms)
-    except Exception:
-        return False
-
-
-async def _moderation_ready(update, action="moderate"):
+async def _moderation_ready(update, context, action="moderate"):
     if not await is_admin(update):
         await update.message.reply_text("⛔ Group admin/Owner/Sudo only for this command.")
         return False
@@ -1074,24 +1051,30 @@ async def _moderation_ready(update, action="moderate"):
         return False
 
     try:
-        bot_member = await update.get_bot().get_chat_member(
+        bot_member = await context.bot.get_chat_member(
             update.effective_chat.id,
-            update.get_bot().id,
+            context.bot.id,
         )
-        if bot_member.status != "administrator" and bot_member.status != "creator":
+        if bot_member.status not in ("administrator", "creator"):
             await update.message.reply_text(
                 "ℹ️ Vanya ka bot-admin hona zaroori nahi hai for games/chat/economy. "
                 "Lekin /ban /mute /warn jaise moderation commands ke liye mujhe group admin banao."
             )
             return False
-        if action in ("ban", "warn", "mute") and not getattr(bot_member, "can_restrict_members", False):
+
+        if action in ("ban", "warn", "mute") and not getattr(
+            bot_member, "can_restrict_members", False
+        ):
             await update.message.reply_text(
-                "ℹ️ Is moderation command ke liye Vanya ko **Restrict Members** permission chahiye."
+                "ℹ️ Is moderation command ke liye Vanya ko Restrict Members permission chahiye."
             )
             return False
-        if action == "purge" and not getattr(bot_member, "can_delete_messages", False):
+
+        if action == "purge" and not getattr(
+            bot_member, "can_delete_messages", False
+        ):
             await update.message.reply_text(
-                "ℹ️ /purge ke liye Vanya ko **Delete Messages** permission chahiye."
+                "ℹ️ /purge ke liye Vanya ko Delete Messages permission chahiye."
             )
             return False
     except Exception:
@@ -1103,7 +1086,7 @@ async def _moderation_ready(update, action="moderate"):
     return True
 
 async def ban(update,context):
-    if not await _moderation_ready(update,"ban"):return
+    if not await _moderation_ready(update,context,"ban"):return
     t=await target_user(update)
     if not t:await update.message.reply_text("Reply to a user.");return
     await update.effective_chat.ban_member(t.id)
@@ -1116,7 +1099,7 @@ async def unban(update,context):
     await update.effective_chat.unban_member(uid,only_if_banned=True);await update.message.reply_text("✅ Unbanned.")
 
 async def warn(update,context):
-    if not await _moderation_ready(update,"warn"):return
+    if not await _moderation_ready(update,context,"warn"):return
     t=await target_user(update)
     if not t:return
     await ensure_user(t);u=await get_user(t.id);w=u.get("warnings",0)+1
@@ -1126,7 +1109,7 @@ async def warn(update,context):
         await update.effective_chat.ban_member(t.id);await update.message.reply_text("🔨 3 warnings reached — banned.")
 
 async def mute(update,context):
-    if not await _moderation_ready(update,"mute"):return
+    if not await _moderation_ready(update,context,"mute"):return
     t=await target_user(update)
     if not t:return
     await update.effective_chat.restrict_member(t.id,ChatPermissions(can_send_messages=False))
@@ -1140,7 +1123,7 @@ async def unmute(update,context):
     await update.message.reply_text(f"🔊 Unmuted {t.first_name}")
 
 async def purge(update,context):
-    if not await _moderation_ready(update,"purge"):return
+    if not await _moderation_ready(update,context,"purge"):return
     if update.message.reply_to_message:
         try:
             await update.message.reply_to_message.delete();await update.message.delete()
