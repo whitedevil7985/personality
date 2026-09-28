@@ -113,8 +113,6 @@ class ProtectedBot(Bot):
             return markup
 
         mapping = await cls._get_emoji_map()
-        if not mapping:
-            return markup
 
         # InlineKeyboardButton now supports icon_custom_emoji_id. For each
         # button, move the first learned premium emoji into the button icon
