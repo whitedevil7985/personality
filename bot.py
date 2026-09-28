@@ -1991,7 +1991,7 @@ async def main():
         "rank":rank,"rob":rob,"protect":protect,"shield":lambda u,c: u.message.reply_text("🛡️ Use /protect to activate a shield."),
         "kill":kill,"revive":revive,"topkill":topkill,
         "propose":propose,"accept":accept,"reject":reject,"divorce":divorce,"marriage":marriage,"couple":couple,"topcouples":topcouples,
-        "rps":rps,"dice":dice,"coinflip":coinflip,"slots":slots,"card":card,"jumble":jumble,
+        "rps":rps,"dice":dice,"coinflip":coinflip,"slots":slots,"jumble":jumble,
         "tap":tap,"bet":bet,"card":card,"cardjoin":cardjoin,"cardstart":cardstart,"cardcancel":cardcancel,"uno":uno,"unojoin":unojoin,"ludo":ludo,"ludojoin":ludojoin,
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
