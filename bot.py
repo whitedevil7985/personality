@@ -576,7 +576,8 @@ async def toprich(update, context):
 
     lines.extend(["", "💎 Ranking is based on total current coins."])
     await update.message.reply_html("\n".join(lines))
-\nasync def balance(update, context):
+
+async def balance(update, context):
     await ensure_user(update.effective_user)
     u=await get_user(update.effective_user.id)
     await update.message.reply_html(f"💰 <b>{u.get('coins',0):,}</b> coins\n⭐ XP: <b>{u.get('xp',0):,}</b>\n🏆 Level: <b>{u.get('level',1)}</b>")
