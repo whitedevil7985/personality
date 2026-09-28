@@ -1712,7 +1712,8 @@ async def mention_chat(update,context):
         pass
     group_title = getattr(update.effective_chat, "title", "") or ""
     answer = await ai_reply(update.effective_user, text, "group", group_title)
-    await update.message.reply_text(answer)
+    # Use the same premium/custom-emoji renderer for group AI replies.
+    await send_vanya_reply(update, answer)
 
 
 async def persona(update, context):
