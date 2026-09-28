@@ -1421,6 +1421,7 @@ async def callback(update,context):
                 return
             lines = [
                 "👑 <b>Owner/Sudo Commands</b>",
+                "🎛 <code>/owner</code> / <code>/panel</code> — Open this panel",
                 "",
                 "📢 <code>/broadcast</code> — Broadcast text/media",
                 "💰 <code>/addcoins USER_ID AMOUNT</code> — Add coins",
@@ -1986,7 +1987,6 @@ def owner_panel_kb(owner_only=False, staff_access=False):
     if staff_access:
         rows.append([InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek")])
         rows.append([InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")])
-        rows.append([InlineKeyboardButton("📢 Broadcast", callback_data="owner:broadcast")])
     if owner_only:
         rows.append([InlineKeyboardButton("➕ Add Sudo", callback_data="owner:addsudo"),
                      InlineKeyboardButton("➖ Del Sudo", callback_data="owner:delsudo")])
@@ -2302,11 +2302,15 @@ async def delsudo(update, context):
         await update.message.reply_text("Reply to a user: /delsudo")
         return
     await users.update_one({"_id": target.id}, {"$set": {"is_sudo": False}})
+    try:
+        await context.bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=target.id))
+    except Exception:
+        pass
     await update.message.reply_text(f"Removed {target.first_name} from sudo.")
 
 async def sudolist(update, context):
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("Owner only.")
+    if not await is_owner_or_sudo(update):
+        await update.message.reply_text("⛔ Owner/Sudo only.")
         return
     rows = []
     async for u in users.find({"is_sudo": True}):
@@ -2314,23 +2318,23 @@ async def sudolist(update, context):
     await update.message.reply_html("👑 <b>Sudo users</b>\n\n" + ("\n".join(rows) or "None"))
 
 async def auth(update, context):
-    if not await is_admin(update):
-        await update.message.reply_text("Group admins only.")
+    if not (await is_owner_or_sudo(update) or await is_admin(update)):
+        await update.message.reply_text("⛔ Owner/Sudo or group admins only.")
         return
     chat = update.effective_chat
     await groups.update_one({"_id": chat.id}, {"$set": {"authorized": True, "title": chat.title}}, upsert=True)
     await update.message.reply_text("✅ This group is authorized for Vanya features.")
 
 async def unauth(update, context):
-    if not await is_admin(update):
-        await update.message.reply_text("Group admins only.")
+    if not (await is_owner_or_sudo(update) or await is_admin(update)):
+        await update.message.reply_text("⛔ Owner/Sudo or group admins only.")
         return
     await groups.update_one({"_id": update.effective_chat.id}, {"$set": {"authorized": False}})
     await update.message.reply_text("🔒 Vanya features are now unauthorized here.")
 
 async def authlist(update, context):
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("Owner only.")
+    if not await is_owner_or_sudo(update):
+        await update.message.reply_text("⛔ Owner/Sudo only.")
         return
     rows = []
     async for g in groups.find({"authorized": True}):
