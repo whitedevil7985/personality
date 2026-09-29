@@ -44,7 +44,7 @@ def new_room(game='ludo'):
     return {
         'code': None, 'game': game, 'players': [], 'started': False, 'turn': 0,
         'positions': {}, 'winner': None, 'last_roll': 0, 'created': time.time(),
-        'updated': time.time(), 'chat': [], 'pending_roll': 0, 'movable': [], 'spectators': []
+        'updated': time.time(), 'chat': [], 'pending_roll': 0, 'movable': [], 'spectators': [], 'ended': False
     }
 
 
@@ -228,7 +228,7 @@ def ludo_reset_roll(room):
 async def maybe_ludo_bot_turn(room):
     # One task per room keeps rapid state updates from spawning duplicate bot turns.
     await asyncio.sleep(0.65)
-    if not room['started'] or room['winner'] or room.get('pending_roll'):
+    if room.get('ended') or not room['started'] or room['winner'] or room.get('pending_roll'):
         return
     p = current_player(room)
     if not p or not p.get('bot'):
@@ -478,7 +478,7 @@ CHESS_PIECES = {
 
 def new_chess_room():
     return {'code':None,'board':chesslib.Board() if chesslib else None,'players':[],
-            'started':False,'winner':None,'chat':[],'created':time.time(),'updated':time.time()}
+            'started':False,'winner':None,'chat':[],'created':time.time(),'updated':time.time(),'ended':False}
 
 def chess_player_public(p):
     return {'id':p['id'],'name':p['name'],'color':p['color'],'bot':p.get('bot',False),'connected':p.get('connected',False)}
@@ -518,7 +518,7 @@ async def chess_page(request): return web.FileResponse(WEB/'chess.html')
 
 async def maybe_chess_bot_turn(room):
     await asyncio.sleep(.65)
-    if not room['started'] or room['winner'] or chesslib is None: return
+    if room.get('ended') or not room['started'] or room['winner'] or chesslib is None: return
     p=chess_current_player(room)
     if not p or not p.get('bot'): return
     moves=list(room['board'].legal_moves)
@@ -596,6 +596,7 @@ def new_scribble_room():
         'chat': [],
         'created': time.time(),
         'updated': time.time(),
+        'ended': False,
     }
 
 
@@ -812,7 +813,7 @@ def make_uno_deck():
 
 def new_uno_room():
     return {'code':None,'game':'uno','players':[],'started':False,'turn':0,'direction':1,'top':None,'deck':[],
-            'discard':[],'winner':None,'pending_color':None,'chat':[],'created':time.time(),'updated':time.time()}
+            'discard':[],'winner':None,'pending_color':None,'chat':[],'created':time.time(),'updated':time.time(),'ended':False}
 
 
 def uno_player_public(p):
@@ -872,7 +873,7 @@ def uno_apply_card(room,p,card):
 
 async def maybe_uno_bot_turn(room):
     await asyncio.sleep(.9)
-    if not room['started'] or room['winner']: return
+    if room.get('ended') or not room['started'] or room['winner']: return
     p=uno_current(room)
     if not p or not p.get('bot'): return
     playable=[c for c in p['hand'] if uno_playable(c,room['top'],room['pending_color'])]
@@ -1087,51 +1088,71 @@ async def health(request): return web.json_response({'ok':True,'app':'ItzVanyaBo
 
 
 async def end_web_rooms_for_group(group_id):
-    """End all browser-game rooms that were launched from a Telegram group."""
+    """End every active browser game room launched from this Telegram group.
+
+    /end lives only in the Telegram group. The web apps do not need their own
+    /end command; they receive a server-side game_ended event and close.
+    """
     ended = 0
     try:
         gid = int(group_id)
     except (TypeError, ValueError):
         return 0
 
+    payload = json.dumps({
+        'type': 'game_ended',
+        'message': 'This game was ended from the Telegram group by /end.',
+    }, separators=(',', ':'))
+
+    async def stop_room(room):
+        # Mark ended first so delayed bot turns cannot keep the match alive.
+        room['ended'] = True
+        room['started'] = False
+        room['winner'] = None
+
+        sockets = []
+        for player in room.get('players', []):
+            ws = player.get('ws')
+            if ws and not ws.closed:
+                sockets.append(ws)
+
+        # Ludo can have spectators connected outside the player seats.
+        for ws in room.get('spectators', []):
+            if ws and not ws.closed:
+                sockets.append(ws)
+
+        seen = set()
+        for ws in sockets:
+            marker = id(ws)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            try:
+                await ws.send_str(payload)
+            except Exception:
+                pass
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+        room['spectators'] = []
+
     for key, room in list(ROOMS.items()):
         if room.get('group_id') != gid:
             continue
-        payload = json.dumps({
-            'type': 'game_ended',
-            'message': 'This game was ended from the Telegram group by /end.',
-        }, separators=(',', ':'))
-        for p in room.get('players', []):
-            ws = p.get('ws')
-            if ws and not ws.closed:
-                try:
-                    await ws.send_str(payload)
-                    await ws.close()
-                except Exception:
-                    pass
+        await stop_room(room)
         ROOMS.pop(key, None)
         ended += 1
 
     for code, room in list(CHESS_ROOMS.items()):
         if room.get('group_id') != gid:
             continue
-        payload = json.dumps({
-            'type': 'game_ended',
-            'message': 'This game was ended from the Telegram group by /end.',
-        }, separators=(',', ':'))
-        for p in room.get('players', []):
-            ws = p.get('ws')
-            if ws and not ws.closed:
-                try:
-                    await ws.send_str(payload)
-                    await ws.close()
-                except Exception:
-                    pass
+        await stop_room(room)
         CHESS_ROOMS.pop(code, None)
         ended += 1
 
     return ended
-
 
 async def cleanup_rooms(app):
     while True:
