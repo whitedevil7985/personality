@@ -24,17 +24,17 @@ from config import (
 from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
 
 # ───────────────────── modular games ─────────────────────
-from games.rps import rps, rps_cb
+from games.rps import rps, rps_cb, RPS_GAMES
 from games.dice import dice
 from games.coinflip import coinflip
 from games.slots import slots
-from games.card import card, cardjoin, cardstart, cardcancel, card_cb, cardjoin, cardstart, cardcancel, card_cb
+from games.card import card, cardjoin, cardstart, cardcancel, card_cb, CARD_ROOMS
 from games.jumble import jumble
 from games.tap import tap, tap_cb
 from games.bet import bet
-from games.uno import uno as uno_legacy, unojoin, uno_cb
-from games.ludo import ludo as ludo_legacy, ludojoin, ludo_cb
-from games.chess import chess_cmd, chessjoin, chess_cb
+from games.uno import uno as uno_legacy, unojoin, uno_cb, uno_games
+from games.ludo import ludo as ludo_legacy, ludojoin, ludo_cb, ludo_games
+from games.chess import chess_cmd, chessjoin, chess_cb, chess_games
 from games.mines import mines, mines_cb
 from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek, WORDSEEK_GAMES
 from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_wordgrid
@@ -45,7 +45,7 @@ from games.wordscramble import wordscramble
 from games.hack import hack
 from games.scribble import scribble
 from features import spin, achievements, quest, progress_quest
-from webserver import start_web_server
+from webserver import start_web_server, end_web_rooms_for_group
 
 if not TOKEN:
     raise RuntimeError(
@@ -75,6 +75,8 @@ def get_uno_webapp_url():
 async def uno(update, context):
     """Open the Vanya UNO Telegram Mini App."""
     webapp_url = get_uno_webapp_url()
+    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+        webapp_url += ("&" if "?" in webapp_url else "?") + "gc=" + str(update.effective_chat.id)
     if not webapp_url or not webapp_url.startswith("https://"):
         await update.message.reply_text(
             "🃏 UNO Web App is not configured yet. Set UNO_WEBAPP_URL to your public HTTPS /uno URL in Railway Variables."
@@ -112,6 +114,8 @@ def get_chess_webapp_url():
 async def chess(update, context):
     """Open the Vanya Chess Telegram Mini App."""
     webapp_url=get_chess_webapp_url()
+    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+        webapp_url += ("&" if "?" in webapp_url else "?") + "gc=" + str(update.effective_chat.id)
     if not webapp_url or not webapp_url.startswith("https://"):
         await update.message.reply_text("♟️ Chess Web App is not configured yet. Set CHESS_WEBAPP_URL to your public HTTPS /chess URL in Railway Variables.")
         return
@@ -193,6 +197,8 @@ async def pet(update, context): await world_cmd(update, context, 'pet')
 async def ludo(update, context):
     """Open the Vanya Ludo Telegram Mini App."""
     webapp_url = get_ludo_webapp_url()
+    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+        webapp_url += ("&" if "?" in webapp_url else "?") + "gc=" + str(update.effective_chat.id)
     if not webapp_url or not webapp_url.startswith("https://"):
         await update.message.reply_text(
             "🎲 Ludo Web App is not configured yet. Set LUDO_WEBAPP_URL to your public HTTPS /ludo URL in Railway Variables."
@@ -2993,6 +2999,90 @@ async def answer(update, context):
     await wordseek_answer(update, context)
 
 
+async def end_game(update, context):
+    """End all active games associated with the current Telegram group."""
+    chat = update.effective_chat
+    if not chat or chat.type not in ("group", "supergroup"):
+        await update.message.reply_text("🎮 /end sirf group games ko end karta hai. Is command ko group mein use karo.")
+        return
+
+    chat_id = chat.id
+    ended = []
+
+    # Native bot-side games.
+    for gid, game in list(RPS_GAMES.items()):
+        if game.get("chat_id") == chat_id:
+            RPS_GAMES.pop(gid, None)
+            ended.append("RPS")
+
+    for room_id, room in list(CARD_ROOMS.items()):
+        if room.get("group_id") == chat_id:
+            CARD_ROOMS.pop(room_id, None)
+            ended.append("Card")
+
+    if chat_id in WORDSEEK_GAMES:
+        WORDSEEK_GAMES.pop(chat_id, None)
+        ended.append("Wordseek")
+
+    wordgrid_active = context.application.bot_data.get("wordgrid_active", {}) if context.application else {}
+    if chat_id in wordgrid_active:
+        wordgrid_active.pop(chat_id, None)
+        ended.append("Wordgrid")
+
+    if chat_id in WORDCHAIN_GAMES:
+        WORDCHAIN_GAMES.pop(chat_id, None)
+        ended.append("Wordchain")
+
+    # Legacy in-bot game dictionaries are still cleaned up for older rooms.
+    for store, label in (
+        (uno_games, "UNO"),
+        (ludo_games, "Ludo"),
+        (chess_games, "Chess"),
+    ):
+        for gid in list(store.keys()):
+            if str(gid).startswith(str(chat_id) + "-"):
+                store.pop(gid, None)
+                ended.append(label)
+
+    # Mines is stored per user; clear active rounds for users known in this group.
+    try:
+        mine_result = await users.update_many(
+            {"group_ids": chat_id, "mines_active": True},
+            {"$set": {"mines_active": False, "mines_set": [], "mines_safe": [], "mines_bet": 0}},
+        )
+        if mine_result.modified_count:
+            ended.append(f"Mines ({mine_result.modified_count} player)")
+    except Exception:
+        pass
+
+    # Browser Mini App rooms launched from this group are tagged with gc=chat_id.
+    try:
+        web_count = await end_web_rooms_for_group(chat_id)
+        if web_count:
+            ended.append(f"Web App ({web_count} room{'s' if web_count != 1 else ''})")
+    except Exception as exc:
+        print(f"[EndGame] web-room cleanup failed: {type(exc).__name__}: {exc}")
+
+    if not ended:
+        await update.message.reply_text(
+            "ℹ️ Is group mein abhi koi active game nahi mila."
+        )
+        return
+
+    counts = {}
+    for item in ended:
+        key = item.split(" (", 1)[0]
+        counts[key] = counts.get(key, 0) + 1
+    lines = [f"{name}: {count}" if count > 1 else name for name, count in counts.items()]
+
+    await update.message.reply_html(
+        "🛑 <b>GAME SESSION ENDED</b>\n\n"
+        "✅ Current group ke active game sessions close kar diye gaye.\n"
+        "• " + "\n• ".join(html.escape(x) for x in lines) + "\n\n"
+        "🎮 Ab koi bhi player naya game start kar sakta hai."
+    )
+
+
 async def chatstatus(update, context):
     """Diagnose Telegram group-message access without requiring bot admin rights."""
     if not update.effective_chat or update.effective_chat.type not in ("group", "supergroup"):
@@ -3059,7 +3149,7 @@ async def main():
         "wordchain":wordchain,"wordchainjoin":wordchain_join,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
         "scribble":scribble,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
-        "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,
+        "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
     }
     for name,fn in commands.items():
         app.add_handler(CommandHandler(name,fn))
@@ -3098,7 +3188,7 @@ async def main():
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
-        "unmute": "Unmute a user", "purge": "Delete recent messages", "chatstatus": "Check group chat access",
+        "unmute": "Unmute a user", "purge": "Delete recent messages", "chatstatus": "Check group chat access", "end": "End all active games in this group",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
