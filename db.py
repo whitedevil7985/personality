@@ -1,4 +1,5 @@
 import os
+import random
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -122,6 +123,41 @@ async def get_game_leaderboard(game="ALL", scope="global", chat_id=None, since=N
             "games": int(row.get("games", 0)),
         })
     return rows
+
+
+async def next_wordseek_word(pool):
+    """Pick a Wordseek word without repeating until the whole pool is used.
+    Used words are persisted in MongoDB so Railway restarts do not reset the pool.
+    """
+    normalized = []
+    seen = set()
+    for word in pool:
+        value = str(word).strip().upper()
+        if value and value not in seen:
+            seen.add(value)
+            normalized.append(value)
+    if not normalized:
+        return None
+
+    state_id = "wordseek_pool"
+    state = await games.find_one({"_id": state_id}) or {}
+    used = [str(x).strip().upper() for x in state.get("used_words", []) if str(x).strip()]
+    used_set = set(used)
+    available = [word for word in normalized if word not in used_set]
+
+    if not available:
+        used = []
+        used_set = set()
+        available = normalized[:]
+
+    word = random.choice(available)
+    used.append(word)
+    await games.update_one(
+        {"_id": state_id},
+        {"$set": {"used_words": used, "total_words": len(normalized), "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return word
 
 
 async def save_custom_emoji(emoji_id, alternative, added_by=None):
