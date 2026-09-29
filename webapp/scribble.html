@@ -1,28 +1,162 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Vanya Scribble</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d1a">
+<title>Vanya Scribble</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#101325;color:#fff;font:14px system-ui}.app{max-width:1080px;margin:auto;padding:12px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.title{font-size:22px;font-weight:800}.sub{font-size:12px;color:#aab0cf}.bar,.card{background:#191c33;border:1px solid #30365b;border-radius:16px}.bar{padding:9px;display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.bar>*{background:#252944;color:#fff;border:1px solid #3a4065;border-radius:9px;padding:8px}.primary{background:#8277ff!important}.layout{display:grid;grid-template-columns:1fr 300px;gap:10px}.card{padding:10px}.board{background:#fff;border-radius:12px;overflow:hidden;aspect-ratio:4/3}.board canvas{display:block;width:100%;height:100%;touch-action:none}.status{padding:8px 2px 0;color:#aab0cf}.players{display:flex;flex-direction:column;gap:6px;margin-top:8px}.p{background:#252944;padding:7px;border-radius:8px}.chat{height:310px;display:flex;flex-direction:column;margin-top:8px}.msgs{flex:1;overflow:auto;display:flex;flex-direction:column;gap:5px}.m{background:#252944;padding:6px;border-radius:8px}.chatrow{display:flex;gap:6px;margin-top:7px}.chatrow input{flex:1;min-width:0}input,select,button{font:inherit}@media(max-width:760px){.layout{grid-template-columns:1fr}.chat{height:220px}}
-</style></head>
-<body><div class="app">
-<div class="top"><div><div class="title">🖌️ Vanya Scribble</div><div class="sub">Draw together in real time</div></div><div id="room">No room</div></div>
-<div class="bar"><button id="new" class="primary">➕ New Room</button><input id="code" maxlength="6" placeholder="Room code"><button id="join">Join</button><select id="color"><option value="#111">Black</option><option value="#e34d5a">Red</option><option value="#3779e8">Blue</option><option value="#3bbf70">Green</option><option value="#8b63ee">Purple</option><option value="#f2b84b">Yellow</option><option value="#fff">Eraser</option></select><input id="size" type="range" min="2" max="28" value="6"><button id="clear">🧽 Clear</button></div>
-<div class="layout"><div class="card"><div class="board"><canvas id="c"></canvas></div><div class="status" id="st">Create or join a room to start drawing.</div></div>
-<div class="card"><b>👥 Players</b><div class="players" id="ps"></div><hr style="border:0;border-top:1px solid #30365b;margin:12px 0"><b>💬 Room Chat</b><div class="chat"><div class="msgs" id="ms"></div><div class="chatrow"><input id="ct" placeholder="Type…"><button id="send">Send</button></div></div></div></div></div>
+:root{--bg:#090b16;--panel:#111528;--panel2:#171c33;--line:#2a3156;--muted:#98a0c1;--text:#f7f8ff;--accent:#8b7cff;--accent2:#b0a8ff;--good:#45d483}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(1200px 600px at 50% -10%,#202652 0,#0c0f1d 58%,#080a13 100%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+button,input,select{font:inherit}.app{width:min(1360px,100%);margin:0 auto;padding:18px}
+.header{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:14px}.brand{display:flex;align-items:center;gap:11px}.logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#8d82ff,#5d56b8);font-size:24px;box-shadow:0 10px 30px rgba(85,74,190,.28)}.title{font-size:27px;font-weight:850;letter-spacing:-.4px}.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.roompill{display:flex;align-items:center;gap:10px;padding:9px 12px;background:rgba(17,21,40,.82);border:1px solid var(--line);border-radius:14px}.dot{width:9px;height:9px;border-radius:50%;background:#68708f}.dot.live{background:var(--good);box-shadow:0 0 12px rgba(69,212,131,.8)}.roomname{font-weight:800}.roomhint{font-size:11px;color:var(--muted)}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px;background:rgba(17,21,40,.9);border:1px solid var(--line);border-radius:17px;margin-bottom:11px;box-shadow:0 16px 40px rgba(0,0,0,.18)}
+button,.field{border:1px solid #343d69;background:var(--panel2);color:var(--text);border-radius:11px;min-height:40px;padding:9px 12px}button{cursor:pointer;transition:.16s transform,.16s border-color,.16s background}button:hover{border-color:#58629a}button:active{transform:translateY(1px)}button.primary{background:linear-gradient(135deg,#8e82ff,#6f65dd);border-color:#8f84ff;box-shadow:0 7px 18px rgba(112,99,227,.24)}button.ghost{background:#13182b}.field{outline:none}.code{width:132px;text-transform:uppercase;letter-spacing:2px;font-weight:800}.smallbtn{min-width:40px;padding-inline:10px}.toolbar .spacer{flex:1}.group{display:flex;gap:6px;align-items:center;padding:4px 6px;background:#0f1425;border:1px solid #283051;border-radius:12px}.group span{font-size:11px;color:var(--muted);padding-left:4px}.swatch{width:34px;height:34px;padding:0;border-radius:9px;position:relative}.swatch.active{outline:2px solid var(--accent2);outline-offset:1px}.eraser{font-size:16px}.range{width:125px;height:34px}.sharebtn{display:none}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:11px}.card{background:rgba(17,21,40,.94);border:1px solid var(--line);border-radius:18px;box-shadow:0 16px 50px rgba(0,0,0,.22)}.boardcard{padding:11px}.board{position:relative;width:100%;aspect-ratio:16/10;background:#fff;border-radius:15px;overflow:hidden;border:1px solid #d7d9e1;box-shadow:inset 0 0 0 1px rgba(0,0,0,.05)}canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}.board.locked canvas{cursor:not-allowed}.boardbadge{position:absolute;top:10px;left:10px;padding:6px 9px;border-radius:999px;background:rgba(14,17,30,.72);backdrop-filter:blur(8px);color:#fff;font-size:11px;border:1px solid rgba(255,255,255,.12);pointer-events:none}.statusbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 2px 0;color:var(--muted);font-size:12px}.statusstrong{color:var(--text);font-weight:750}.hint{font-size:11px;color:var(--muted)}
+.side{padding:12px;display:flex;flex-direction:column;min-height:0}.section{padding-bottom:12px}.section+.section{border-top:1px solid #2a3150;padding-top:12px}.sectionhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;font-weight:850}.players{display:flex;flex-direction:column;gap:7px;max-height:185px;overflow:auto}.player{display:flex;align-items:center;justify-content:space-between;background:#14192d;border:1px solid #252e50;padding:8px 9px;border-radius:10px}.pname{display:flex;align-items:center;gap:8px;font-weight:700}.avatar{width:27px;height:27px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,#6e63d3,#2c356d);font-size:12px}.you{font-size:10px;color:var(--accent2);font-weight:800}.online{width:7px;height:7px;border-radius:50%;background:var(--good)}.empty{font-size:12px;color:var(--muted);padding:8px 2px}
+.chat{display:flex;flex-direction:column;min-height:320px}.msgs{flex:1;overflow:auto;display:flex;flex-direction:column;gap:7px;padding-right:2px}.msg{background:#14192d;border:1px solid #252e50;padding:7px 9px;border-radius:10px;font-size:12px;line-height:1.35}.msg b{color:#cfcaff}.chatrow{display:flex;gap:6px;margin-top:8px}.chatrow input{flex:1;min-width:0}.send{padding-inline:13px}
+.help{font-size:11px;line-height:1.45;color:var(--muted)}.toast{position:fixed;left:50%;bottom:18px;transform:translate(-50%,120px);opacity:0;transition:.2s;background:#1d2440;border:1px solid #3a4675;color:#fff;padding:10px 14px;border-radius:12px;z-index:50;box-shadow:0 16px 35px rgba(0,0,0,.32)}.toast.show{transform:translate(-50%,0);opacity:1}
+@media(max-width:960px){.app{padding:12px}.layout{grid-template-columns:1fr}.side{min-height:0}.sharebtn{display:inline-flex}.title{font-size:23px}}@media(max-width:640px){.header{align-items:flex-start}.roompill{padding:8px 10px}.roomhint{display:none}.toolbar{gap:6px}.code{width:105px}.group span{display:none}.range{width:90px}.layout{gap:8px}.boardcard{padding:8px}.side{padding:10px}.chat{min-height:230px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="brand"><div class="logo">🖌️</div><div><div class="title">Vanya Scribble</div><div class="sub">Draw together • real-time canvas • room chat</div></div></div>
+    <div class="roompill"><span id="liveDot" class="dot"></span><div><div id="roomName" class="roomname">No room</div><div id="roomHint" class="roomhint">Create or join to play</div></div></div>
+  </header>
+
+  <div class="toolbar">
+    <button id="newBtn" class="primary">➕ New Room</button>
+    <input id="code" class="field code" maxlength="6" placeholder="ROOM CODE" autocomplete="off">
+    <button id="joinBtn">Join</button>
+    <button id="shareBtn" class="smallbtn sharebtn">🔗</button>
+    <div class="group"><span>COLOR</span>
+      <button class="swatch active" data-color="#111111" style="background:#111111" aria-label="Black"></button>
+      <button class="swatch" data-color="#e24e5d" style="background:#e24e5d" aria-label="Red"></button>
+      <button class="swatch" data-color="#3a7bea" style="background:#3a7bea" aria-label="Blue"></button>
+      <button class="swatch" data-color="#41be73" style="background:#41be73" aria-label="Green"></button>
+      <button class="swatch" data-color="#8a63ef" style="background:#8a63ef" aria-label="Purple"></button>
+      <button class="swatch" data-color="#f2bc46" style="background:#f2bc46" aria-label="Yellow"></button>
+      <button class="swatch" data-color="#ff7a32" style="background:#ff7a32" aria-label="Orange"></button>
+      <button class="swatch eraser" data-color="#ffffff" aria-label="Eraser">⌫</button>
+    </div>
+    <div class="group"><span>SIZE</span><input id="size" class="range" type="range" min="2" max="30" value="7"><b id="sizeValue">7</b></div>
+    <div class="spacer"></div>
+    <button id="undoBtn" class="ghost">↶ Undo</button>
+    <button id="clearBtn" class="ghost">🧽 Clear</button>
+  </div>
+
+  <main class="layout">
+    <section class="card boardcard">
+      <div id="board" class="board"><div class="boardbadge" id="drawBadge">Canvas locked — create/join a room</div><canvas id="canvas"></canvas></div>
+      <div class="statusbar"><div id="status">Create or join a room to start drawing.</div><div class="hint">Tip: use your finger/stylus on mobile</div></div>
+    </section>
+
+    <aside class="card side">
+      <div class="section">
+        <div class="sectionhead"><span>👥 Players</span><span id="playerCount" class="hint">0 online</span></div>
+        <div id="players" class="players"><div class="empty">No players yet.</div></div>
+      </div>
+      <div class="section" style="flex:1">
+        <div class="sectionhead"><span>💬 Room Chat</span><span class="hint">Live</span></div>
+        <div class="chat"><div id="messages" class="msgs"></div>
+          <div class="chatrow"><input id="chatInput" class="field" maxlength="180" placeholder="Type a message…"><button id="sendChat" class="send">Send</button></div>
+        </div>
+      </div>
+      <div class="section"><div class="help">Create a room, share the code, then draw. Everyone in the same room sees the same canvas instantly.</div></div>
+    </aside>
+  </main>
+</div>
+<div id="toast" class="toast"></div>
+
 <script>
-const tg=window.Telegram&&Telegram.WebApp?Telegram.WebApp:null;if(tg){try{tg.ready();tg.expand()}catch(e){}}
-const c=document.getElementById('c'),x=c.getContext('2d'),box=c.parentElement,st=document.getElementById('st');let ws=null,code=new URLSearchParams(location.search).get('room')||'',down=false,last=null;
-const u=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user)||{id:'guest-'+Math.random().toString(36).slice(2),first_name:'Guest'},uid=String(u.id),name=u.first_name||'Player';
-function fit(){const r=box.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);c.width=r.width*d;c.height=r.height*d;x.setTransform(d,0,0,d,0,0);x.fillStyle='#fff';x.fillRect(0,0,r.width,r.height)}new ResizeObserver(fit).observe(box);fit();
+const tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;
+if(tg){try{tg.ready();tg.expand();}catch(e){}}
+const $=id=>document.getElementById(id);
+const canvas=$('canvas'),ctx=canvas.getContext('2d'),board=$('board'),statusEl=$('status');
+let ws=null,roomCode=new URLSearchParams(location.search).get('room')||'',drawing=false,lastPoint=null,currentColor='#111111';
+let me=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user)||{id:'guest-'+Math.random().toString(36).slice(2),first_name:'Guest'};
+const uid=String(me.id),myName=me.first_name||'Player';
+
+function toast(t){const el=$('toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),2200)}
 function esc(v){return String(v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function pos(e){const r=c.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}}
-function stroke(s){if(!s)return;const r=c.getBoundingClientRect();x.strokeStyle=s.color;x.lineWidth=s.size;x.lineCap='round';x.lineJoin='round';x.beginPath();x.moveTo(s.a.x*r.width,s.a.y*r.height);x.lineTo(s.b.x*r.width,s.b.y*r.height);x.stroke()}
-function connect(){if(ws)try{ws.close()}catch(e){}if(!code)return;document.getElementById('room').textContent='Room '+code;const p=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(p+'://'+location.host+'/ws/scribble/'+encodeURIComponent(code)+'?cid='+encodeURIComponent(uid)+'&name='+encodeURIComponent(name)+(tg?'&initData='+encodeURIComponent(tg.initData):''));ws.onopen=()=>{st.textContent='🟢 Connected';ws.send(JSON.stringify({type:'join',name}))};ws.onclose=()=>st.textContent='🔴 Disconnected';ws.onmessage=e=>{let d;try{d=JSON.parse(e.data)}catch(_){return}if(d.type==='state'){document.getElementById('ps').innerHTML=(d.players||[]).map(p=>'<div class="p">🟢 '+esc(p.name)+(String(p.id)===uid?' <small>(You)</small>':'')+'</div>').join('');fit();(d.strokes||[]).forEach(stroke)}else if(d.type==='stroke')stroke(d.stroke);else if(d.type==='clear')fit();else if(d.type==='chat'){const q=document.createElement('div');q.className='m';q.innerHTML='<b>'+esc(d.name)+'</b> '+esc(d.text);document.getElementById('ms').appendChild(q);document.getElementById('ms').scrollTop=1e9}else if(d.type==='error')st.textContent='⚠️ '+d.message}}
-document.getElementById('new').onclick=async()=>{try{const r=await fetch('/api/scribble/rooms',{method:'POST'}),d=await r.json();if(!d.ok)throw Error(d.error||'Create failed');code=d.room;document.getElementById('code').value=code;connect()}catch(e){st.textContent='⚠️ '+e.message}};
-document.getElementById('join').onclick=()=>{code=document.getElementById('code').value.trim().toUpperCase();if(code)connect()};
-document.getElementById('clear').onclick=()=>ws&&ws.readyState===1&&ws.send(JSON.stringify({type:'clear'}));
-c.onpointerdown=e=>{if(!ws||ws.readyState!==1)return;down=true;last=pos(e);c.setPointerCapture(e.pointerId)};
-c.onpointermove=e=>{if(!down||!last)return;const b=pos(e),s={a:last,b,color:document.getElementById('color').value,size:+document.getElementById('size').value};stroke(s);ws.send(JSON.stringify({type:'stroke',stroke:s}));last=b};
-['pointerup','pointercancel','pointerleave'].forEach(ev=>c.addEventListener(ev,()=>{down=false;last=null}));
-function send(){const z=document.getElementById('ct'),t=z.value.trim();if(t&&ws&&ws.readyState===1){ws.send(JSON.stringify({type:'chat',text:t}));z.value=''}}document.getElementById('send').onclick=send;document.getElementById('ct').onkeydown=e=>e.key==='Enter'&&send();
-if(code){document.getElementById('code').value=code;connect()}
-</script></body></html>
+function fitCanvas(){const r=board.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));ctx.setTransform(d,0,0,d,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,r.width,r.height);if(window.lastStrokes)window.lastStrokes.forEach(drawStroke)}
+new ResizeObserver(()=>fitCanvas()).observe(board);fitCanvas();
+
+function drawStroke(s){if(!s||!s.a||!s.b)return;const r=canvas.getBoundingClientRect();ctx.strokeStyle=s.color||'#111';ctx.lineWidth=+s.size||6;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(s.a.x*r.width,s.a.y*r.height);ctx.lineTo(s.b.x*r.width,s.b.y*r.height);ctx.stroke()}
+function renderCanvas(strokes){window.lastStrokes=strokes||[];fitCanvas()}
+function getPos(e){const r=canvas.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}}
+
+function renderPlayers(list){
+  const ps=$('players');$('playerCount').textContent=(list||[]).length+' online';
+  if(!list||!list.length){ps.innerHTML='<div class="empty">No players yet.</div>';return}
+  ps.innerHTML=list.map(p=>'<div class="player"><div class="pname"><span class="avatar">'+esc((p.name||'P').slice(0,1).toUpperCase())+'</span><span>'+esc(p.name||'Player')+(String(p.id)===uid?' <span class="you">YOU</span>':'')+'</span></div><span class="online"></span></div>').join('');
+}
+function addChat(name,text){
+  const q=document.createElement('div');q.className='msg';q.innerHTML='<b>'+esc(name)+'</b> '+esc(text);$('messages').appendChild(q);$('messages').scrollTop=1e9;
+}
+function setConnected(on){$('liveDot').classList.toggle('live',!!on);board.classList.toggle('locked',!on)}
+function setStatus(t,good=false){statusEl.innerHTML='<span class="statusstrong">'+esc(t)+'</span>';if(good){$('drawBadge').textContent='🟢 Live canvas'}} 
+
+function setToolColor(color){
+  currentColor=color;
+  document.querySelectorAll('.swatch').forEach(b=>b.classList.toggle('active',b.dataset.color===color));
+}
+document.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>setToolColor(b.dataset.color));
+$('size').oninput=()=>$('sizeValue').textContent=$('size').value;
+
+async function createRoom(){
+  try{
+    setStatus('Creating room…');
+    const r=await fetch('/api/scribble/rooms',{method:'POST'});
+    const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Could not create room');
+    roomCode=String(d.room).toUpperCase();$('code').value=roomCode;connect(true);
+  }catch(e){setStatus('Could not create room');toast('⚠️ '+e.message)}
+}
+function connect(showToast=false){
+  if(ws)try{ws.close()}catch(e){}
+  if(!roomCode){$('roomName').textContent='No room';$('roomHint').textContent='Create or join to play';setConnected(false);return}
+  roomCode=roomCode.toUpperCase();$('roomName').textContent='Room '+roomCode;$('roomHint').textContent='Connecting…';setStatus('Connecting…');setConnected(false);
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const query='?cid='+encodeURIComponent(uid)+'&name='+encodeURIComponent(myName)+(tg?'&initData='+encodeURIComponent(tg.initData):'');
+  ws=new WebSocket(proto+'://'+location.host+'/ws/scribble/'+encodeURIComponent(roomCode)+query);
+  ws.onopen=()=>{setConnected(true);$('roomHint').textContent='Live • share code with friends';setStatus('Connected — start drawing',true);ws.send(JSON.stringify({type:'join',name:myName}));if(showToast)toast('✅ Room '+roomCode+' created')};
+  ws.onerror=()=>{setConnected(false);setStatus('Connection error')};
+  ws.onclose=()=>{setConnected(false);$('roomHint').textContent='Disconnected';setStatus('Disconnected — tap Join to reconnect')};
+  ws.onmessage=e=>{
+    let d;try{d=JSON.parse(e.data)}catch(_){return}
+    if(d.type==='state'){
+      renderPlayers(d.players||[]);renderCanvas(d.strokes||[]);
+      $('messages').innerHTML='';(d.chat||[]).forEach(m=>addChat(m.name,m.text));
+      if(d.room){roomCode=d.room;$('code').value=roomCode;$('roomName').textContent='Room '+roomCode}
+    }else if(d.type==='stroke'){
+      window.lastStrokes=window.lastStrokes||[];window.lastStrokes.push(d.stroke);drawStroke(d.stroke);
+    }else if(d.type==='clear'){renderCanvas([]);toast('🧽 Canvas cleared')}
+    else if(d.type==='undo'){renderCanvas(d.strokes||[]);toast('↶ Last stroke undone')}
+    else if(d.type==='chat'){addChat(d.name,d.text)}
+    else if(d.type==='error'){toast('⚠️ '+(d.message||'Something went wrong'));setStatus(d.message||'Error')}
+  };
+}
+
+function sendStroke(a,b){
+  if(!ws||ws.readyState!==1)return;
+  ws.send(JSON.stringify({type:'stroke',stroke:{a,b,color:currentColor,size:+$('size').value}}));
+}
+canvas.addEventListener('pointerdown',e=>{if(!ws||ws.readyState!==1)return;e.preventDefault();drawing=true;lastPoint=getPos(e);try{canvas.setPointerCapture(e.pointerId)}catch(_){}}); 
+canvas.addEventListener('pointermove',e=>{if(!drawing||!lastPoint||!ws||ws.readyState!==1)return;e.preventDefault();const p=getPos(e);sendStroke(lastPoint,p);lastPoint=p});
+['pointerup','pointercancel','pointerleave'].forEach(ev=>canvas.addEventListener(ev,()=>{drawing=false;lastPoint=null}));
+
+$('newBtn').onclick=createRoom;
+$('joinBtn').onclick=()=>{const c=$('code').value.trim().toUpperCase();if(!/^[A-Z0-9]{4,6}$/.test(c)){toast('Enter a valid room code');return}roomCode=c;connect(true)};
+$('shareBtn').onclick=async()=>{if(!roomCode){toast('Create a room first');return}const link=location.origin+'/scribble?room='+encodeURIComponent(roomCode);try{if(navigator.share)await navigator.share({title:'Vanya Scribble',text:'Join my Vanya Scribble room',url:link});else{await navigator.clipboard.writeText(link);toast('🔗 Room link copied')}}catch(e){try{await navigator.clipboard.writeText(link);toast('🔗 Room link copied')}catch(_){toast('Room code: '+roomCode)}}};
+$('undoBtn').onclick=()=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'undo'}));else toast('Join a room first')};
+$('clearBtn').onclick=()=>{if(ws&&ws.readyState===1){if(confirm('Clear the whole room canvas?'))ws.send(JSON.stringify({type:'clear'}))}else toast('Join a room first')};
+function sendChat(){const z=$('chatInput'),t=z.value.trim();if(!t)return;if(!ws||ws.readyState!==1){toast('Join a room first');return}ws.send(JSON.stringify({type:'chat',text:t}));z.value='';z.focus()}
+$('sendChat').onclick=sendChat;$('chatInput').onkeydown=e=>{if(e.key==='Enter')sendChat()};
+$('code').onkeydown=e=>{if(e.key==='Enter')$('joinBtn').click()};
+if(roomCode){$('code').value=roomCode.toUpperCase();connect()}else setConnected(false);
+</script>
+</body>
+</html>
