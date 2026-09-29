@@ -45,7 +45,7 @@ from games.wordscramble import wordscramble
 from games.hack import hack
 from games.scribble import scribble
 from features import spin, achievements, quest, progress_quest
-from webserver import start_web_server, end_web_rooms_for_group
+from webserver import start_web_server
 
 if not TOKEN:
     raise RuntimeError(
@@ -3055,14 +3055,8 @@ async def end_game(update, context):
     except Exception:
         pass
 
-    # Browser Mini App rooms launched from this group are tagged with gc=chat_id.
-    try:
-        web_count = await end_web_rooms_for_group(chat_id)
-        if web_count:
-            ended.append(f"Web App ({web_count} room{'s' if web_count != 1 else ''})")
-    except Exception as exc:
-        print(f"[EndGame] web-room cleanup failed: {type(exc).__name__}: {exc}")
-
+    # Browser Mini Apps are independent web rooms.
+    # /end intentionally does NOT stop UNO/Ludo/Chess/Scribble browser rooms.
     if not ended:
         await update.message.reply_text(
             "ℹ️ Is group mein abhi koi active game nahi mila."
