@@ -1639,51 +1639,86 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         return answer
     try:
         session=await _get_ai_http_session()
-        payload={
-            "model":ELITE_LLM_MODEL or AI_MODEL,
-            "messages":[{"role":"system","content":VANYA_SYSTEM_PROMPT},{"role":"user","content":prompt}],
-            "temperature":float(os.getenv("AI_TEMPERATURE","0.88")),
-            "max_tokens":int(os.getenv("AI_MAX_TOKENS","420")),
-            "stream":False,
-        }
+        # Keep the request body to the documented OpenAI-compatible fields.
+        # Some GPT-5-family gateways reject legacy temperature/max_tokens fields.
+        base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
+        fallback_models = [
+            base_model,
+            "gpt-5-mini",
+            "gpt-4o-mini",
+        ]
+        models=[]
+        for model_name in fallback_models:
+            model_name=str(model_name or "").strip()
+            if model_name and model_name not in models:
+                models.append(model_name)
+
         max_attempts=max(1, int(os.getenv("AI_RETRY_ATTEMPTS","3")))
         last_error=None
         data=None
         async with _AI_SEMAPHORE:
-            for attempt in range(max_attempts):
-                await _wait_for_ai_slot()
-                try:
-                    async with session.post(
-                        f"{ELITE_LLM_BASE_URL}/chat/completions",
-                        headers={"Authorization":f"Bearer {ELITE_LLM_API_KEY}","Content-Type":"application/json"},
-                        json=payload,
-                    ) as resp:
-                        raw=await resp.text()
-                        if resp.status == 429:
-                            retry_after = resp.headers.get("Retry-After")
-                            try:
-                                delay=float(retry_after) if retry_after else min(8.0, 1.5 ** attempt)
-                            except Exception:
-                                delay=min(8.0, 1.5 ** attempt)
-                            last_error=RuntimeError(f"Elite LLM HTTP 429: {raw[:300]}")
-                            if attempt < max_attempts - 1:
-                                await asyncio.sleep(max(0.25, delay))
-                                continue
-                            raise last_error
-                        if resp.status >= 500 and attempt < max_attempts - 1:
-                            last_error=RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
+            for model_index, model_name in enumerate(models):
+                payload={
+                    "model":model_name,
+                    "messages":[
+                        {"role":"system","content":VANYA_SYSTEM_PROMPT},
+                        {"role":"user","content":prompt},
+                    ],
+                    "stream":False,
+                }
+                for attempt in range(max_attempts):
+                    await _wait_for_ai_slot()
+                    try:
+                        async with session.post(
+                            f"{ELITE_LLM_BASE_URL}/chat/completions",
+                            headers={
+                                "Authorization":f"Bearer {ELITE_LLM_API_KEY}",
+                                "Content-Type":"application/json",
+                            },
+                            json=payload,
+                        ) as resp:
+                            raw=await resp.text()
+                            if resp.status == 429:
+                                retry_after = resp.headers.get("Retry-After")
+                                try:
+                                    delay=float(retry_after) if retry_after else min(8.0, 1.5 ** attempt)
+                                except Exception:
+                                    delay=min(8.0, 1.5 ** attempt)
+                                last_error=RuntimeError(f"Elite LLM HTTP 429: {raw[:300]}")
+                                if attempt < max_attempts - 1:
+                                    await asyncio.sleep(max(0.25, delay))
+                                    continue
+                                break
+
+                            if resp.status >= 500:
+                                last_error=RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
+                                if attempt < max_attempts - 1:
+                                    await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
+                                    continue
+                                break
+
+                            if resp.status in (400, 404) and model_index < len(models) - 1:
+                                # Try a known live catalog model if the configured
+                                # model is unavailable on the current Elite deployment.
+                                last_error=RuntimeError(
+                                    f"Elite LLM model '{model_name}' rejected ({resp.status}): {raw[:220]}"
+                                )
+                                break
+
+                            if resp.status >= 400:
+                                raise RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
+
+                            data=await resp.json(content_type=None)
+                            break
+                    except asyncio.TimeoutError as exc:
+                        last_error=exc
+                        if attempt < max_attempts - 1:
                             await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
                             continue
-                        if resp.status >= 400:
-                            raise RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
-                        data=await resp.json(content_type=None)
                         break
-                except asyncio.TimeoutError as exc:
-                    last_error=exc
-                    if attempt < max_attempts - 1:
-                        await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
-                        continue
-                    raise
+                if data is not None:
+                    break
+
         if data is None:
             raise last_error or RuntimeError("Elite LLM request failed")
         answer=((data.get("choices") or [{}])[0].get("message") or {}).get("content","")
