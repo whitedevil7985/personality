@@ -605,6 +605,7 @@ def scribble_state(room):
         'room': room['code'],
         'players': [scribble_player_public(p) for p in room['players']],
         'strokes': room['strokes'][-4000:],
+        'chat': room['chat'][-40:],
     }
 
 
@@ -624,6 +625,10 @@ async def broadcast_scribble(room, event=None):
     for p in dead:
         p['ws'] = None
         p['connected'] = False
+
+
+def scribble_find_player(room, pid):
+    return next((x for x in room['players'] if x['id'] == pid), None)
 
 
 async def create_scribble_room(request):
@@ -672,7 +677,7 @@ async def scribble_ws(request):
 
             if typ == 'join':
                 name = (data.get('name') or query_name or (tg_user or {}).get('first_name') or 'Player').strip()[:32] or 'Player'
-                p = next((x for x in room['players'] if x['id'] == session_id), None)
+                p = scribble_find_player(room, session_id)
                 if not p:
                     if len(room['players']) >= 12:
                         await ws.send_json({'type': 'error', 'message': 'Room is full'})
@@ -694,45 +699,72 @@ async def scribble_ws(request):
                 await broadcast_scribble(room, {'event': 'joined', 'player': session_id})
 
             elif typ == 'stroke':
-                p = next((x for x in room['players'] if x['id'] == session_id), None)
+                p = scribble_find_player(room, session_id)
                 stroke = data.get('stroke')
                 if not p or not isinstance(stroke, dict):
                     continue
                 a, b = stroke.get('a'), stroke.get('b')
-                color = str(stroke.get('color') or '#111')[:20]
+                if not isinstance(a, dict) or not isinstance(b, dict):
+                    continue
                 try:
-                    size = max(1, min(40, float(stroke.get('size', 6))))
                     ax, ay = float(a.get('x')), float(a.get('y'))
                     bx, by = float(b.get('x')), float(b.get('y'))
+                    size = max(1.0, min(40.0, float(stroke.get('size', 6))))
                 except Exception:
                     continue
+                color = str(stroke.get('color') or '#111111')[:20]
                 clean = {
                     'a': {'x': max(0.0, min(1.0, ax)), 'y': max(0.0, min(1.0, ay))},
                     'b': {'x': max(0.0, min(1.0, bx)), 'y': max(0.0, min(1.0, by))},
                     'color': color,
                     'size': size,
+                    'uid': session_id,
                 }
                 room['strokes'].append(clean)
                 room['strokes'] = room['strokes'][-4000:]
                 room['updated'] = time.time()
                 await broadcast_scribble(room, {'event': 'stroke', 'stroke': clean})
 
+            elif typ == 'undo':
+                p = scribble_find_player(room, session_id)
+                if not p:
+                    continue
+                index = next(
+                    (i for i in range(len(room['strokes']) - 1, -1, -1)
+                     if room['strokes'][i].get('uid') == session_id),
+                    None
+                )
+                if index is None:
+                    await ws.send_json({'type': 'error', 'message': 'Nothing from your drawing to undo'})
+                    continue
+                room['strokes'].pop(index)
+                room['updated'] = time.time()
+                await broadcast_scribble(room, {'event': 'undo'})
+
             elif typ == 'clear':
-                if not any(x['id'] == session_id for x in room['players']):
+                if not scribble_find_player(room, session_id):
                     continue
                 room['strokes'] = []
                 room['updated'] = time.time()
                 await broadcast_scribble(room, {'event': 'clear'})
 
             elif typ == 'chat':
-                p = next((x for x in room['players'] if x['id'] == session_id), None)
+                p = scribble_find_player(room, session_id)
                 txt = str(data.get('text') or '').strip()[:180]
                 if p and txt:
-                    room['chat'].append({'name': p['name'], 'text': txt})
-                    room['chat'] = room['chat'][-30:]
-                    await broadcast_scribble(room, {'event': 'chat', 'name': p['name'], 'text': txt})
+                    room['chat'].append({
+                        'name': p['name'],
+                        'text': txt,
+                        'uid': session_id,
+                    })
+                    room['chat'] = room['chat'][-40:]
+                    room['updated'] = time.time()
+                    await broadcast_scribble(
+                        room,
+                        {'event': 'chat', 'name': p['name'], 'text': txt},
+                    )
     finally:
-        p = next((x for x in room['players'] if x['id'] == session_id), None)
+        p = scribble_find_player(room, session_id)
         if p and p.get('ws') is ws:
             p['connected'] = False
             p['ws'] = None
