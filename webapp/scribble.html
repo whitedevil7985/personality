@@ -127,7 +127,7 @@ function connect(showToast=false){
   ws.onclose=()=>{setConnected(false);$('roomHint').textContent='Disconnected';setStatus('Disconnected — tap Join to reconnect')};
   ws.onmessage=e=>{
     let d;try{d=JSON.parse(e.data)}catch(_){return}
-    if(d.type==='state'){
+    if(d.type==='game_ended'){setConnected(false);$('roomHint').textContent='Game ended';setStatus(d.message||'Game ended from Telegram group.');toast('🛑 Game ended');try{ws.close()}catch(_){ }return}if(d.type==='state'){
       renderPlayers(d.players||[]);renderCanvas(d.strokes||[]);
       $('messages').innerHTML='';(d.chat||[]).forEach(m=>addChat(m.name,m.text));
       if(d.room){roomCode=d.room;$('code').value=roomCode;$('roomName').textContent='Room '+roomCode}
