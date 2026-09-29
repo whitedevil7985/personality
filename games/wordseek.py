@@ -1,5 +1,6 @@
 import html
 import random
+import asyncio
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
 from config import OWNER_ID
@@ -13,9 +14,13 @@ WORDS = [
     "SUMMER", "WINTER", "FLOWER", "FOREST", "GALAXY",
 ]
 WORDSEEK_GAMES = {}
+_WORDSEEK_LOCK = asyncio.Lock()
+
+
 async def _next_wordseek_word():
     """Return a Wordseek word without repeating until the full pool is exhausted."""
-    return await next_wordseek_word(WORDS)
+    async with _WORDSEEK_LOCK:
+        return await next_wordseek_word(WORDS)
 
 
 def _scramble_word(answer: str) -> str:
