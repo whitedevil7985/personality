@@ -3193,16 +3193,24 @@ async def main():
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
     # into any public command scope.
-    public_command_list = [c for c in command_list if c.command not in STAFF_COMMANDS and c.command not in {"addemoji"}]
+    # /end is a GROUP-ONLY command. Keep it out of private/default
+    # command menus so it never appears as a web-app/private-chat command.
+    public_command_list = [
+        c for c in command_list
+        if c.command not in STAFF_COMMANDS and c.command not in {"addemoji", "end"}
+    ]
+    group_command_list = public_command_list + [
+        BotCommand("end", "End all active games in this group")
+    ]
 
     # Clear previously registered public command menus first. This prevents
-    # Telegram from retaining a stale /revealgrid entry after code updates.
+    # Telegram from retaining a stale /revealgrid or /end entry.
     await app.bot.delete_my_commands(scope=BotCommandScopeDefault())
     await app.bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
     await app.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
 
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeDefault())
-    await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllGroupChats())
+    await app.bot.set_my_commands(group_command_list, scope=BotCommandScopeAllGroupChats())
     await app.bot.set_my_commands(public_command_list, scope=BotCommandScopeAllPrivateChats())
     if OWNER_ID:
         await app.bot.set_my_commands(
