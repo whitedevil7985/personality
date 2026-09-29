@@ -190,8 +190,9 @@ async def rps_cb(q, parts):
             await record_game_result(p1, "RPS", reward, False, game["chat_id"])
             await record_game_result(p2, "RPS", reward, False, game["chat_id"])
             result_text = (
-                "🤝 <b>DRAW!</b>\n"
-                f"Both played {_choice_label(c1)}.\n\n"
+                "🤝 <b>DRAW!</b>\n\n"
+                f"👤 <b>{html.escape(names[p1])}</b> — {_choice_label(c1)}\n"
+                f"👤 <b>{html.escape(names[p2])}</b> — {_choice_label(c2)}\n\n"
                 f"💰 Both players: +{reward} coins • 🏆 +{reward} points"
             )
         else:
@@ -201,10 +202,12 @@ async def rps_cb(q, parts):
             await record_game_result(winner_uid, "RPS", 100, True, game["chat_id"])
             await record_game_result(loser_uid, "RPS", 0, False, game["chat_id"])
             result_text = (
-                "🏆 <b>RPS WINNER!</b>\n\n"
-                f"👤 <b>{html.escape(names[winner_uid])}</b> — {_choice_label(game['choices'][winner_uid])}\n"
-                f"👤 {html.escape(names[loser_uid])} — {_choice_label(game['choices'][loser_uid])}\n\n"
-                "💰 Winner: +100 coins • 🏆 +100 points"
+                "🏆🏆🏆 <b>WINNER</b> 🏆🏆🏆\n"
+                f"👑 <b>{html.escape(names[winner_uid])}</b> <b>WINS!</b>\n\n"
+                f"✅ Winning move: <b>{_choice_label(game['choices'][winner_uid])}</b>\n"
+                f"❌ {html.escape(names[loser_uid])}: {_choice_label(game['choices'][loser_uid])}\n\n"
+                "💰 <b>Winner reward: +100 coins</b>\n"
+                "🏆 <b>Leaderboard: +100 points</b>"
             )
 
         await q.edit_message_text(
