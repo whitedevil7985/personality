@@ -577,6 +577,171 @@ async def chess_ws(request):
         if p: p['connected']=False; p['ws']=None; room['updated']=time.time(); await broadcast_chess(room)
     return ws
 
+# ---------------- SCRIBBLE MINI APP ----------------
+def new_scribble_room():
+    return {
+        'code': None,
+        'game': 'scribble',
+        'players': [],
+        'strokes': [],
+        'chat': [],
+        'created': time.time(),
+        'updated': time.time(),
+    }
+
+
+def scribble_player_public(p):
+    return {
+        'id': p['id'],
+        'name': p['name'],
+        'connected': p.get('connected', False),
+    }
+
+
+def scribble_state(room):
+    return {
+        'type': 'state',
+        'game': 'scribble',
+        'room': room['code'],
+        'players': [scribble_player_public(p) for p in room['players']],
+        'strokes': room['strokes'][-4000:],
+    }
+
+
+async def broadcast_scribble(room, event=None):
+    payload = scribble_state(room)
+    if event:
+        payload.update(event)
+    msg = json.dumps(payload, separators=(',', ':'))
+    dead = []
+    for p in room['players']:
+        ws = p.get('ws')
+        if ws and not ws.closed:
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                dead.append(p)
+    for p in dead:
+        p['ws'] = None
+        p['connected'] = False
+
+
+async def create_scribble_room(request):
+    async with ROOM_LOCK:
+        code = new_code()
+        room = new_scribble_room()
+        room['code'] = code
+        ROOMS['S:' + code] = room
+    return web.json_response({'ok': True, 'room': code})
+
+
+async def scribble_page(request):
+    return web.FileResponse(WEB / 'scribble.html')
+
+
+async def scribble_ws(request):
+    code = request.match_info['code'].upper()
+    room = ROOMS.get('S:' + code)
+    if not room:
+        return web.json_response({'ok': False, 'error': 'Room not found'}, status=404)
+
+    ws = web.WebSocketResponse(heartbeat=25, max_msg_size=64 * 1024)
+    await ws.prepare(request)
+
+    tg_user = verify_telegram_init_data(request.query.get('initData', ''))
+    client_id = ''.join(
+        ch for ch in (request.query.get('cid') or '')
+        if ch.isalnum() or ch in '_-'
+    )[:80]
+    session_id = str(tg_user['id']) if tg_user else (
+        'guest-' + client_id if client_id
+        else 'guest-' + ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(12))
+    )
+    query_name = (request.query.get('name') or '').strip()[:32]
+
+    try:
+        async for msg in ws:
+            if msg.type != WSMsgType.TEXT:
+                continue
+            try:
+                data = json.loads(msg.data)
+            except Exception:
+                continue
+
+            typ = data.get('type')
+
+            if typ == 'join':
+                name = (data.get('name') or query_name or (tg_user or {}).get('first_name') or 'Player').strip()[:32] or 'Player'
+                p = next((x for x in room['players'] if x['id'] == session_id), None)
+                if not p:
+                    if len(room['players']) >= 12:
+                        await ws.send_json({'type': 'error', 'message': 'Room is full'})
+                        continue
+                    p = {
+                        'id': session_id,
+                        'name': name,
+                        'connected': True,
+                        'ws': ws,
+                    }
+                    room['players'].append(p)
+                else:
+                    p['name'] = name
+                    p['connected'] = True
+                    p['ws'] = ws
+
+                room['updated'] = time.time()
+                await ws.send_str(json.dumps(scribble_state(room), separators=(',', ':')))
+                await broadcast_scribble(room, {'event': 'joined', 'player': session_id})
+
+            elif typ == 'stroke':
+                p = next((x for x in room['players'] if x['id'] == session_id), None)
+                stroke = data.get('stroke')
+                if not p or not isinstance(stroke, dict):
+                    continue
+                a, b = stroke.get('a'), stroke.get('b')
+                color = str(stroke.get('color') or '#111')[:20]
+                try:
+                    size = max(1, min(40, float(stroke.get('size', 6))))
+                    ax, ay = float(a.get('x')), float(a.get('y'))
+                    bx, by = float(b.get('x')), float(b.get('y'))
+                except Exception:
+                    continue
+                clean = {
+                    'a': {'x': max(0.0, min(1.0, ax)), 'y': max(0.0, min(1.0, ay))},
+                    'b': {'x': max(0.0, min(1.0, bx)), 'y': max(0.0, min(1.0, by))},
+                    'color': color,
+                    'size': size,
+                }
+                room['strokes'].append(clean)
+                room['strokes'] = room['strokes'][-4000:]
+                room['updated'] = time.time()
+                await broadcast_scribble(room, {'event': 'stroke', 'stroke': clean})
+
+            elif typ == 'clear':
+                if not any(x['id'] == session_id for x in room['players']):
+                    continue
+                room['strokes'] = []
+                room['updated'] = time.time()
+                await broadcast_scribble(room, {'event': 'clear'})
+
+            elif typ == 'chat':
+                p = next((x for x in room['players'] if x['id'] == session_id), None)
+                txt = str(data.get('text') or '').strip()[:180]
+                if p and txt:
+                    room['chat'].append({'name': p['name'], 'text': txt})
+                    room['chat'] = room['chat'][-30:]
+                    await broadcast_scribble(room, {'event': 'chat', 'name': p['name'], 'text': txt})
+    finally:
+        p = next((x for x in room['players'] if x['id'] == session_id), None)
+        if p and p.get('ws') is ws:
+            p['connected'] = False
+            p['ws'] = None
+            room['updated'] = time.time()
+            await broadcast_scribble(room, {'event': 'left', 'player': session_id})
+
+    return ws
+
+
 # ---------------- UNO ----------------
 UNO_COLORS=['red','green','blue','yellow']
 UNO_COLOR_HEX={'red':'#ef625e','green':'#63c981','blue':'#63a4e2','yellow':'#f6bd35'}
@@ -895,14 +1060,14 @@ async def cleanup_ctx(app):
 async def start_web_server():
     app=web.Application()
     app.router.add_get('/',health); app.router.add_get('/health',health); app.router.add_get('/api/config',config)
-    app.router.add_post('/api/rooms',create_ludo_room); app.router.add_post('/api/uno/rooms',create_uno_room); app.router.add_post('/api/chess/rooms',create_chess_room)
-    app.router.add_get('/ludo',ludo_page); app.router.add_get('/ws/ludo/{code}',ludo_ws)
+    app.router.add_post('/api/rooms',create_ludo_room); app.router.add_post('/api/uno/rooms',create_uno_room); app.router.add_post('/api/chess/rooms',create_chess_room); app.router.add_post('/api/scribble/rooms',create_scribble_room)
+    app.router.add_get('/ludo',ludo_page); app.router.add_get('/ws/ludo/{code}',ludo_ws); app.router.add_get('/scribble',scribble_page); app.router.add_get('/ws/scribble/{code}',scribble_ws)
     app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/ws/chess/{code}',chess_ws)
     # Vanya World aliases all point to the same 3D page; query ?tab= selects City/Room/Pet.
     world_page = lambda request: web.FileResponse(WEB/'vanya_world.html')
     app.router.add_get('/vanya-city', world_page); app.router.add_get('/world', world_page); app.router.add_get('/vanya-world', world_page)
     app.router.add_get('/city', world_page); app.router.add_get('/room', world_page); app.router.add_get('/pet', world_page)
     app.router.add_get('/api/world/state',world_state); app.router.add_post('/api/world/action',world_action)
-    app.router.add_static('/ludo/',WEB,show_index=False); app.router.add_static('/uno/',WEB,show_index=False); app.router.add_static('/chess/',WEB,show_index=False)
+    app.router.add_static('/ludo/',WEB,show_index=False); app.router.add_static('/uno/',WEB,show_index=False); app.router.add_static('/chess/',WEB,show_index=False); app.router.add_static('/scribble/',WEB,show_index=False)
     app.cleanup_ctx.append(cleanup_ctx)
     runner=web.AppRunner(app); await runner.setup(); port=int(os.getenv('PORT','8080')); await web.TCPSite(runner,'0.0.0.0',port).start(); return runner
