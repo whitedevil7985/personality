@@ -9,14 +9,14 @@
 <div id="chat" class="chatbox"><div class="label">GAME CHAT</div><div id="messages" class="messages"></div><div class="chatrow"><input id="chatInput" maxlength="180" placeholder="Message..."><button id="sendChat">Send</button></div></div><div id="error" class="error"></div>
 <script>
 const tg=window.Telegram?.WebApp; if(tg){tg.ready();tg.expand()}
-const root=location.origin, params=new URLSearchParams(location.search); let roomCode=params.get('room')||'', ws=null, state=null, chosenWild=null;
+const root=location.origin, params=new URLSearchParams(location.search); let roomCode=params.get('room')||'', ws=null, state=null, chosenWild=null, ended=false;
 const $=id=>document.getElementById(id); const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 function meName(){return tg?.initDataUnsafe?.user?.first_name||'Player'}
 function showErr(s){$('error').textContent=s;$('error').classList.add('show');setTimeout(()=>$('error').classList.remove('show'),2400)}
 async function api(path,opts={}){const r=await fetch(path,opts);return r.json()}
 async function ensureRoom(){if(roomCode)return;const r=await api('/api/uno/rooms'+(new URLSearchParams(location.search).get('gc')?'?gc='+encodeURIComponent(new URLSearchParams(location.search).get('gc')):''),{method:'POST'});if(!r.ok){showErr('Could not create room');return}roomCode=r.room;history.replaceState({},'',`/uno?room=${roomCode}`)}
 function inviteLink(){const bot='ItzVanyaBot';return `https://t.me/${bot}?startapp=uno_${roomCode}`}
-function connect(){if(!roomCode)return; const init=tg?.initData||''; ws=new WebSocket(`${location.origin.replace(/^http/,'ws')}/ws/uno/${roomCode}?initData=${encodeURIComponent(init)}`);ws.onopen=()=>send({type:'join',name:meName()});ws.onmessage=e=>handle(JSON.parse(e.data));ws.onclose=()=>setTimeout(()=>connect(),1800)}
+function connect(){if(!roomCode||ended)return; const init=tg?.initData||''; ws=new WebSocket(`${location.origin.replace(/^http/,'ws')}/ws/uno/${roomCode}?initData=${encodeURIComponent(init)}`);ws.onopen=()=>send({type:'join',name:meName()});ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='game_ended'){ended=true;showErr(d.message||'Game ended from group.');return}handle(d)};ws.onclose=()=>{if(!ended)setTimeout(()=>connect(),1800)}}
 function send(o){if(ws?.readyState===1)ws.send(JSON.stringify(o))}
 function cardClass(c){return c.color==='wild'?'wild':c.color}
 function cardText(c){if(c.value==='+2')return '+2';if(c.value==='skip')return '⊘';if(c.value==='reverse')return '↻';if(c.value==='wild')return '★';if(c.value==='+4')return '+4';return c.value}
