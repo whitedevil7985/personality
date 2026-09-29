@@ -3,7 +3,7 @@ import random
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
 from config import OWNER_ID
-from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result, next_wordseek_word
 
 WORDS = [
     "VANYA", "DELHI", "ARCADE", "CHAT", "FRIEND",
@@ -13,16 +13,9 @@ WORDS = [
     "SUMMER", "WINTER", "FLOWER", "FOREST", "GALAXY",
 ]
 WORDSEEK_GAMES = {}
-WORDSEEK_QUEUE = []
-
-
-def _next_wordseek_word():
-    """Return a fresh Wordseek word without repetition until the pool resets."""
-    global WORDSEEK_QUEUE
-    if not WORDSEEK_QUEUE:
-        WORDSEEK_QUEUE = WORDS[:]
-        random.shuffle(WORDSEEK_QUEUE)
-    return WORDSEEK_QUEUE.pop()
+async def _next_wordseek_word():
+    """Return a Wordseek word without repeating until the full pool is exhausted."""
+    return await next_wordseek_word(WORDS)
 
 
 def _scramble_word(answer: str) -> str:
@@ -68,7 +61,7 @@ async def _start_wordseek_round(
 
 async def wordseek(update, context):
     chat_id = update.effective_chat.id
-    answer = _next_wordseek_word()
+    answer = await _next_wordseek_word()
     await _start_wordseek_round(update, answer, solved=0, total=TOTAL_WORDSEEK_WORDS)
 
 
@@ -120,7 +113,7 @@ async def answer(update, context):
     )
 
     # Continue automatically, but keep the same 7-word game counter.
-    next_answer = _next_wordseek_word()
+    next_answer = await _next_wordseek_word()
     await _start_wordseek_round(
         update,
         next_answer,
