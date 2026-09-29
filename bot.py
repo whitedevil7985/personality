@@ -2039,11 +2039,40 @@ async def callback(update,context):
             return
         if action == "broadcast":
             await q.edit_message_text(
-                "📢 <b>Broadcast</b>\n\n"
-                "Text:\n<code>/broadcast Your message</code>\n\n"
-                "Media/content:\nReply to the message and send <code>/broadcast</code>.\n\n"
-                "Only Owner/Sudo can use this command.",
-                parse_mode="HTML", reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+                "📢 <b>Broadcast Center</b>\n\n"
+                "Choose where the broadcast should go:\n\n"
+                "👤 <b>Users Only</b> — private users who started Vanya\n"
+                "💬 <b>Groups Only</b> — groups known to Vanya\n"
+                "🌐 <b>Users + Groups</b> — send to both\n\n"
+                "After choosing, send <code>/broadcast Your message</code> "
+                "or reply to any message/media with <code>/broadcast</code>.\n\n"
+                "🔒 <i>Owner/Sudo only.</i>",
+                parse_mode="HTML", reply_markup=broadcast_target_kb()
+            )
+            return
+        if action.startswith("broadcastmode:"):
+            mode = action.split(":", 1)[1]
+            if mode not in {"users", "groups", "both"}:
+                await q.answer("Invalid broadcast mode.", show_alert=True)
+                return
+            modes = {
+                "users": "👤 Users Only",
+                "groups": "💬 Groups Only",
+                "both": "🌐 Users + Groups",
+            }
+            broadcast_modes = context.application.bot_data.setdefault("broadcast_modes", {})
+            broadcast_modes[q.from_user.id] = mode
+            await q.edit_message_text(
+                "📢 <b>Broadcast Target Selected</b>\n\n"
+                f"🎯 <b>{modes[mode]}</b>\n\n"
+                "Now send <code>/broadcast Your message</code>\n"
+                "or reply to any message/media with <code>/broadcast</code>.\n\n"
+                "The broadcast will use the selected target and show a completion report.",
+                parse_mode="HTML",
+                reply_markup=kb([
+                    [InlineKeyboardButton("🔁 Change Target", callback_data="owner:broadcast")],
+                    [InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")],
+                ])
             )
             return
         if action == "sudo":
@@ -2528,7 +2557,7 @@ STAFF_COMMANDS = {
     "ownerpanel": "Open Owner/Sudo panel",
     "panel": "Open Owner/Sudo panel",
     "devpanel": "Open Owner/Sudo panel",
-    "broadcast": "Broadcast text/media",
+    "broadcast": "Broadcast to users, groups, or both",
     "addcoins": "Add coins by user ID",
     "removecoins": "Remove coins by user ID",
     "sudolist": "List sudo users",
@@ -2560,6 +2589,15 @@ async def is_owner_or_sudo(update):
         return True
     u = await get_user(uid)
     return bool(u and u.get("is_sudo"))
+
+def broadcast_target_kb():
+    return kb([
+        [InlineKeyboardButton("👤 Users Only", callback_data="owner:broadcastmode:users")],
+        [InlineKeyboardButton("💬 Groups Only", callback_data="owner:broadcastmode:groups")],
+        [InlineKeyboardButton("🌐 Users + Groups", callback_data="owner:broadcastmode:both")],
+        [InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")],
+    ])
+
 
 def owner_panel_kb(owner_only=False, staff_access=False):
     rows = [
@@ -2739,34 +2777,100 @@ async def removecoins_admin(update, context):
 
 
 async def broadcast(update, context):
-    """Broadcast a text or any Telegram message to started users and known groups."""
+    """Broadcast a text/media message to users, groups, or both. Owner/Sudo only."""
     if not await is_owner_or_sudo(update):
         await update.message.reply_text("⛔ Owner/Sudo only.")
         return
 
+    user_id = update.effective_user.id if update.effective_user else 0
+    app_data = context.application.bot_data if context.application else {}
+    broadcast_modes = app_data.setdefault("broadcast_modes", {})
+
     source = update.message.reply_to_message
-    text = " ".join(context.args).strip()
+    args = list(context.args or [])
+    mode = None
+
+    # Optional direct mode:
+    # /broadcast users Your message
+    # /broadcast groups Your message
+    # /broadcast both Your message
+    if args and str(args[0]).lower() in {"users", "user", "groups", "group", "chats", "chat", "both"}:
+        raw_mode = str(args.pop(0)).lower()
+        mode = "users" if raw_mode in {"users", "user"} else "groups" if raw_mode in {"groups", "group", "chats", "chat"} else "both"
+        broadcast_modes[user_id] = mode
+    else:
+        mode = broadcast_modes.get(user_id)
+
+    text = " ".join(args).strip()
+
     if not source and not text:
         await update.message.reply_html(
-            "📢 <b>Broadcast</b>\n\n"
-            "Send <code>/broadcast your message</code> for text, or reply to any "
-            "message/media with <code>/broadcast</code> to broadcast that content."
+            "📢 <b>Broadcast Center</b>\n\n"
+            "Choose the target first:\n\n"
+            "👤 <b>Users Only</b> — private users who started Vanya\n"
+            "💬 <b>Groups Only</b> — groups known to Vanya\n"
+            "🌐 <b>Users + Groups</b> — both\n\n"
+            "You can also use directly:\n"
+            "<code>/broadcast users Your message</code>\n"
+            "<code>/broadcast groups Your message</code>\n"
+            "<code>/broadcast both Your message</code>\n\n"
+            "For media, choose a target and then reply to the media with <code>/broadcast</code>."
+            ,
+            reply_markup=broadcast_target_kb(),
+        )
+        return
+
+    if mode not in {"users", "groups", "both"}:
+        await update.message.reply_html(
+            "📢 <b>Select a broadcast target first.</b>\n\n"
+            "👤 Users Only\n"
+            "💬 Groups Only\n"
+            "🌐 Users + Groups",
+            reply_markup=broadcast_target_kb(),
         )
         return
 
     targets = []
-    async for u in users.find({"started": True}, {"_id": 1}):
-        targets.append(u["_id"])
-    async for g in groups.find({}, {"_id": 1}):
-        targets.append(g["_id"])
+    user_count = 0
+    group_count = 0
+
+    if mode in {"users", "both"}:
+        async for u in users.find({"started": True}, {"_id": 1}):
+            targets.append(u["_id"])
+            user_count += 1
+
+    if mode in {"groups", "both"}:
+        async for g in groups.find({}, {"_id": 1}):
+            targets.append(g["_id"])
+            group_count += 1
 
     # De-duplicate while preserving order.
     targets = list(dict.fromkeys(targets))
+    # The selected mode is consumed after a real broadcast starts so the next
+    # broadcast requires an explicit target again unless the command includes one.
+    broadcast_modes.pop(user_id, None)
+
     if not targets:
-        await update.message.reply_text("📢 No started users or known groups found.")
+        await update.message.reply_text(
+            f"📢 No targets found for the selected broadcast mode: {mode}."
+        )
         return
 
-    status = await update.message.reply_text(f"📢 Broadcasting to {len(targets):,} chats…")
+    mode_label = {
+        "users": "👤 Users Only",
+        "groups": "💬 Groups Only",
+        "both": "🌐 Users + Groups",
+    }[mode]
+
+    status = await update.message.reply_text(
+        f"📢 <b>Broadcast started</b>\n\n"
+        f"🎯 Target: <b>{mode_label}</b>\n"
+        f"👤 Users: <b>{user_count:,}</b>\n"
+        f"💬 Groups: <b>{group_count:,}</b>\n"
+        f"📨 Total targets: <b>{len(targets):,}</b>",
+        parse_mode="HTML",
+    )
+
     sent = failed = 0
     for chat_id in targets:
         try:
@@ -2786,20 +2890,30 @@ async def broadcast(update, context):
         if (sent + failed) % 25 == 0:
             try:
                 await status.edit_text(
-                    f"📢 Broadcasting… <b>{sent:,}</b> sent • <b>{failed:,}</b> failed • "
-                    f"{sent + failed:,}/{len(targets):,}",
+                    f"📢 <b>Broadcasting…</b>\n\n"
+                    f"🎯 Target: <b>{mode_label}</b>\n"
+                    f"📨 Sent: <b>{sent:,}</b>\n"
+                    f"⚠️ Failed: <b>{failed:,}</b>\n"
+                    f"📊 Progress: <b>{sent + failed:,}/{len(targets):,}</b>",
                     parse_mode="HTML",
                 )
             except Exception:
                 pass
 
-    await status.edit_text(
-        f"✅ <b>Broadcast complete</b>\n\n"
-        f"📨 Sent: <b>{sent:,}</b>\n"
-        f"⚠️ Failed: <b>{failed:,}</b>\n"
-        f"👥 Total targets: <b>{len(targets):,}</b>",
-        parse_mode="HTML",
-    )
+    try:
+        await status.edit_text(
+            f"✅ <b>Broadcast Completed</b>\n\n"
+            f"🎯 Target: <b>{mode_label}</b>\n"
+            f"👤 Users targeted: <b>{user_count:,}</b>\n"
+            f"💬 Groups targeted: <b>{group_count:,}</b>\n"
+            f"📨 Sent: <b>{sent:,}</b>\n"
+            f"⚠️ Failed: <b>{failed:,}</b>\n"
+            f"👥 Total targets: <b>{len(targets):,}</b>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
 
 async def addemoji(update, context):
     """Owner-only helper: save custom emoji IDs from a replied Telegram message."""
@@ -3178,7 +3292,7 @@ async def main():
         "wordscramble": "Play Wordscramble", "words": "Play Wordscramble", "hack": "Play Hack puzzle",
         "scribble": "Open Scribble", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
-        "panel": "Open owner panel", "ownerpanel": "Open owner panel", "devpanel": "Open owner panel", "broadcast": "Broadcast a message", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
+        "panel": "Open owner panel", "ownerpanel": "Open owner panel", "devpanel": "Open owner panel", "broadcast": "Broadcast to users, groups, or both (Owner/Sudo)", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
