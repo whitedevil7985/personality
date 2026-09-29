@@ -40,7 +40,7 @@ from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek,
 from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_wordgrid
 from games.crash import crash
 from games.charades import charades
-from games.wordchain import wordchain
+from games.wordchain import wordchain, wordchain_join, wordchain_answer, WORDCHAIN_GAMES
 from games.wordscramble import wordscramble
 from games.hack import hack
 from games.scribble import scribble
@@ -1881,6 +1881,11 @@ async def callback(update,context):
     if data == "wordgrid:new":
         await send_wordgrid(q.message, context, getattr(q.from_user, "id", None))
         return
+    if data.startswith("wordchain:"):
+        if data == "wordchain:join":
+            await wordchain_join(update, context)
+            return
+
     if data.startswith("lb|"):
         parts = data.split("|")
         action = parts[1] if len(parts) > 1 else "v"
@@ -2311,6 +2316,11 @@ async def direct_game_answer(update, context):
     if chat_id in WORDSEEK_GAMES:
         await wordseek_answer(update, context)
         return
+
+    if chat_id in WORDCHAIN_GAMES:
+        handled = await wordchain_answer(update, context)
+        if handled:
+            return
 
 
 async def mention_chat(update,context):
@@ -3046,7 +3056,7 @@ async def main():
         "tap":tap,"bet":bet,"card":card,"cardjoin":cardjoin,"cardstart":cardstart,"cardcancel":cardcancel,"uno":uno,"unojoin":unojoin,"ludo":ludo,"ludojoin":ludojoin,
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
-        "wordchain":wordchain,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
+        "wordchain":wordchain,"wordchainjoin":wordchain_join,"wordscramble":wordscramble,"words":wordscramble,"hack":hack,
         "scribble":scribble,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,
