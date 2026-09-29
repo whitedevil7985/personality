@@ -38,25 +38,38 @@ def _scramble_word(answer: str) -> str:
     return "".join(letters)
 
 
-async def _start_wordseek_round(update, answer: str, prefix: str = "🔎 <b>Wordseek</b>"):
+TOTAL_WORDSEEK_WORDS = 7
+
+
+async def _start_wordseek_round(
+    update,
+    answer: str,
+    prefix: str = "🔎 <b>Wordseek</b>",
+    solved: int = 0,
+    total: int = TOTAL_WORDSEEK_WORDS,
+):
     chat_id = update.effective_chat.id
     scrambled = _scramble_word(answer)
     WORDSEEK_GAMES[chat_id] = {
         "answer": answer,
         "found": False,
+        "solved": int(solved),
+        "total": int(total),
         "created_by": update.effective_user.id if update.effective_user else None,
     }
     await update.message.reply_text(
         f"{prefix}: find the hidden word from these letters:\n\n"
         f"<code>{scrambled}</code>\n\n"
+        f"🔎 <b>Words found:</b> {solved}/{total}\n"
         "✏️ Bas answer ka <b>word type</b> karke send karo.",
         parse_mode="HTML",
     )
 
 
 async def wordseek(update, context):
+    chat_id = update.effective_chat.id
     answer = _next_wordseek_word()
-    await _start_wordseek_round(update, answer)
+    await _start_wordseek_round(update, answer, solved=0, total=TOTAL_WORDSEEK_WORDS)
 
 
 async def answer(update, context):
@@ -79,23 +92,41 @@ async def answer(update, context):
         return
 
     game["found"] = True
+    game["solved"] = int(game.get("solved", 0)) + 1
+    solved = game["solved"]
+    total = int(game.get("total", TOTAL_WORDSEEK_WORDS))
     uid = update.effective_user.id
     await add_xp(uid, 50)
     await add_coins(uid, 50)
     await record_game_result(uid, "WORDSEEK", 50, True, chat_id)
+
+    if solved >= total:
+        await update.message.reply_text(
+            "🎉 <b>Correct!</b> You found the final Wordseek word!\n"
+            f"🔎 <b>Words found:</b> {solved}/{total}\n"
+            "🏆 <b>WORDSEEK GAME OVER!</b>\n\n"
+            "⭐ +50 XP  •  💰 +50 coins  •  🏆 +50 points\n"
+            "✨ Start another challenge with /wordseek.",
+            parse_mode="HTML",
+        )
+        WORDSEEK_GAMES.pop(chat_id, None)
+        return
+
     await update.message.reply_text(
         "🎉 <b>Correct!</b> You found the Wordseek word!\n"
+        f"🔎 <b>Words found:</b> {solved}/{total}\n"
         "⭐ +50 XP  •  💰 +50 coins  •  🏆 +50 points",
         parse_mode="HTML",
     )
 
-    # Automatically start the next round in the same chat so players can
-    # continue solving without sending /wordseek again.
+    # Continue automatically, but keep the same 7-word game counter.
     next_answer = _next_wordseek_word()
     await _start_wordseek_round(
         update,
         next_answer,
-        prefix="➡️ <b>Next Wordseek</b>",
+        prefix=f"➡️ <b>Next Wordseek</b> ({solved + 1}/{total})",
+        solved=solved,
+        total=total,
     )
 
 
