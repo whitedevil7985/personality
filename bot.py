@@ -589,9 +589,21 @@ async def toprich(update, context):
     await update.message.reply_html("\n".join(lines))
 
 async def balance(update, context):
-    await ensure_user(update.effective_user)
-    u=await get_user(update.effective_user.id)
-    await update.message.reply_html(f"💰 <b>{u.get('coins',0):,}</b> coins\n⭐ XP: <b>{u.get('xp',0):,}</b>\n🏆 Level: <b>{u.get('level',1)}</b>")
+    target = await target_user(update) if update.message and update.message.reply_to_message else None
+    target = target or update.effective_user
+    if not target:
+        return
+    await ensure_user(target)
+    u = await get_user(target.id)
+    name = html.escape(u.get("name") or target.first_name or "User")
+    status = "💀 Dead" if u.get("dead") else "🟢 Alive"
+    await update.message.reply_html(
+        f"👤 <b>{name}</b>\n"
+        f"💰 Coins: <b>{u.get('coins',0):,}</b>\n"
+        f"⭐ XP: <b>{u.get('xp',0):,}</b>\n"
+        f"🏆 Level: <b>{u.get('level',1)}</b>\n"
+        f"❤️ Status: <b>{status}</b>"
+    )
 
 async def daily(update, context):
     await ensure_user(update.effective_user)
@@ -737,32 +749,237 @@ async def target_user(update):
     if update.message.reply_to_message: return update.message.reply_to_message.from_user
     return None
 
+def _protection_until(user_doc):
+    value = user_doc.get("protected_until") if user_doc else None
+    if not value:
+        return None
+    try:
+        until = datetime.fromisoformat(str(value))
+        if until <= datetime.now(timezone.utc):
+            return None
+        return until
+    except Exception:
+        return None
+
+
+def _is_dead(user_doc):
+    return bool(user_doc and user_doc.get("dead"))
+
+
 async def rob(update,context):
-    target=await target_user(update)
-    if not target: await update.message.reply_text("Reply to someone: /rob 100");return
-    try: amount=int(context.args[0])
-    except: await update.message.reply_text("Usage: /rob &lt;amount&gt;");return
-    victim=await get_user(target.id); thief=await get_user(update.effective_user.id)
-    if not victim or not thief: return
-    if victim.get("protected_until") and victim["protected_until"]>datetime.now(timezone.utc).isoformat():
-        await update.message.reply_text("🛡️ Target is protected.");return
-    if thief.get("coins",0)<100: await update.message.reply_text("You need at least 100 coins.");return
-    success=random.random()<0.45
-    amount=min(max(1,amount),victim.get("coins",0))
-    if success:
-        await add_coins(target.id,-amount);await add_coins(update.effective_user.id,amount)
+    target = await target_user(update)
+    if not target:
+        await update.message.reply_text("Reply to someone: /rob [amount]")
+        return
+
+    thief = await get_user(update.effective_user.id)
+    victim = await get_user(target.id)
+    if not thief:
+        await ensure_user(update.effective_user)
+        thief = await get_user(update.effective_user.id)
+    if not victim:
+        await ensure_user(target)
+        victim = await get_user(target.id)
+
+    if _is_dead(thief):
+        await update.message.reply_text("💀 You're dead. Use /revive first.")
+        return
+
+    protected_until = _protection_until(victim)
+    if protected_until:
+        await update.message.reply_text("🛡️ Target is protected. You can't rob them right now.")
+        return
+
+    if _is_dead(victim):
+        await update.message.reply_text("💀 Target is dead. You can't rob them until they revive.")
+        return
+
+    if thief.get("coins", 0) < 100:
+        await update.message.reply_text("❌ You need at least 100 coins to rob.")
+        return
+
+    victim_coins = max(0, int(victim.get("coins", 0)))
+    if victim_coins <= 0:
+        await update.message.reply_text("💸 Target has no coins to rob.")
+        return
+
+    # /rob [amount] lets the robber choose an amount, capped at the target's
+    # current balance. Without an amount, rob half of the target's balance.
+    try:
+        amount = int(context.args[0]) if context.args else max(1, victim_coins // 2)
+    except Exception:
+        await update.message.reply_text("Usage: /rob [amount]")
+        return
+    amount = min(max(1, amount), victim_coins)
+
+    if random.random() < 0.45:
+        await add_coins(target.id, -amount)
+        await add_coins(update.effective_user.id, amount)
         await update.message.reply_text(f"🕵️ Rob successful! +{amount:,} coins.")
     else:
-        fine=min(100,thief.get("coins",0));await add_coins(update.effective_user.id,-fine)
-        await update.message.reply_text(f"🚨 Caught! You lost {fine} coins.")
+        fine = min(100, int(thief.get("coins", 0)))
+        await add_coins(update.effective_user.id, -fine)
+        await update.message.reply_text(f"🚨 Caught! You lost {fine:,} coins.")
+
 
 async def protect(update,context):
-    u=await get_user(update.effective_user.id)
-    if u.get("coins",0)<250: await update.message.reply_text("🛡️ Protection costs 250 coins.");return
-    until=(datetime.now(timezone.utc)+timedelta(hours=12)).isoformat()
-    await add_coins(update.effective_user.id,-250)
-    await users.update_one({"_id":update.effective_user.id},{"$set":{"protected_until":until}})
-    await update.message.reply_text("🛡️ Shield active for 12 hours.")
+    await ensure_user(update.effective_user)
+    u = await get_user(update.effective_user.id)
+    now = datetime.now(timezone.utc)
+    existing = _protection_until(u)
+    if existing:
+        remaining = existing - now
+        hours = max(1, int(remaining.total_seconds() // 3600))
+        mins = int((remaining.total_seconds() % 3600) // 60)
+        await update.message.reply_text(
+            f"🛡️ Protection already active for {hours}h {mins}m. Use /shield to check it."
+        )
+        return
+
+    duration_arg = (context.args[0].lower().strip() if context.args else "")
+    plans = {
+        "1d": (timedelta(days=1), 500),
+        "2d": (timedelta(days=2), 900),
+        "1day": (timedelta(days=1), 500),
+        "2days": (timedelta(days=2), 900),
+    }
+    duration, price = plans.get(duration_arg, (None, None))
+    if duration is None:
+        await update.message.reply_text(
+            "🛡️ <b>Protection Plans</b>\n\n"
+            "• <code>/protect 1d</code> — 1 day • 💰 500 coins\n"
+            "• <code>/protect 2d</code> — 2 days • 💰 900 coins\n\n"
+            "Use /shield to see remaining protection time.",
+            parse_mode="HTML",
+        )
+        return
+
+    if int(u.get("coins", 0)) < price:
+        await update.message.reply_text(
+            f"❌ You need {price:,} coins for {duration_arg} protection."
+        )
+        return
+
+    until = now + duration
+    await add_coins(update.effective_user.id, -price)
+    await users.update_one(
+        {"_id": update.effective_user.id},
+        {"$set": {"protected_until": until.isoformat()}},
+    )
+    await update.message.reply_text(
+        f"🛡️ <b>Protection activated!</b>\n"
+        f"⏱️ Duration: <b>{duration_arg}</b>\n"
+        f"💰 Cost: <b>{price:,} coins</b>\n"
+        "🔒 You cannot be robbed while it is active.\n"
+        "Use /shield anytime to check the timer.",
+        parse_mode="HTML",
+    )
+
+
+async def shield(update,context):
+    await ensure_user(update.effective_user)
+    u = await get_user(update.effective_user.id)
+    until = _protection_until(u)
+    if not until:
+        if u.get("protected_until"):
+            await users.update_one(
+                {"_id": update.effective_user.id},
+                {"$set": {"protected_until": None}},
+            )
+        await update.message.reply_text("🛡️ Protection inactive. You are not protected right now.")
+        return
+
+    remaining = until - datetime.now(timezone.utc)
+    total_seconds = max(0, int(remaining.total_seconds()))
+    days, rem = divmod(total_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if not parts:
+        parts.append(f"{seconds}s")
+
+    await update.message.reply_html(
+        "🛡️ <b>Protection Status</b>\n\n"
+        "🔒 Status: <b>ACTIVE</b>\n"
+        f"⏳ Remaining: <b>{' '.join(parts)}</b>\n"
+        f"🕒 Expires: <b>{until.strftime('%d %b %Y, %I:%M %p UTC')}</b>\n\n"
+        "🕵️ Rob attempts on you will be blocked until expiry."
+    )
+
+
+async def kill(update, context):
+    target = await target_user(update)
+    if not target or target.id == update.effective_user.id:
+        await update.message.reply_text("Reply to another player: /kill")
+        return
+
+    await ensure_user(update.effective_user)
+    await ensure_user(target)
+    me = await get_user(update.effective_user.id)
+    victim = await get_user(target.id)
+
+    if _is_dead(me):
+        await update.message.reply_text("💀 You're dead. Use /revive first.")
+        return
+
+    protected_until = _protection_until(victim)
+    if protected_until:
+        await update.message.reply_text("🛡️ Target is protected. You can't kill them right now.")
+        return
+
+    if _is_dead(victim):
+        await update.message.reply_text("💀 This player is already dead. They must use /revive first.")
+        return
+
+    reward = random.randint(50, 100)
+    await users.update_one(
+        {"_id": target.id},
+        {"$set": {"dead": True, "protected_until": None}},
+        upsert=True,
+    )
+    await add_coins(update.effective_user.id, reward)
+    await users.update_one(
+        {"_id": update.effective_user.id},
+        {"$inc": {"kills": 1}},
+    )
+    await update.message.reply_html(
+        f"☠️ <b>{html.escape(target.first_name or 'Player')}</b> has been killed!\n"
+        f"💰 Killer reward: <b>+{reward:,} coins</b>\n"
+        "💀 Target status: <b>DEAD</b>\n"
+        "❤️ They need <code>/revive</code> to return."
+    )
+
+
+async def revive(update, context):
+    await ensure_user(update.effective_user)
+    me = await get_user(update.effective_user.id)
+
+    if not _is_dead(me):
+        await update.message.reply_text("🟢 You're already alive.")
+        return
+
+    revive_cost = 500
+    if int(me.get("coins", 0)) < revive_cost:
+        await update.message.reply_text("❌ Revival costs 500 coins.")
+        return
+
+    await add_coins(update.effective_user.id, -revive_cost)
+    await users.update_one(
+        {"_id": update.effective_user.id},
+        {"$set": {"dead": False}},
+    )
+    await update.message.reply_html(
+        "✨ <b>You have been revived!</b>\n"
+        "❤️ Status: <b>ALIVE</b>\n"
+        "💰 Revival cost: <b>500 coins</b>"
+    )
 
 async def propose(update,context):
     target=await target_user(update)
@@ -2750,8 +2967,8 @@ async def main():
         "profile": "View your profile", "balance": "Check your balance", "bal": "Check your balance",
         "daily": "Claim daily coins and XP", "work": "Work for coins", "give": "Give coins to another user",
         "toprich": "Show richest users", "leaderboard": "Show the leaderboard", "rank": "Show your rank",
-        "rob": "Try to rob another user", "protect": "Activate protection", "shield": "Check shield/protection",
-        "kill": "Start a fictional action", "revive": "Revive a player", "topkill": "Show kill leaderboard",
+        "rob": "Rob up to the target balance", "protect": "Buy 1d/2d protection", "shield": "Check protection time",
+        "kill": "Kill a player for 50-100 coins", "revive": "Revive yourself for 500 coins", "topkill": "Show kill leaderboard",
         "propose": "Propose to another user", "accept": "Accept a proposal", "reject": "Reject a proposal",
         "divorce": "End a marriage", "marriage": "View marriage status", "couple": "Pair group players", "topcouples": "View group couples",
         "rps": "Play rock paper scissors", "dice": "Roll a dice", "coinflip": "Flip a coin",
