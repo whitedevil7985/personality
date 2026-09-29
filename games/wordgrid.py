@@ -463,6 +463,10 @@ async def wordgrid_answer(update, context):
     active = context.application.bot_data.get("wordgrid_active", {}).get(chat_id)
     if not active:
         return
+    # Once all words are found, stop treating later normal messages as
+    # WordGrid guesses. The New Grid button will create a fresh active game.
+    if active.get("game_over"):
+        return
 
     # WordGrid answers are now plain text only. The old /answer command is
     # intentionally ignored so users cannot get a usage prompt.
@@ -493,6 +497,7 @@ async def wordgrid_answer(update, context):
 
     remaining = len(active["words"] - active["found"])
     if remaining == 0:
+        active["game_over"] = True
         completion_bonus = 50
         points[user_id] += completion_bonus
         await record_game_result(user_id, "WORDGRID", completion_bonus, True, chat_id)
@@ -516,6 +521,9 @@ async def wordgrid_answer(update, context):
             f"🪙 Bonus rewards: +100 coins +50 XP",
             parse_mode="HTML",
         )
+        # Keep the final board visible, but remove the completed game from
+        # the active-answer map so later group messages are not treated as guesses.
+        context.application.bot_data.get("wordgrid_active", {}).pop(chat_id, None)
     else:
         await _refresh_wordgrid_message(context, chat_id, active)
         found_count = len(active["found"])
