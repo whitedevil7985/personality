@@ -4,6 +4,7 @@ import asyncio
 import time
 import html
 import re
+from collections import deque
 from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
@@ -1427,6 +1428,35 @@ Reply only as Vanya, with natural Hinglish/texting style, while staying honest a
 _AI_HTTP_SESSION = None
 _AI_HTTP_SESSION_LOCK = asyncio.Lock()
 
+# Elite LLM public defaults are 10 chat requests/10 seconds and
+# 60 chat requests/60 seconds. Keep a local limiter so a busy group does
+# not create a thundering herd of 429s at the provider.
+_AI_RATE_LOCK = asyncio.Lock()
+_AI_RATE_EVENTS_10S = deque()
+_AI_RATE_EVENTS_60S = deque()
+_AI_CONCURRENCY = max(1, int(os.getenv("AI_CONCURRENCY", "8")))
+_AI_SEMAPHORE = asyncio.Semaphore(_AI_CONCURRENCY)
+
+def _ai_rate_cleanup(now):
+    while _AI_RATE_EVENTS_10S and now - _AI_RATE_EVENTS_10S[0] >= 10:
+        _AI_RATE_EVENTS_10S.popleft()
+    while _AI_RATE_EVENTS_60S and now - _AI_RATE_EVENTS_60S[0] >= 60:
+        _AI_RATE_EVENTS_60S.popleft()
+
+async def _wait_for_ai_slot():
+    while True:
+        async with _AI_RATE_LOCK:
+            now = time.monotonic()
+            _ai_rate_cleanup(now)
+            if len(_AI_RATE_EVENTS_10S) < 10 and len(_AI_RATE_EVENTS_60S) < 60:
+                _AI_RATE_EVENTS_10S.append(now)
+                _AI_RATE_EVENTS_60S.append(now)
+                return
+            wait_10 = (10 - (now - _AI_RATE_EVENTS_10S[0])) if _AI_RATE_EVENTS_10S else 0
+            wait_60 = (60 - (now - _AI_RATE_EVENTS_60S[0])) if _AI_RATE_EVENTS_60S else 0
+            delay = max(0.05, wait_10, wait_60)
+        await asyncio.sleep(delay)
+
 async def _get_ai_http_session():
     global _AI_HTTP_SESSION
     if _AI_HTTP_SESSION is not None and not _AI_HTTP_SESSION.closed:
@@ -1435,7 +1465,7 @@ async def _get_ai_http_session():
     async with _AI_HTTP_SESSION_LOCK:
         if _AI_HTTP_SESSION is None or _AI_HTTP_SESSION.closed:
             timeout = aiohttp.ClientTimeout(total=max(10, int(os.getenv("AI_TIMEOUT_SECONDS", "18"))))
-            connector = aiohttp.TCPConnector(limit=20, ttl_dns_cache=300)
+            connector = aiohttp.TCPConnector(limit=max(20, _AI_CONCURRENCY + 4), ttl_dns_cache=300)
             _AI_HTTP_SESSION = aiohttp.ClientSession(timeout=timeout, connector=connector)
     return _AI_HTTP_SESSION
 
@@ -1609,21 +1639,53 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         return answer
     try:
         session=await _get_ai_http_session()
-        async with session.post(
-            f"{ELITE_LLM_BASE_URL}/chat/completions",
-            headers={"Authorization":f"Bearer {ELITE_LLM_API_KEY}","Content-Type":"application/json"},
-            json={
-                "model":ELITE_LLM_MODEL or AI_MODEL,
-                "messages":[{"role":"system","content":VANYA_SYSTEM_PROMPT},{"role":"user","content":prompt}],
-                "temperature":float(os.getenv("AI_TEMPERATURE","0.88")),
-                "max_tokens":int(os.getenv("AI_MAX_TOKENS","420")),
-                "stream":False,
-            }
-        ) as resp:
-            raw=await resp.text()
-            if resp.status>=400:
-                raise RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
-            data=await resp.json(content_type=None)
+        payload={
+            "model":ELITE_LLM_MODEL or AI_MODEL,
+            "messages":[{"role":"system","content":VANYA_SYSTEM_PROMPT},{"role":"user","content":prompt}],
+            "temperature":float(os.getenv("AI_TEMPERATURE","0.88")),
+            "max_tokens":int(os.getenv("AI_MAX_TOKENS","420")),
+            "stream":False,
+        }
+        max_attempts=max(1, int(os.getenv("AI_RETRY_ATTEMPTS","3")))
+        last_error=None
+        data=None
+        async with _AI_SEMAPHORE:
+            for attempt in range(max_attempts):
+                await _wait_for_ai_slot()
+                try:
+                    async with session.post(
+                        f"{ELITE_LLM_BASE_URL}/chat/completions",
+                        headers={"Authorization":f"Bearer {ELITE_LLM_API_KEY}","Content-Type":"application/json"},
+                        json=payload,
+                    ) as resp:
+                        raw=await resp.text()
+                        if resp.status == 429:
+                            retry_after = resp.headers.get("Retry-After")
+                            try:
+                                delay=float(retry_after) if retry_after else min(8.0, 1.5 ** attempt)
+                            except Exception:
+                                delay=min(8.0, 1.5 ** attempt)
+                            last_error=RuntimeError(f"Elite LLM HTTP 429: {raw[:300]}")
+                            if attempt < max_attempts - 1:
+                                await asyncio.sleep(max(0.25, delay))
+                                continue
+                            raise last_error
+                        if resp.status >= 500 and attempt < max_attempts - 1:
+                            last_error=RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
+                            await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
+                            continue
+                        if resp.status >= 400:
+                            raise RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
+                        data=await resp.json(content_type=None)
+                        break
+                except asyncio.TimeoutError as exc:
+                    last_error=exc
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
+                        continue
+                    raise
+        if data is None:
+            raise last_error or RuntimeError("Elite LLM request failed")
         answer=((data.get("choices") or [{}])[0].get("message") or {}).get("content","")
         if isinstance(answer,list):
             answer="".join(str(x.get("text", "")) for x in answer if isinstance(x,dict))
