@@ -14,7 +14,7 @@ const $=id=>document.getElementById(id); const esc=s=>String(s??'').replace(/[&<
 function meName(){return tg?.initDataUnsafe?.user?.first_name||'Player'}
 function showErr(s){$('error').textContent=s;$('error').classList.add('show');setTimeout(()=>$('error').classList.remove('show'),2400)}
 async function api(path,opts={}){const r=await fetch(path,opts);return r.json()}
-async function ensureRoom(){if(roomCode)return;const r=await api('/api/uno/rooms',{method:'POST'});if(!r.ok){showErr('Could not create room');return}roomCode=r.room;history.replaceState({},'',`/uno?room=${roomCode}`)}
+async function ensureRoom(){if(roomCode)return;const r=await api('/api/uno/rooms'+(new URLSearchParams(location.search).get('gc')?'?gc='+encodeURIComponent(new URLSearchParams(location.search).get('gc')):''),{method:'POST'});if(!r.ok){showErr('Could not create room');return}roomCode=r.room;history.replaceState({},'',`/uno?room=${roomCode}`)}
 function inviteLink(){const bot='ItzVanyaBot';return `https://t.me/${bot}?startapp=uno_${roomCode}`}
 function connect(){if(!roomCode)return; const init=tg?.initData||''; ws=new WebSocket(`${location.origin.replace(/^http/,'ws')}/ws/uno/${roomCode}?initData=${encodeURIComponent(init)}`);ws.onopen=()=>send({type:'join',name:meName()});ws.onmessage=e=>handle(JSON.parse(e.data));ws.onclose=()=>setTimeout(()=>connect(),1800)}
 function send(o){if(ws?.readyState===1)ws.send(JSON.stringify(o))}
