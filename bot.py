@@ -42,7 +42,6 @@ from games.crash import crash
 from games.charades import charades
 from games.wordchain import wordchain, wordchain_join, wordchain_answer, WORDCHAIN_GAMES
 from games.wordscramble import wordscramble
-from games.wordscramble import wordscramble as wordscramble_game
 from games.hack import hack
 from games.scribble import scribble
 from features import spin, achievements, quest, progress_quest
@@ -57,11 +56,6 @@ if not TOKEN:
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                        VANYA UI                             ║
 # ╚══════════════════════════════════════════════════════════════╝
-
-async def words(update, context):
-    """Separate /words command. It intentionally has its own command entry."""
-    await wordscramble_game(update, context)
-
 
 def get_uno_webapp_url():
     """Return one normalized HTTPS UNO Mini App URL."""
@@ -3260,7 +3254,7 @@ async def main():
         "tap":tap,"bet":bet,"card":card,"cardjoin":cardjoin,"cardstart":cardstart,"cardcancel":cardcancel,"uno":uno,"unojoin":unojoin,"ludo":ludo,"ludojoin":ludojoin,
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
-        "wordchain":wordchain,"wordchainjoin":wordchain_join,"wordscramble":wordscramble,"words":words,"hack":hack,
+        "wordchain":wordchain,"wordchainjoin":wordchain_join,"wordscramble":wordscramble,"hack":hack,
         "scribble":scribble,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
@@ -3295,7 +3289,7 @@ async def main():
         "spin": "Spin for a reward", "achievements": "View achievements", "quest": "View quests",
         "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid",
         "crash": "Play Crash", "charades": "Play Charades", "wordchain": "Start multiplayer Wordchain", "wordchainjoin": "Join active Wordchain lobby",
-        "wordscramble": "Play Wordscramble", "words": "Play Words", "hack": "Play Hack puzzle",
+        "wordscramble": "Play Wordscramble", "hack": "Play Hack puzzle",
         "scribble": "Open Scribble", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
         "panel": "Open owner panel", "ownerpanel": "Open owner panel", "devpanel": "Open owner panel", "broadcast": "Broadcast to users, groups, or both (Owner/Sudo)", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
