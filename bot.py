@@ -23,7 +23,7 @@ from config import (
 from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
 
 # ───────────────────── modular games ─────────────────────
-from games.rps import rps
+from games.rps import rps, rps_cb
 from games.dice import dice
 from games.coinflip import coinflip
 from games.slots import slots
@@ -2117,6 +2117,9 @@ async def callback(update,context):
             "Messages are posted into the current game chat.",
             parse_mode="HTML",
             reply_markup=kb([[InlineKeyboardButton("🎮 Back to Arena",callback_data=f"game:{key}" if key!="ARCADE" else "cat:games")], [InlineKeyboardButton("⌂ Home",callback_data="home")]]))
+        return
+    if data.startswith("rps:"):
+        await rps_cb(q, data.split(":"))
         return
     if data.startswith("card:"):
         await card_cb(q, data.split(":"))
