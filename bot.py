@@ -2056,7 +2056,12 @@ async def mention_chat(update,context):
 
     normalized = re.sub(r"\s+", " ", text.lower()).strip()
     greeting = bool(re.fullmatch(
-        r"(?:hi+|hello+|hey+)(?:\s+@?(?:vanya|itzvanya))?[\s!.?~]*|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+)[\s!.?~]*",
+        r"(?:"
+        r"(?:hi+|hello+|hey+)(?:\s+@?(?:vanya|itzvanya))?"
+        r"|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+)"
+        r"|(?:good\s+morning|good\s+night|goodnight)(?:\s+@?(?:vanya|itzvanya))?"
+        r"|@?(?:vanya|itzvanya)\s+(?:good\s+morning|good\s+night|goodnight)"
+        r")[\s!.?~]*",
         normalized,
         re.I,
     ))
