@@ -2939,7 +2939,7 @@ async def main():
     commands={
         "start":start,"help":help_cmd,"profile":profile,"balance":balance,"bal":balance,
         "daily":daily,"work":work,"give":give,"toprich":toprich,"leaderboard":leaderboard,
-        "rank":rank,"rob":rob,"protect":protect,"shield":lambda u,c: u.message.reply_text("🛡️ Use /protect to activate a shield."),
+        "rank":rank,"rob":rob,"protect":protect,"shield":shield,
         "kill":kill,"revive":revive,"topkill":topkill,
         "propose":propose,"accept":accept,"reject":reject,"divorce":divorce,"marriage":marriage,"couple":couple,"topcouples":topcouples,
         "rps":rps,"dice":dice,"coinflip":coinflip,"slots":slots,"jumble":jumble,
