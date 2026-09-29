@@ -33,6 +33,7 @@ async def scribble(update, context):
         return
 
     if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+        url = url + ("&" if "?" in url else "?") + "gc=" + str(update.effective_chat.id)
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🖌️ Open Scribble", url=url)],
             [InlineKeyboardButton("💬 Game Chat", callback_data="gchat:SCRIBBLE")],
