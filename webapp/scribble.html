@@ -110,7 +110,7 @@ $('size').oninput=()=>$('sizeValue').textContent=$('size').value;
 async function createRoom(){
   try{
     setStatus('Creating room…');
-    const r=await fetch('/api/scribble/rooms',{method:'POST'});
+    const r=await fetch('/api/scribble/rooms'+(new URLSearchParams(location.search).get('gc')?'?gc='+encodeURIComponent(new URLSearchParams(location.search).get('gc')):''),{method:'POST'});
     const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Could not create room');
     roomCode=String(d.room).toUpperCase();$('code').value=roomCode;connect(true);
   }catch(e){setStatus('Could not create room');toast('⚠️ '+e.message)}
