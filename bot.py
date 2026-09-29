@@ -420,7 +420,7 @@ def safe_html(text):
 
 CATEGORIES = {
 "economy": ("💰 <b>Economy commands</b> 💰", [
-"/balance or /bal — Check your balance and XP",
+"/bal — Check your balance and XP",
 "/daily — Claim your daily cash reward",
 "/work — Work for coins",
 "/give &lt;amount&gt; — Transfer coins (reply to a user)",
@@ -2937,7 +2937,7 @@ async def main():
     web_runner = await start_web_server()
     app=Application.builder().bot(ProtectedBot(TOKEN)).build()
     commands={
-        "start":start,"help":help_cmd,"profile":profile,"balance":balance,"bal":balance,
+        "start":start,"help":help_cmd,"profile":profile,"bal":balance,
         "daily":daily,"work":work,"give":give,"toprich":toprich,"leaderboard":leaderboard,
         "rank":rank,"rob":rob,"protect":protect,"shield":shield,
         "kill":kill,"revive":revive,"topkill":topkill,
@@ -2964,7 +2964,7 @@ async def main():
     # command suggestions shown by established bots).
     command_descriptions = {
         "start": "Start Vanya", "help": "Open help and command categories",
-        "profile": "View your profile", "balance": "Check your balance", "bal": "Check your balance",
+        "profile": "View your profile", "bal": "Check your balance",
         "daily": "Claim daily coins and XP", "work": "Work for coins", "give": "Give coins to another user",
         "toprich": "Show richest users", "leaderboard": "Show the leaderboard", "rank": "Show your rank",
         "rob": "Rob up to the target balance", "protect": "Buy 1d/2d protection", "shield": "Check protection time",
