@@ -28,8 +28,16 @@ def new_code():
     alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
     while True:
         code = ''.join(random.choice(alphabet) for _ in range(6))
-        if code not in ROOMS:
+        if code not in ROOMS and code not in CHESS_ROOMS:
             return code
+
+
+def request_group_id(request):
+    try:
+        value = int(request.query.get('gc', '0') or 0)
+        return value if value else None
+    except (TypeError, ValueError):
+        return None
 
 
 def new_room(game='ludo'):
@@ -274,6 +282,7 @@ async def create_ludo_room(request):
         code = new_code()
         room = new_room('ludo')
         room['code'] = code
+        room['group_id'] = request_group_id(request)
         room['positions'] = {}
         room['pending_roll'] = 0
         room['movable'] = []
@@ -502,7 +511,7 @@ def chess_current_player(room):
 async def create_chess_room(request):
     if chesslib is None: return web.json_response({'ok':False,'error':'Chess package unavailable'},status=500)
     async with CHESS_LOCK:
-        code=new_code(); room=new_chess_room(); room['code']=code; CHESS_ROOMS[code]=room
+        code=new_code(); room=new_chess_room(); room['code']=code; room['group_id']=request_group_id(request); CHESS_ROOMS[code]=room
     return web.json_response({'ok':True,'room':code})
 
 async def chess_page(request): return web.FileResponse(WEB/'chess.html')
@@ -636,6 +645,7 @@ async def create_scribble_room(request):
         code = new_code()
         room = new_scribble_room()
         room['code'] = code
+        room['group_id'] = request_group_id(request)
         ROOMS['S:' + code] = room
     return web.json_response({'ok': True, 'room': code})
 
@@ -881,7 +891,7 @@ async def maybe_uno_bot_turn(room):
 
 async def create_uno_room(request):
     async with ROOM_LOCK:
-        code=new_code(); room=new_uno_room(); room['code']=code; room['deck']=make_uno_deck(); room['top']=room['deck'].pop();
+        code=new_code(); room=new_uno_room(); room['code']=code; room['group_id']=request_group_id(request); room['deck']=make_uno_deck(); room['top']=room['deck'].pop();
         while room['top']['color']==UNO_WILD: room['deck'].insert(0,room['top']); room['top']=room['deck'].pop()
         room['discard']=[room['top']]; ROOMS['U:'+code]=room
     return web.json_response({'ok':True,'room':code})
@@ -1076,11 +1086,60 @@ async def config(request):
 async def health(request): return web.json_response({'ok':True,'app':'ItzVanyaBot Games Web Apps','ludo_rooms':sum(1 for k in ROOMS if k.startswith('L:')),'uno_rooms':sum(1 for k in ROOMS if k.startswith('U:'))})
 
 
+async def end_web_rooms_for_group(group_id):
+    """End all browser-game rooms that were launched from a Telegram group."""
+    ended = 0
+    try:
+        gid = int(group_id)
+    except (TypeError, ValueError):
+        return 0
+
+    for key, room in list(ROOMS.items()):
+        if room.get('group_id') != gid:
+            continue
+        payload = json.dumps({
+            'type': 'game_ended',
+            'message': 'This game was ended from the Telegram group by /end.',
+        }, separators=(',', ':'))
+        for p in room.get('players', []):
+            ws = p.get('ws')
+            if ws and not ws.closed:
+                try:
+                    await ws.send_str(payload)
+                    await ws.close()
+                except Exception:
+                    pass
+        ROOMS.pop(key, None)
+        ended += 1
+
+    for code, room in list(CHESS_ROOMS.items()):
+        if room.get('group_id') != gid:
+            continue
+        payload = json.dumps({
+            'type': 'game_ended',
+            'message': 'This game was ended from the Telegram group by /end.',
+        }, separators=(',', ':'))
+        for p in room.get('players', []):
+            ws = p.get('ws')
+            if ws and not ws.closed:
+                try:
+                    await ws.send_str(payload)
+                    await ws.close()
+                except Exception:
+                    pass
+        CHESS_ROOMS.pop(code, None)
+        ended += 1
+
+    return ended
+
+
 async def cleanup_rooms(app):
     while True:
         await asyncio.sleep(300); now=time.time()
         for code,room in list(ROOMS.items()):
             if now-room['updated']>21600: ROOMS.pop(code,None)
+        for code,room in list(CHESS_ROOMS.items()):
+            if now-room['updated']>21600: CHESS_ROOMS.pop(code,None)
 
 
 async def cleanup_ctx(app):
