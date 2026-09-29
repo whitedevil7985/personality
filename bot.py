@@ -1613,7 +1613,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
             f"{ELITE_LLM_BASE_URL}/chat/completions",
             headers={"Authorization":f"Bearer {ELITE_LLM_API_KEY}","Content-Type":"application/json"},
             json={
-                "model":AI_MODEL or ELITE_LLM_MODEL,
+                "model":ELITE_LLM_MODEL or AI_MODEL,
                 "messages":[{"role":"system","content":VANYA_SYSTEM_PROMPT},{"role":"user","content":prompt}],
                 "temperature":float(os.getenv("AI_TEMPERATURE","0.88")),
                 "max_tokens":int(os.getenv("AI_MAX_TOKENS","420")),
