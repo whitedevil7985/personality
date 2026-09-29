@@ -2073,10 +2073,10 @@ async def mention_chat(update,context):
     # - say hi/hello/hey to Vanya
     # - or simply send a normal message when group AI is enabled.
     # This is intentionally not tied to bot-admin status.
-    # Vanya's group chat is intentionally open to normal messages too.
-    # Bot-admin status is never checked here. Telegram still requires the
-    # bot's Group Privacy Mode to be disabled for ordinary messages to arrive.
-    should_reply = True
+    # In groups Vanya should not interrupt normal conversations.
+    # Reply only when she is directly mentioned, greeted, or someone replies
+    # to one of her messages. Bot-admin status is not required for this.
+    should_reply = mentioned or greeting or replied_to_bot
     if not should_reply:
         return
 
