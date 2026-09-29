@@ -58,7 +58,7 @@ AI_DISCLOSURE = _bool("AI_DISCLOSURE", False)
 # Elite LLMs is OpenAI-compatible and uses /v1/chat/completions.
 ELITE_LLM_API_KEY = os.getenv("ELITE_LLM_API_KEY", "").strip().strip('"').strip("'")
 ELITE_LLM_BASE_URL = os.getenv("ELITE_LLM_BASE_URL", "https://elite-llms.vercel.app/v1").strip().rstrip("/")
-ELITE_LLM_MODEL = os.getenv("ELITE_LLM_MODEL", "gpt-5-mini").strip().strip('"').strip("'")
+ELITE_LLM_MODEL = os.getenv("ELITE_LLM_MODEL", "gpt-5.6-luna").strip().strip('"').strip("'")
 # Keep AI_MODEL for compatibility with older deployments.
 AI_MODEL = os.getenv("AI_MODEL", "").strip() or ELITE_LLM_MODEL
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "30"))
