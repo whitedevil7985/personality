@@ -80,8 +80,24 @@ class ProtectedBot(Bot):
         return rendered, ("HTML" if parse_mode is None else parse_mode)
 
     @classmethod
+    def _sanitize_reply_markup(cls, markup):
+        """Telegram inline-keyboard text does not support HTML tg-emoji tags."""
+        if markup is None:
+            return markup
+        try:
+            for row in getattr(markup, "inline_keyboard", []) or []:
+                for button in row:
+                    if getattr(button, "text", None):
+                        button.text = cls._strip_emoji_markup(button.text)
+        except Exception:
+            pass
+        return markup
+
+    @classmethod
     async def _prepare_message_kwargs(cls, kwargs, caption=False):
         kwargs.setdefault("protect_content", True)
+        if kwargs.get("reply_markup") is not None:
+            kwargs["reply_markup"] = cls._sanitize_reply_markup(kwargs["reply_markup"])
         key = "caption" if caption else "text"
         if kwargs.get(key) is not None:
             kwargs[key], kwargs["parse_mode"] = await cls._render_custom_emoji(
