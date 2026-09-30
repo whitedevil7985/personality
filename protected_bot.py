@@ -35,11 +35,11 @@ class ProtectedBot(Bot):
     def _strip_emoji_markup(cls, text):
         """Remove Telegram custom-emoji markup and emoji IDs from outgoing text."""
         text = str(text or "")
-        text = re.sub(r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>", r"\\1", text, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r"<tg-emoji\\b[^>]*>", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>", r"\\1", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<tg-emoji\b[^>]*>", "", text, flags=re.IGNORECASE)
         text = re.sub(r"</tg-emoji>", "", text, flags=re.IGNORECASE)
         text = re.sub(r'emoji[-_ ]?id\s*=\s*["\']?[^\s>"\']+["\']?', "", text, flags=re.IGNORECASE)
-        text = re.sub(r"emoji[-_ ]?id\\s*[:=]\\s*\\d+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"emoji[-_ ]?id\s*[:=]\s*\d+", "", text, flags=re.IGNORECASE)
         return text
 
     @classmethod
