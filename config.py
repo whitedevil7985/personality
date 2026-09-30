@@ -46,7 +46,7 @@ MONGO_DB = os.getenv("MONGO_DB", "ItzVanyaBot").strip() or "ItzVanyaBot"
 
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 DEVELOPER_NAME = os.getenv("DEVELOPER_NAME", "Developer")
-OWNER_PROFILE_URL = os.getenv("OWNER_PROFILE_URL", f"tg://user?id={OWNER_ID}")
+OWNER_PROFILE_URL = os.getenv("OWNER_PROFILE_URL", "https://t.me/")
 UPDATES_URL = os.getenv("UPDATES_URL", "https://t.me/")
 SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/")
 LOGGER_CHAT_ID = int(os.getenv("LOGGER_CHAT_ID", "0"))
