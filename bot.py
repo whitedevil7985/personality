@@ -1767,7 +1767,7 @@ async def _call_chatgp_api(text_value):
             async with session.post(
                 CHATGP_API_URL,
                 headers=_ai_headers(CHATGP_API_KEY),
-                json={"prompt": text_value},
+                json={"prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}"},
             ) as resp:
                 raw = await resp.text()
                 if resp.status >= 400:
