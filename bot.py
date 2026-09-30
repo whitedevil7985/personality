@@ -2582,9 +2582,19 @@ async def mention_chat(update,context):
     )
 
     # If another user is explicitly tagged, keep Vanya out of that
-    # direct conversation. Otherwise, ordinary messages — including replies
-    # to other users — should still receive a Vanya response.
+    # direct conversation.
     if other_user_mentioned and not mentioned:
+        return
+
+    # A reply to another person's message is also a private conversation
+    # between those users. Only replies to Vanya should trigger her.
+    reply_to = update.message.reply_to_message
+    if (
+        reply_to is not None
+        and reply_to.from_user is not None
+        and reply_to.from_user.id != context.bot.id
+        and not mentioned
+    ):
         return
 
     # Group AI mode: reply to ordinary messages too, even without a mention,
