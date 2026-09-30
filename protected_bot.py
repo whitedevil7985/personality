@@ -1,4 +1,5 @@
 import html
+import random
 import time
 import re
 
@@ -29,12 +30,12 @@ class ProtectedBot(Bot):
     def _strip_emoji_markup(cls, text):
         text = str(text or "")
         text = re.sub(
-            r'(?is)(?:<|&lt;)tg-emoji\\b[^>]*>(.*?)(?:</tg-emoji>|&lt;/tg-emoji&gt;)',
-            r'\\1',
+            r'(?is)(?:<|&lt;)tg-emoji\b[^>]*>(.*?)(?:</tg-emoji>|&lt;/tg-emoji&gt;)',
+            r'\1',
             text,
         )
         text = re.sub(
-            r'(?is)(?:<|&lt;)tg-emoji\\b[^>]*(?:>|&gt;)',
+            r'(?is)(?:<|&lt;)tg-emoji\b[^>]*(?:>|&gt;)',
             '',
             text,
         )
@@ -44,7 +45,7 @@ class ProtectedBot(Bot):
             text,
         )
         text = re.sub(
-            r'''(?i)\\bemoji[-_ ]?id\\s*(?:=|:)\\s*(?:"|&quot;|'|&apos;)?\\d+(?:"|&quot;|'|&apos;)?''',
+            r'''(?i)\bemoji[-_ ]?id\s*(?:=|:)\s*(?:"|&quot;|'|&apos;)?\d+(?:"|&quot;|'|&apos;)?''',
             '',
             text,
         )
@@ -58,8 +59,6 @@ class ProtectedBot(Bot):
         if not mapping:
             return cleaned, parse_mode
 
-        # Telegram custom emoji are HTML entities, so HTML mode is required.
-        # Escape user/provider text first, then replace only trusted aliases.
         escaped = html.escape(cleaned)
         placeholders = {}
         for index, alt in enumerate(sorted(mapping, key=len, reverse=True)):
