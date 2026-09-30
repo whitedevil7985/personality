@@ -24,54 +24,65 @@ def _bet_font(size, bold=False):
 
 
 def _make_bet_result_image(won: bool, amount: int, balance: int):
-    """Create the BET result card in memory, so no image files are required."""
-    width, height = 1200, 630
-    # Dark casino-style background with a different accent for win/loss.
-    bg = (18, 24, 35)
-    accent = (46, 204, 113) if won else (231, 76, 60)
-    accent_dark = (25, 112, 65) if won else (125, 38, 31)
+    """Create a simple, highly readable BET result card."""
+    width, height = 1200, 700
+    bg = (12, 17, 27)
+    accent = (25, 150, 85) if won else (190, 55, 55)
 
     image = Image.new("RGB", (width, height), bg)
     draw = ImageDraw.Draw(image)
 
-    # Soft card + accent bands.
+    # Main card
     draw.rounded_rectangle(
-        (35, 35, width - 35, height - 35),
-        radius=42,
-        fill=(27, 36, 51),
+        (40, 45, width - 40, height - 45),
+        radius=35,
+        fill=(29, 38, 54),
         outline=accent,
-        width=5,
-    )
-    draw.rounded_rectangle(
-        (65, 65, width - 65, 185),
-        radius=30,
-        fill=accent_dark,
+        width=7,
     )
 
-    title = "YOU GAINED" if won else "YOU LOST"
-    title_font = _bet_font(68, True)
-    amount_font = _bet_font(100, True)
-    small_font = _bet_font(34, False)
-    balance_font = _bet_font(42, True)
+    # Header
+    draw.rounded_rectangle(
+        (65, 75, width - 65, 205),
+        radius=28,
+        fill=accent,
+    )
+
+    title = "YOU WON!" if won else "YOU LOST!"
+    amount_text = f"+{amount:,} COINS" if won else f"-{amount:,} COINS"
+    message = "Your bet paid off!" if won else "Better luck next time!"
+
+    title_font = _bet_font(70, True)
+    amount_font = _bet_font(64, True)
+    small_font = _bet_font(36, False)
+    balance_font = _bet_font(40, True)
+    coin_font = _bet_font(46, True)
 
     def centered(text, font, y, fill):
         box = draw.textbbox((0, 0), text, font=font)
         x = (width - (box[2] - box[0])) / 2
         draw.text((x, y), text, font=font, fill=fill)
 
-    centered(title, title_font, 83, (255, 255, 255))
-    centered(f"{amount:,} COINS", amount_font, 225, accent)
-    centered(
-        "Your bet paid off!" if won else "Better luck next time!",
-        small_font,
-        355,
-        (210, 220, 235),
-    )
-    centered(f"Balance: {balance:,} coins", balance_font, 430, (255, 255, 255))
+    centered(title, title_font, 95, (255, 255, 255))
+    centered(amount_text, amount_font, 270, accent)
+    centered(message, small_font, 375, (220, 225, 235))
+    centered(f"Balance: {balance:,} coins", balance_font, 460, (255, 255, 255))
 
-    # Decorative casino chips.
-    for x, y, r in ((115, 525, 34), (180, 550, 22), (1020, 525, 34), (1085, 550, 22)):
-        draw.ellipse((x-r, y-r, x+r, y+r), fill=accent_dark, outline=accent, width=5)
+    # Large coin icon
+    cx, cy = width // 2, 610
+    draw.ellipse(
+        (cx - 48, cy - 48, cx + 48, cy + 48),
+        fill=(242, 190, 50),
+        outline=(255, 230, 120),
+        width=5,
+    )
+    box = draw.textbbox((0, 0), "$", font=coin_font)
+    draw.text(
+        (cx - (box[2] - box[0]) / 2, cy - (box[3] - box[1]) / 2 - 5),
+        "$",
+        font=coin_font,
+        fill=(100, 70, 10),
+    )
 
     output = io.BytesIO()
     output.name = "bet_result.png"
