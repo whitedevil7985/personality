@@ -2448,7 +2448,10 @@ async def chat(update,context):
     if not text:
         await update.message.reply_text("💬 Tell me something: /chat hello Vanya")
         return
-    await ensure_user(update.effective_user)
+    try:
+        await ensure_user(update.effective_user)
+    except Exception as exc:
+        print(f"[Chat][DB] ensure_user skipped: {type(exc).__name__}: {exc}")
     try:
         await update.effective_chat.send_action("typing")
     except Exception:
@@ -2513,7 +2516,10 @@ async def mention_chat(update,context):
             return
         if text.startswith("/"):
             return
-        await ensure_user(update.effective_user)
+        try:
+            await ensure_user(update.effective_user)
+        except Exception as exc:
+            print(f"[Chat][DB] ensure_user skipped: {type(exc).__name__}: {exc}")
         answer = await ai_reply(update.effective_user, text, "private")
         await send_vanya_reply(update, answer)
         return
