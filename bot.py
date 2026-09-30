@@ -2546,7 +2546,7 @@ async def mention_chat(update,context):
     if bot_username:
         vanya_aliases.add(bot_username.lower().lstrip("@"))
 
-    mentioned = bool(re.search(r"(?<!\\w)(?:@?(?:vanya|itzvanya))(?!\\w)", text, re.I))
+    mentioned = bool(re.search(r"(?<!\w)(?:@?(?:vanya|itzvanya))(?!\w)", text, re.I))
     other_user_mentioned = False
 
     for entity in (update.message.entities or []):
@@ -2557,20 +2557,19 @@ async def mention_chat(update,context):
             else:
                 other_user_mentioned = True
 
-    # Fallback for @usernames that Telegram clients may deliver without a
-    # usable entity list.
-    for username in re.findall(r"(?<!\\w)@([A-Za-z0-9_]{3,32})", text):
+    # Fallback for usernames when Telegram does not provide a usable entity.
+    for username in re.findall(r"(?<!\w)@([A-Za-z0-9_]{3,32})", text):
         if username.lower() not in vanya_aliases:
             other_user_mentioned = True
 
-    normalized = re.sub(r"\\s+", " ", text.lower()).strip()
+    normalized = re.sub(r"\s+", " ", text.lower()).strip()
     greeting = bool(re.fullmatch(
         r"(?:"
-        r"(?:hi+|hello+|hey+)(?:\\s+@?(?:vanya|itzvanya))?(?:\\s+.*)?"
-        r"|@?(?:vanya|itzvanya)\\s+(?:hi+|hello+|hey+)(?:\\s+.*)?"
-        r"|(?:good\\s+morning|good\\s+night|goodnight)\\s+@?(?:vanya|itzvanya)(?:\\s+.*)?"
-        r"|@?(?:vanya|itzvanya)\\s+(?:good\\s+morning|good\\s+night|goodnight)(?:\\s+.*)?"
-        r")[\\s!.?~]*",
+        r"(?:hi+|hello+|hey+)(?:\s+@?(?:vanya|itzvanya))?(?:\s+.*)?"
+        r"|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+)(?:\s+.*)?"
+        r"|(?:good\s+morning|good\s+night|goodnight)\s+@?(?:vanya|itzvanya)(?:\s+.*)?"
+        r"|@?(?:vanya|itzvanya)\s+(?:good\s+morning|good\s+night|goodnight)(?:\s+.*)?"
+        r")[\s!.?~]*",
         normalized,
         re.I,
     ))
