@@ -1896,7 +1896,7 @@ def _strip_non_custom_emoji(text_value):
 
 
 async def _premiumize_text(text_value):
-    """Allow only saved Telegram custom/premium emoji in Vanya replies.
+    """Render saved custom emoji without ever blocking a normal AI reply.
 
     OWNER_ID being Premium does not automatically give the bot access to the
     owner's emoji library. The Owner must provide custom emoji IDs via
@@ -1935,6 +1935,13 @@ async def _premiumize_text(text_value):
 
 
 async def send_vanya_reply(update, text_value):
+    # AI replies must still be delivered if the optional custom-emoji renderer fails.
+    try:
+        rendered, has_custom = await _premiumize_text(text_value)
+    except Exception as exc:
+        print(f"[CustomEmoji] reply rendering skipped: {type(exc).__name__}: {exc}")
+        rendered, has_custom = str(text_value or ""), False
+
     if AI_DISCLOSURE and update.effective_chat.type=="private":
         u=await get_user(update.effective_user.id)
         if not u.get("ai_disclosure_sent"):
@@ -1946,7 +1953,6 @@ async def send_vanya_reply(update, text_value):
             else:
                 await update.effective_chat.send_message(html.unescape(disclosure))
             await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
-    rendered, has_custom = await _premiumize_text(text_value)
     if has_custom:
         await update.message.reply_text(rendered, parse_mode="HTML")
     else:
