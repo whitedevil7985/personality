@@ -2525,9 +2525,14 @@ async def mention_chat(update,context):
     if not AI_GROUP_MODE:
         return
 
-    # Never let the normal AI chat handler consume word-game answers.
+    # Never let the normal AI chat handler consume active word-game answers.
     wordgrid_active = context.application.bot_data.get("wordgrid_active", {})
-    if chat.id in wordgrid_active or chat.id in WORDSEEK_GAMES:
+    if (
+        chat.id in wordgrid_active
+        or chat.id in WORDSEEK_GAMES
+        or chat.id in WORDCHAIN_GAMES
+        or chat.id in WORDSCRAMBLE_GAMES
+    ):
         return
 
     if text.startswith("/"):
@@ -2569,19 +2574,10 @@ async def mention_chat(update,context):
         and update.message.reply_to_message.from_user.id == context.bot.id
     )
 
-    # Group chat now works without making Vanya an admin:
-    # - reply to Vanya
-    # - mention Vanya
-    # - say hi/hello/hey to Vanya
-    # - say good morning/good night only when explicitly addressing Vanya
-    # - or simply send a normal message when group AI is enabled.
-    # This is intentionally not tied to bot-admin status.
-    # In groups Vanya should not interrupt normal conversations.
-    # Reply only when she is directly mentioned, greeted, or someone replies
-    # to one of her messages. Bot-admin status is not required for this.
-    should_reply = mentioned or greeting or replied_to_bot
-    if not should_reply:
-        return
+    # Group AI mode: reply to ordinary messages too, even without a mention,
+    # greeting, or reply-to-Vanya. Commands and active game answers are
+    # excluded above.
+    should_reply = True
 
     # Do non-critical progression work in the background so it cannot add
     # MongoDB latency to the visible chat reply.
