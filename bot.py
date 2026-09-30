@@ -1920,17 +1920,33 @@ def _strip_non_custom_emoji(text_value):
 
 
 async def _premiumize_text(text_value):
-    """Render saved custom emoji without ever blocking a normal AI reply.
+    """Render only Vanya's saved custom emoji.
 
-    OWNER_ID being Premium does not automatically give the bot access to the
-    owner's emoji library. The Owner must provide custom emoji IDs via
-    /addemoji. Every ordinary Unicode emoji is removed unless its exact
-    fallback emoji has a saved Telegram custom-emoji ID.
+    AI models sometimes copy Telegram's <tg-emoji> markup into their answer.
+    Never expose that markup to users. Strip model-generated tags first, then
+    convert only emoji that the owner explicitly saved with /addemoji.
     """
     text_value = str(text_value or "")
-    mapping = await _load_custom_emoji_map()
 
-    # Protect known custom-emoji alternatives with placeholders first.
+    # AI may generate Telegram custom-emoji markup as plain text.
+    # Keep its visible fallback emoji and let our own mapping decide whether
+    # it should become a real Telegram custom emoji.
+    text_value = re.sub(
+        r'<tg-emoji\b[^>]*>(.*?)</tg-emoji>',
+        r'\1',
+        text_value,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    try:
+        mapping = await _load_custom_emoji_map()
+    except Exception as exc:
+        print(f"[CustomEmoji] map unavailable: {type(exc).__name__}: {exc}")
+        mapping = {}
+
+    if not isinstance(mapping, dict):
+        mapping = {}
+
     placeholders = {}
     cleaned = text_value
     for index, alt in enumerate(sorted(mapping, key=len, reverse=True)):
@@ -1941,10 +1957,8 @@ async def _premiumize_text(text_value):
         placeholders[token] = (alt, random.choice(ids))
         cleaned = cleaned.replace(alt, token)
 
-    # Strip every remaining ordinary Unicode emoji.
     cleaned = _strip_non_custom_emoji(cleaned)
 
-    # Restore only the saved custom/premium emoji entities.
     rendered = html.escape(cleaned)
     replaced_count = 0
     for token, (alt, eid) in placeholders.items():
