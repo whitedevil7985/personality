@@ -1992,10 +1992,9 @@ async def send_vanya_reply(update, text_value):
             else:
                 await update.effective_chat.send_message(html.unescape(disclosure))
             await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
-    if has_custom:
-        await update.message.reply_text(rendered, parse_mode="HTML")
-    else:
-        await update.message.reply_text(text_value)
+    # ALWAYS send the sanitized/rendered value.
+    # Never send the raw AI output because it may contain <tg-emoji ...> markup.
+    await update.message.reply_text(rendered, parse_mode="HTML")
 
 async def cleanup_expired_memory():
     cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
