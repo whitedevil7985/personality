@@ -41,7 +41,7 @@ from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_word
 from games.crash import crash
 from games.charades import charades
 from games.wordchain import wordchain, wordchain_join, wordchain_answer, WORDCHAIN_GAMES
-from games.wordscramble import wordscramble
+from games.wordscramble import wordscramble, wordscramble_answer, WORDSCRAMBLE_GAMES
 from games.hack import hack
 from games.scribble import scribble
 from features import spin, achievements, quest, progress_quest
@@ -2491,6 +2491,11 @@ async def direct_game_answer(update, context):
 
     if chat_id in WORDCHAIN_GAMES:
         handled = await wordchain_answer(update, context)
+        if handled:
+            return
+
+    if chat_id in WORDSCRAMBLE_GAMES:
+        handled = await wordscramble_answer(update, context)
         if handled:
             return
 
