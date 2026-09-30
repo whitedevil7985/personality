@@ -62,6 +62,10 @@ class ProtectedBot(Bot):
         return text.strip()
 
     @classmethod
+    async def _render_custom_emoji(cls, text, parse_mode=None):
+        return cls._strip_emoji_markup(text), parse_mode
+
+    @classmethod
     def _sanitize_reply_markup(cls, markup):
         """Telegram inline-keyboard text does not support HTML tg-emoji tags."""
         if markup is None:
