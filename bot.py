@@ -2539,31 +2539,38 @@ async def mention_chat(update,context):
         return
 
     # Telegram can deliver an @mention as an entity rather than as plain text.
-    # Check both the actual bot username and the legacy Vanya names.
-    mentioned = bool(re.search(r"(?<!\w)(?:@?itzvanya|@?vanya)(?!\w)", text, re.I))
+    # Only Vanya's own mentions should wake the AI. If someone is talking to
+    # another tagged user, do not interrupt that conversation.
     bot_username = getattr(context.bot, "username", None)
+    vanya_aliases = {"vanya", "itzvanya"}
     if bot_username:
-        mentioned = mentioned or bool(
-            re.search(
-                rf"(?<!\w)@{re.escape(bot_username)}(?!\w)",
-                text,
-                re.I,
-            )
-        )
+        vanya_aliases.add(bot_username.lower().lstrip("@"))
+
+    mentioned = bool(re.search(r"(?<!\\w)(?:@?(?:vanya|itzvanya))(?!\\w)", text, re.I))
+    other_user_mentioned = False
+
     for entity in (update.message.entities or []):
         if getattr(entity, "type", "") == "mention":
-            mention_text = text[entity.offset:entity.offset + entity.length]
-            if bot_username and mention_text.lstrip("@").lower() == bot_username.lower():
+            mention_text = text[entity.offset:entity.offset + entity.length].lstrip("@").lower()
+            if mention_text in vanya_aliases:
                 mentioned = True
+            else:
+                other_user_mentioned = True
 
-    normalized = re.sub(r"\s+", " ", text.lower()).strip()
+    # Fallback for @usernames that Telegram clients may deliver without a
+    # usable entity list.
+    for username in re.findall(r"(?<!\\w)@([A-Za-z0-9_]{3,32})", text):
+        if username.lower() not in vanya_aliases:
+            other_user_mentioned = True
+
+    normalized = re.sub(r"\\s+", " ", text.lower()).strip()
     greeting = bool(re.fullmatch(
         r"(?:"
-        r"(?:hi+|hello+|hey+)(?:\s+@?(?:vanya|itzvanya))?(?:\s+.*)?"
-        r"|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+)(?:\s+.*)?"
-        r"|(?:good\s+morning|good\s+night|goodnight)\s+@?(?:vanya|itzvanya)(?:\s+.*)?"
-        r"|@?(?:vanya|itzvanya)\s+(?:good\s+morning|good\s+night|goodnight)(?:\s+.*)?"
-        r")[\s!.?~]*",
+        r"(?:hi+|hello+|hey+)(?:\\s+@?(?:vanya|itzvanya))?(?:\\s+.*)?"
+        r"|@?(?:vanya|itzvanya)\\s+(?:hi+|hello+|hey+)(?:\\s+.*)?"
+        r"|(?:good\\s+morning|good\\s+night|goodnight)\\s+@?(?:vanya|itzvanya)(?:\\s+.*)?"
+        r"|@?(?:vanya|itzvanya)\\s+(?:good\\s+morning|good\\s+night|goodnight)(?:\\s+.*)?"
+        r")[\\s!.?~]*",
         normalized,
         re.I,
     ))
@@ -2573,6 +2580,19 @@ async def mention_chat(update,context):
         and update.message.reply_to_message.from_user is not None
         and update.message.reply_to_message.from_user.id == context.bot.id
     )
+
+    # If the message is aimed at another tagged user, Vanya stays quiet.
+    # Likewise, a reply to another person's message is treated as a private
+    # conversation between those users unless Vanya is explicitly mentioned.
+    if other_user_mentioned and not mentioned:
+        return
+    if (
+        update.message.reply_to_message is not None
+        and update.message.reply_to_message.from_user is not None
+        and not replied_to_bot
+        and not mentioned
+    ):
+        return
 
     # Group AI mode: reply to ordinary messages too, even without a mention,
     # greeting, or reply-to-Vanya. Commands and active game answers are
