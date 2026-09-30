@@ -1532,7 +1532,7 @@ async def _get_ai_http_session():
     import aiohttp
     async with _AI_HTTP_SESSION_LOCK:
         if _AI_HTTP_SESSION is None or _AI_HTTP_SESSION.closed:
-            timeout = aiohttp.ClientTimeout(total=max(10, int(os.getenv("AI_TIMEOUT_SECONDS", "18"))))
+            timeout = aiohttp.ClientTimeout(total=max(6, int(os.getenv("AI_TIMEOUT_SECONDS", "8"))))
             connector = aiohttp.TCPConnector(limit=max(20, _AI_CONCURRENCY + 4), ttl_dns_cache=300)
             _AI_HTTP_SESSION = aiohttp.ClientSession(timeout=timeout, connector=connector)
     return _AI_HTTP_SESSION
@@ -1704,7 +1704,7 @@ async def _call_elite_api(text_value):
         if model_name and model_name not in fallback_models:
             fallback_models.append(model_name)
 
-    max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "3")))
+    max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
     last_error = None
 
     async with _AI_SEMAPHORE:
@@ -1819,8 +1819,20 @@ async def probe_ai_providers():
     return results
 
 
+async def _save_chat_state_background(user_id, user_text, answer):
+    """Persist memory/history after the user already received the fast reply."""
+    try:
+        await remember_facts(user_id, user_text)
+    except Exception as exc:
+        print(f"[AI][DB] remember skipped: {type(exc).__name__}: {exc}")
+    try:
+        await _append_history(user_id, user_text, answer)
+    except Exception as exc:
+        print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
+
+
 async def ai_reply(user, text_value, chat_type="private", group_title=""):
-    # MongoDB is used for memory/economy, but it must never prevent a chat reply.
+    """Fast chat path: one DB read before the API, persistence after the reply."""
     try:
         await ensure_user(user)
     except Exception as exc:
@@ -1828,58 +1840,45 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
 
     quick = _identity_quick_reply(text_value)
     if quick and chat_type == "private":
-        try:
-            await _append_history(user.id, text_value, quick)
-        except Exception as exc:
-            print(f"[AI][DB] history skipped: {type(exc).__name__}: {exc}")
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
         return quick
 
-    memory = ""
-    history = ""
+    # One Mongo read is enough to build the prompt. Older code performed
+    # remember_facts -> prune -> get_user before contacting the AI provider.
     try:
-        await remember_facts(user.id, text_value)
-        await _prune_and_get_memories(user.id)
         u = await get_user(user.id) or {}
         history = _history_text(u)
         memory = _memory_text(u)
     except Exception as exc:
-        print(f"[AI][DB] memory unavailable; continuing without memory: {type(exc).__name__}: {exc}")
+        print(f"[AI][DB] prompt context unavailable: {type(exc).__name__}: {exc}")
+        history = ""
+        memory = ""
 
-    prompt=(
-        f"Chat type: {chat_type}. Group: {group_title or 'DM'}\n"
-        f"User display name: {user.first_name or 'User'}\n\n"
-        f"Saved memory (last {MEMORY_DAYS} days):\n{memory}\n\n"
-        f"Recent conversation:\n{history or '- None yet.'}\n\n"
-        f"User's new message:\n{text_value}\n\n"
+    prompt = (
+        f"Chat type: {chat_type}. Group: {group_title or 'DM'}\\n"
+        f"User display name: {user.first_name or 'User'}\\n\\n"
+        f"Saved memory (last {MEMORY_DAYS} days):\\n{memory}\\n\\n"
+        f"Recent conversation:\\n{history or '- None yet.'}\\n\\n"
+        f"User's new message:\\n{text_value}\\n\\n"
         "Reply only as Vanya. Be natural, concise, warm, and context-aware."
     )
 
     answer = await _call_elite_api(prompt)
     if answer:
-        try:
-            await _append_history(user.id, text_value, answer)
-        except Exception as exc:
-            print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
         return answer
 
     answer = await _call_chatgp_api(prompt)
     if answer:
-        try:
-            await _append_history(user.id, text_value, answer)
-        except Exception as exc:
-            print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
         return answer
 
-    # Both providers failed; still answer instead of silently dropping the message.
     answer = random.choice([
         "ufff yaar, abhi mera AI thoda nakhre kar raha hai 😭",
         "ek sec yaar, meri AI service dono side se rooth gayi 😵",
         "arre yaar, reply engine down hai abhi 😭 thoda baad mein try karna",
     ])
-    try:
-        await _append_history(user.id, text_value, answer)
-    except Exception as exc:
-        print(f"[AI][DB] fallback history skipped: {type(exc).__name__}: {exc}")
+    asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
     return answer
 
 async def _load_custom_emoji_map():
@@ -2504,12 +2503,7 @@ async def mention_chat(update,context):
     if not update.message:
         return
 
-    # Count conversational messages toward the daily quest.
-    try:
-        await progress_quest(update.effective_user.id)
-    except Exception:
-        pass
-
+    # Quest tracking must never delay chat handling.
     chat = update.effective_chat
     if not chat:
         return
@@ -2524,10 +2518,6 @@ async def mention_chat(update,context):
             return
         if text.startswith("/"):
             return
-        try:
-            await ensure_user(update.effective_user)
-        except Exception as exc:
-            print(f"[Chat][DB] ensure_user skipped: {type(exc).__name__}: {exc}")
         answer = await ai_reply(update.effective_user, text, "private")
         await send_vanya_reply(update, answer)
         return
@@ -2593,7 +2583,9 @@ async def mention_chat(update,context):
     if not should_reply:
         return
 
-    await ensure_user(update.effective_user)
+    # Do non-critical progression work in the background so it cannot add
+    # MongoDB latency to the visible chat reply.
+    asyncio.create_task(progress_quest(update.effective_user.id))
     try:
         await update.effective_chat.send_action("typing")
     except Exception:
