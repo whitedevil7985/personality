@@ -1933,79 +1933,51 @@ def _strip_non_custom_emoji(text_value):
 
 
 async def _premiumize_text(text_value):
-    """Render only Vanya's saved custom emoji.
+    """Sanitize AI text before sending it to Telegram.
 
-    AI models sometimes copy Telegram's <tg-emoji> markup into their answer.
-    Never expose that markup to users. Strip model-generated tags first, then
-    convert only emoji that the owner explicitly saved with /addemoji.
+    AI/provider output must never expose Telegram custom-emoji markup or
+    emoji-id values. Keep the visible text only; custom emoji rendering is
+    intentionally disabled here so raw IDs can never leak to users.
     """
     text_value = str(text_value or "")
 
-    # AI may generate Telegram custom-emoji markup as plain text.
-    # Keep its visible fallback emoji and let our own mapping decide whether
-    # it should become a real Telegram custom emoji.
+    # Remove complete custom-emoji tags and their attributes.
     text_value = re.sub(
-        r'<tg-emoji\b[^>]*>(.*?)</tg-emoji>',
-        r'\1',
+        r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
+        r"\\1",
         text_value,
         flags=re.IGNORECASE | re.DOTALL,
     )
+    # Also handle malformed/incomplete tags produced by an AI provider.
+    text_value = re.sub(r"<tg-emoji\\b[^>]*>", "", text_value, flags=re.IGNORECASE)
+    text_value = re.sub(r"</tg-emoji>", "", text_value, flags=re.IGNORECASE)
+    # Never let an emoji-id attribute/value appear as visible chat text.
+    text_value = re.sub(r"\\bemoji-id\\s*=\\s*[\\\"']?[^\\s>\\\"']+[\\\"']?", "", text_value, flags=re.IGNORECASE)
+    text_value = re.sub(r"\\bemoji[_ -]?id\\s*[:=]\\s*\\d+", "", text_value, flags=re.IGNORECASE)
 
-    try:
-        mapping = await _load_custom_emoji_map()
-    except Exception as exc:
-        print(f"[CustomEmoji] map unavailable: {type(exc).__name__}: {exc}")
-        mapping = {}
+    # Remove any other raw HTML tags that a provider may emit.
+    text_value = re.sub(r"<[^>]+>", "", text_value)
 
-    if not isinstance(mapping, dict):
-        mapping = {}
-
-    placeholders = {}
-    cleaned = text_value
-    for index, alt in enumerate(sorted(mapping, key=len, reverse=True)):
-        ids = mapping.get(alt) or []
-        if not ids or alt not in cleaned:
-            continue
-        token = f"__VANYA_CUSTOM_EMOJI_{index}__"
-        placeholders[token] = (alt, random.choice(ids))
-        cleaned = cleaned.replace(alt, token)
-
-    cleaned = _strip_non_custom_emoji(cleaned)
-
-    rendered = html.escape(cleaned)
-    replaced_count = 0
-    for token, (alt, eid) in placeholders.items():
-        rendered_token = (
-            f'<tg-emoji emoji-id="{html.escape(str(eid), quote=True)}">'
-            f'{html.escape(alt)}</tg-emoji>'
-        )
-        rendered = rendered.replace(html.escape(token), rendered_token)
-        replaced_count += 1
-
-    return rendered, replaced_count > 0
+    # Telegram parse_mode=HTML requires HTML escaping.
+    return html.escape(text_value), False
 
 
 async def send_vanya_reply(update, text_value):
-    # AI replies must still be delivered if the optional custom-emoji renderer fails.
     try:
-        rendered, has_custom = await _premiumize_text(text_value)
+        rendered, _ = await _premiumize_text(text_value)
     except Exception as exc:
-        print(f"[CustomEmoji] reply rendering skipped: {type(exc).__name__}: {exc}")
-        rendered, has_custom = str(text_value or ""), False
+        print(f"[CustomEmoji] sanitizing failed: {type(exc).__name__}: {exc}")
+        rendered = html.escape(str(text_value or ""))
 
     if AI_DISCLOSURE and update.effective_chat.type=="private":
         u=await get_user(update.effective_user.id)
         if not u.get("ai_disclosure_sent"):
-            disclosure, has_custom = await _premiumize_text(
-                "💜 Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
+            disclosure, _ = await _premiumize_text(
+                "Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
             )
-            if has_custom:
-                await update.effective_chat.send_message(disclosure, parse_mode="HTML")
-            else:
-                await update.effective_chat.send_message(html.unescape(disclosure))
+            await update.effective_chat.send_message(disclosure, parse_mode="HTML")
             await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
-    # ALWAYS send the sanitized/rendered value.
-    # Never send the raw AI output because it may contain <tg-emoji ...> markup.
+
     await update.message.reply_text(rendered, parse_mode="HTML")
 
 async def cleanup_expired_memory():
