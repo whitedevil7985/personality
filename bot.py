@@ -1807,16 +1807,31 @@ async def probe_ai_providers():
 
 
 async def ai_reply(user, text_value, chat_type="private", group_title=""):
-    await ensure_user(user)
+    # MongoDB is used for memory/economy, but it must never prevent a chat reply.
+    try:
+        await ensure_user(user)
+    except Exception as exc:
+        print(f"[AI][DB] ensure_user skipped: {type(exc).__name__}: {exc}")
+
     quick = _identity_quick_reply(text_value)
     if quick and chat_type == "private":
-        await _append_history(user.id, text_value, quick)
+        try:
+            await _append_history(user.id, text_value, quick)
+        except Exception as exc:
+            print(f"[AI][DB] history skipped: {type(exc).__name__}: {exc}")
         return quick
-    await remember_facts(user.id, text_value)
-    await _prune_and_get_memories(user.id)
-    u=await get_user(user.id)
-    history=_history_text(u)
-    memory=_memory_text(u)
+
+    memory = ""
+    history = ""
+    try:
+        await remember_facts(user.id, text_value)
+        await _prune_and_get_memories(user.id)
+        u = await get_user(user.id) or {}
+        history = _history_text(u)
+        memory = _memory_text(u)
+    except Exception as exc:
+        print(f"[AI][DB] memory unavailable; continuing without memory: {type(exc).__name__}: {exc}")
+
     prompt=(
         f"Chat type: {chat_type}. Group: {group_title or 'DM'}\n"
         f"User display name: {user.first_name or 'User'}\n\n"
@@ -1825,24 +1840,33 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         f"User's new message:\n{text_value}\n\n"
         "Reply only as Vanya. Be natural, concise, warm, and context-aware."
     )
+
     answer = await _call_elite_api(prompt)
     if answer:
-        await _append_history(user.id, text_value, answer)
+        try:
+            await _append_history(user.id, text_value, answer)
+        except Exception as exc:
+            print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
         return answer
 
-    # Elite failed/unavailable: fall back to ChatGP automatically.
     answer = await _call_chatgp_api(prompt)
     if answer:
-        await _append_history(user.id, text_value, answer)
+        try:
+            await _append_history(user.id, text_value, answer)
+        except Exception as exc:
+            print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
         return answer
 
-    # Both providers failed; keep the bot conversational rather than exposing API errors.
+    # Both providers failed; still answer instead of silently dropping the message.
     answer = random.choice([
         "ufff yaar, abhi mera AI thoda nakhre kar raha hai 😭",
         "ek sec yaar, meri AI service dono side se rooth gayi 😵",
         "arre yaar, reply engine down hai abhi 😭 thoda baad mein try karna",
     ])
-    await _append_history(user.id, text_value, answer)
+    try:
+        await _append_history(user.id, text_value, answer)
+    except Exception as exc:
+        print(f"[AI][DB] fallback history skipped: {type(exc).__name__}: {exc}")
     return answer
 
 async def _load_custom_emoji_map():
