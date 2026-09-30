@@ -1698,8 +1698,15 @@ async def _call_elite_api(text_value):
 
     session = await _get_ai_http_session()
     base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
+    # Use models that are currently listed by the live Elite LLMs catalog.
+    # Do not fall back to retired/unavailable IDs such as gpt-4o-mini.
     fallback_models = []
-    for model_name in (base_model, "gpt-5-mini", "gpt-4o-mini"):
+    for model_name in (
+        base_model,
+        "gpt-5.6-luna",
+        "gpt-5.4-mini",
+        "gpt-4o",
+    ):
         model_name = str(model_name or "").strip()
         if model_name and model_name not in fallback_models:
             fallback_models.append(model_name)
@@ -1747,7 +1754,12 @@ async def _call_elite_api(text_value):
                             last_error = RuntimeError(f"Model rejected ({resp.status}): {raw[:220]}")
                             break
                         if resp.status >= 400:
-                            raise RuntimeError(f"HTTP {resp.status}: {raw[:300]}")
+                            # Provider errors must not crash the Telegram handler.
+                            # Try the next configured fallback model when possible.
+                            last_error = RuntimeError(f"HTTP {resp.status}: {raw[:300]}")
+                            if model_index < len(fallback_models) - 1:
+                                break
+                            break
                         data = await resp.json(content_type=None)
                         answer = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
                         answer = str(answer or "").strip()
@@ -1805,17 +1817,22 @@ async def _call_chatgp_api(text_value):
 
 
 async def probe_ai_providers():
-    """Probe both providers at startup so the logger shows their live status."""
+    """Probe providers at startup without allowing a bad model/config to crash the bot."""
     probe = "Reply with only: OK"
-    results = {}
+    results = {"elite": False, "chatgp": False}
+
     if ELITE_LLM_API_KEY:
-        results["elite"] = bool(await _call_elite_api(probe))
-    else:
-        results["elite"] = False
+        try:
+            results["elite"] = bool(await _call_elite_api(probe))
+        except Exception as exc:
+            print(f"[AI][PROBE] Elite probe failed: {type(exc).__name__}: {exc}")
+
     if CHATGP_API_KEY:
-        results["chatgp"] = bool(await _call_chatgp_api(probe))
-    else:
-        results["chatgp"] = False
+        try:
+            results["chatgp"] = bool(await _call_chatgp_api(probe))
+        except Exception as exc:
+            print(f"[AI][PROBE] ChatGP probe failed: {type(exc).__name__}: {exc}")
+
     return results
 
 
