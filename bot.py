@@ -18,7 +18,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 from config import (
     TOKEN, OWNER_ID, DEVELOPER_NAME, OWNER_PROFILE_URL, UPDATES_URL, SUPPORT_URL, AI_GROUP_MODE, AI_GROUP_REPLY_ALL, AI_DM_MODE,
-    AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
+    AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
     MEMORY_DAYS, SUDO_IDS, LOGGER_CHAT_ID
 )
 from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
@@ -1446,6 +1446,41 @@ Reply only as Vanya. Stay natural, warm, funny, curious, and varied. Never prete
 """
 
 _AI_HTTP_SESSION = None
+_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
+_AI_LOGGER_BOT = None
+
+async def _set_ai_provider_status(provider, active, detail=""):
+    """Notify the logger when an AI provider changes state."""
+    global _AI_PROVIDER_STATUS
+    if provider not in _AI_PROVIDER_STATUS:
+        return
+    previous = _AI_PROVIDER_STATUS[provider]
+    _AI_PROVIDER_STATUS[provider] = bool(active)
+    # Log the first probe and any later state transition. Avoid flooding logger.
+    if previous is not None and previous == bool(active):
+        return
+    bot = _AI_LOGGER_BOT
+    if bot is None:
+        return
+    label = "Elite LLM" if provider == "elite" else "ChatGP"
+    if active:
+        message = (
+            f"🟢 <b>{label} API ACTIVE</b>\\n"
+            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>"
+        )
+    else:
+        message = (
+            f"🔴 <b>{label} API UNAVAILABLE</b>\\n"
+            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>\\n"
+            f"Reason: <code>{html.escape(str(detail)[:350])}</code>"
+        )
+    await log_event(type("AIStatusContext", (), {"bot": bot})(), message)
+
+_AI_PROVIDER_MESSAGES = {
+    "elite": "Elite LLM",
+    "chatgp": "ChatGP",
+}
+
 _AI_HTTP_SESSION_LOCK = asyncio.Lock()
 
 # Elite LLM public defaults are 10 chat requests/10 seconds and
@@ -1634,6 +1669,142 @@ def _identity_quick_reply(text_value: str):
             ])
     return None
 
+def _ai_headers(api_key):
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+async def _call_elite_api(text_value):
+    """Call the documented OpenAI-compatible Elite endpoint."""
+    if not ELITE_LLM_API_KEY:
+        await _set_ai_provider_status("elite", False, "ELITE_LLM_API_KEY is not configured")
+        return None
+
+    session = await _get_ai_http_session()
+    base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
+    fallback_models = []
+    for model_name in (base_model, "gpt-5-mini", "gpt-4o-mini"):
+        model_name = str(model_name or "").strip()
+        if model_name and model_name not in fallback_models:
+            fallback_models.append(model_name)
+
+    max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "3")))
+    last_error = None
+
+    async with _AI_SEMAPHORE:
+        for model_index, model_name in enumerate(fallback_models):
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": VANYA_SYSTEM_PROMPT},
+                    {"role": "user", "content": text_value},
+                ],
+                "stream": False,
+            }
+            for attempt in range(max_attempts):
+                await _wait_for_ai_slot()
+                try:
+                    async with session.post(
+                        f"{ELITE_LLM_BASE_URL}/chat/completions",
+                        headers=_ai_headers(ELITE_LLM_API_KEY),
+                        json=payload,
+                    ) as resp:
+                        raw = await resp.text()
+                        if resp.status == 429:
+                            last_error = RuntimeError(f"HTTP 429: {raw[:250]}")
+                            if attempt < max_attempts - 1:
+                                retry_after = resp.headers.get("Retry-After")
+                                try:
+                                    delay = float(retry_after) if retry_after else min(8.0, 1.5 ** attempt)
+                                except Exception:
+                                    delay = min(8.0, 1.5 ** attempt)
+                                await asyncio.sleep(max(0.25, delay))
+                                continue
+                            break
+                        if resp.status >= 500:
+                            last_error = RuntimeError(f"HTTP {resp.status}: {raw[:250]}")
+                            if attempt < max_attempts - 1:
+                                await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
+                                continue
+                            break
+                        if resp.status in (400, 404) and model_index < len(fallback_models) - 1:
+                            last_error = RuntimeError(f"Model rejected ({resp.status}): {raw[:220]}")
+                            break
+                        if resp.status >= 400:
+                            raise RuntimeError(f"HTTP {resp.status}: {raw[:300]}")
+                        data = await resp.json(content_type=None)
+                        answer = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+                        answer = str(answer or "").strip()
+                        if not answer:
+                            raise RuntimeError("Empty response")
+                        await _set_ai_provider_status("elite", True)
+                        return answer
+                except (asyncio.TimeoutError, aiohttp.ClientError if "aiohttp" in globals() else Exception) as exc:
+                    last_error = exc
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
+                        continue
+                    break
+
+    detail = str(last_error or "request failed")
+    await _set_ai_provider_status("elite", False, detail)
+    return None
+
+
+async def _call_chatgp_api(text_value):
+    """Fallback ChatGP API: POST /api/chat with {prompt} and read {response}."""
+    if not CHATGP_API_KEY:
+        await _set_ai_provider_status("chatgp", False, "CHATGP_API_KEY is not configured")
+        return None
+
+    import aiohttp
+    timeout = aiohttp.ClientTimeout(total=max(10, CHATGP_TIMEOUT_SECONDS))
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                CHATGP_API_URL,
+                headers=_ai_headers(CHATGP_API_KEY),
+                json={"prompt": text_value},
+            ) as resp:
+                raw = await resp.text()
+                if resp.status >= 400:
+                    detail = f"HTTP {resp.status}: {raw[:300]}"
+                    await _set_ai_provider_status("chatgp", False, detail)
+                    return None
+                data = await resp.json(content_type=None)
+                answer = str(
+                    data.get("response")
+                    or ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+                    or data.get("output")
+                    or ""
+                ).strip()
+                if not answer:
+                    await _set_ai_provider_status("chatgp", False, "Empty response")
+                    return None
+                await _set_ai_provider_status("chatgp", True)
+                return answer
+    except Exception as exc:
+        await _set_ai_provider_status("chatgp", False, f"{type(exc).__name__}: {exc}")
+        return None
+
+
+async def probe_ai_providers():
+    """Probe both providers at startup so the logger shows their live status."""
+    probe = "Reply with only: OK"
+    results = {}
+    if ELITE_LLM_API_KEY:
+        results["elite"] = bool(await _call_elite_api(probe))
+    else:
+        results["elite"] = False
+    if CHATGP_API_KEY:
+        results["chatgp"] = bool(await _call_chatgp_api(probe))
+    else:
+        results["chatgp"] = False
+    return results
+
+
 async def ai_reply(user, text_value, chat_type="private", group_title=""):
     await ensure_user(user)
     quick = _identity_quick_reply(text_value)
@@ -1657,106 +1828,25 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         answer=random.choice(["Arre 😭 bolo, kya scene hai?","Haan yaar, bol 👀","Accha 😌 batao.","Lol okay 😂"])
         await _append_history(user.id,text_value,answer)
         return answer
-    try:
-        session=await _get_ai_http_session()
-        # Keep the request body to the documented OpenAI-compatible fields.
-        # Some GPT-5-family gateways reject legacy temperature/max_tokens fields.
-        base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
-        fallback_models = [
-            base_model,
-            "gpt-5-mini",
-            "gpt-4o-mini",
-        ]
-        models=[]
-        for model_name in fallback_models:
-            model_name=str(model_name or "").strip()
-            if model_name and model_name not in models:
-                models.append(model_name)
-
-        max_attempts=max(1, int(os.getenv("AI_RETRY_ATTEMPTS","3")))
-        last_error=None
-        data=None
-        async with _AI_SEMAPHORE:
-            for model_index, model_name in enumerate(models):
-                payload={
-                    "model":model_name,
-                    "messages":[
-                        {"role":"system","content":VANYA_SYSTEM_PROMPT},
-                        {"role":"user","content":prompt},
-                    ],
-                    "stream":False,
-                }
-                for attempt in range(max_attempts):
-                    await _wait_for_ai_slot()
-                    try:
-                        async with session.post(
-                            f"{ELITE_LLM_BASE_URL}/chat/completions",
-                            headers={
-                                "Authorization":f"Bearer {ELITE_LLM_API_KEY}",
-                                "Content-Type":"application/json",
-                            },
-                            json=payload,
-                        ) as resp:
-                            raw=await resp.text()
-                            if resp.status == 429:
-                                retry_after = resp.headers.get("Retry-After")
-                                try:
-                                    delay=float(retry_after) if retry_after else min(8.0, 1.5 ** attempt)
-                                except Exception:
-                                    delay=min(8.0, 1.5 ** attempt)
-                                last_error=RuntimeError(f"Elite LLM HTTP 429: {raw[:300]}")
-                                if attempt < max_attempts - 1:
-                                    await asyncio.sleep(max(0.25, delay))
-                                    continue
-                                break
-
-                            if resp.status >= 500:
-                                last_error=RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
-                                if attempt < max_attempts - 1:
-                                    await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
-                                    continue
-                                break
-
-                            if resp.status in (400, 404) and model_index < len(models) - 1:
-                                # Try a known live catalog model if the configured
-                                # model is unavailable on the current Elite deployment.
-                                last_error=RuntimeError(
-                                    f"Elite LLM model '{model_name}' rejected ({resp.status}): {raw[:220]}"
-                                )
-                                break
-
-                            if resp.status >= 400:
-                                raise RuntimeError(f"Elite LLM HTTP {resp.status}: {raw[:300]}")
-
-                            data=await resp.json(content_type=None)
-                            break
-                    except asyncio.TimeoutError as exc:
-                        last_error=exc
-                        if attempt < max_attempts - 1:
-                            await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
-                            continue
-                        break
-                if data is not None:
-                    break
-
-        if data is None:
-            raise last_error or RuntimeError("Elite LLM request failed")
-        answer=((data.get("choices") or [{}])[0].get("message") or {}).get("content","")
-        if isinstance(answer,list):
-            answer="".join(str(x.get("text", "")) for x in answer if isinstance(x,dict))
-        answer=str(answer or "").strip()[:3500]
-        if not answer:
-            raise RuntimeError("Elite LLM returned an empty response")
-        await _append_history(user.id,text_value,answer)
+    answer = await _call_elite_api(prompt)
+    if answer:
+        await _append_history(user.id, text_value, answer)
         return answer
-    except Exception as exc:
-        print(f"[EliteLLM] {type(exc).__name__}: {exc}")
-        fallback="Haan yaar 😭 connection thoda glitch hua. Ek baar phir bhej do?"
-        await _append_history(user.id,text_value,fallback)
-        return fallback
 
-_CUSTOM_EMOJI_CACHE = {}
-_CUSTOM_EMOJI_CACHE_AT = 0.0
+    # Elite failed/unavailable: fall back to ChatGP automatically.
+    answer = await _call_chatgp_api(prompt)
+    if answer:
+        await _append_history(user.id, text_value, answer)
+        return answer
+
+    # Both providers failed; keep the bot conversational rather than exposing API errors.
+    answer = random.choice([
+        "ufff yaar, abhi mera AI thoda nakhre kar raha hai 😭",
+        "ek sec yaar, meri AI service dono side se rooth gayi 😵",
+        "arre yaar, reply engine down hai abhi 😭 thoda baad mein try karna",
+    ])
+    await _append_history(user.id, text_value, answer)
+    return answer
 
 async def _load_custom_emoji_map():
     global _CUSTOM_EMOJI_CACHE, _CUSTOM_EMOJI_CACHE_AT
@@ -3359,13 +3449,18 @@ async def main():
     await app.start()
     await app.updater.start_polling()
     print("✦ ItzVanyaBot Ultimate started ✦")
+    global _AI_LOGGER_BOT
+    _AI_LOGGER_BOT = app.bot
+    provider_status = await probe_ai_providers()
     # Startup log is sent only after Telegram initialization/polling succeeds.
     await log_event(
         type("StartupContext", (), {"bot": app.bot})(),
         "🚀 <b>VANYA BOT STARTED</b>\n\n"
         "🟢 Status: <b>Online</b>\n"
         "⚡ Telegram polling: <b>Active</b>\n"
-        "🎮 Games: <b>Ready</b>"
+        "🎮 Games: <b>Ready</b>\n\n"
+        f"🤖 <b>Elite LLM:</b> {'🟢 ACTIVE' if provider_status.get('elite') else '🔴 DOWN'}\n"
+        f"🔁 <b>ChatGP Fallback:</b> {'🟢 ACTIVE' if provider_status.get('chatgp') else '🔴 DOWN'}"
     )
     await asyncio.Event().wait()
 
