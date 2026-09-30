@@ -33,14 +33,26 @@ class ProtectedBot(Bot):
 
     @classmethod
     def _strip_emoji_markup(cls, text):
-        """Remove Telegram custom-emoji markup and emoji IDs from outgoing text."""
+        """Remove any raw Telegram custom-emoji markup/IDs from source text."""
         text = str(text or "")
-        text = re.sub(r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>", r"\\1", text, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r"<tg-emoji\b[^>]*>", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"</tg-emoji>", "", text, flags=re.IGNORECASE)
-        text = re.sub(r'emoji[-_ ]?id\s*=\s*["\']?[^\s>"\']+["\']?', "", text, flags=re.IGNORECASE)
-        text = re.sub(r"emoji[-_ ]?id\s*[:=]\s*\d+", "", text, flags=re.IGNORECASE)
+
+        # Handle both real tags and HTML-escaped tags that can come from games.
+        text = re.sub(r"(?is)(?:&lt;|<)tg-emoji\\b[^>]*>(.*?)(?:&lt;|<)/tg-emoji(?:&gt;|>)", r"\\1", text)
+        text = re.sub(r"(?is)(?:&lt;|<)tg-emoji\\b[^>]*(?:&gt;|>)", "", text)
+        text = re.sub(r"(?is)(?:&lt;|<)/tg-emoji(?:&gt;|>)", "", text)
+
+        # Remove every common spelling of an emoji-id attribute/value.
+        text = re.sub(
+            r"(?i)(?:emoji[-_ ]?id)\\s*(?:=|:)\\s*(?:&quot;|&apos;|[\\\"'])?[^\\s>&quot;&apos;\\\"']+(?:&quot;|&apos;|[\\\"'])?",
+            "",
+            text,
+        )
+        text = re.sub(r"(?i)(?:emoji[-_ ]?id)\\s+\\d+", "", text)
+
+        # Remove leftover custom-emoji XML fragments if they are malformed.
+        text = re.sub(r"(?is)(?:&lt;|<)tg-emoji[^>]*(?:&gt;|>)?", "", text)
         return text
+
 
     @classmethod
     async def _render_custom_emoji(cls, text, parse_mode=None):
