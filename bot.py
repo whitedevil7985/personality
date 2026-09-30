@@ -1825,10 +1825,6 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         f"User's new message:\n{text_value}\n\n"
         "Reply only as Vanya. Be natural, concise, warm, and context-aware."
     )
-    if not ELITE_LLM_API_KEY:
-        answer=random.choice(["Arre 😭 bolo, kya scene hai?","Haan yaar, bol 👀","Accha 😌 batao.","Lol okay 😂"])
-        await _append_history(user.id,text_value,answer)
-        return answer
     answer = await _call_elite_api(prompt)
     if answer:
         await _append_history(user.id, text_value, answer)
