@@ -44,19 +44,10 @@ class ProtectedBot(Bot):
 
     @classmethod
     async def _render_custom_emoji(cls, text, parse_mode=None):
-        """Replace learned Unicode alternatives with Telegram custom emoji.
-
-        Learned IDs come from real Telegram custom-emoji entities sent by the
-        Owner. Unmapped text is kept unchanged so the bot UI never becomes
-        empty just because the emoji library has not been configured yet.
-        """
+        """Sanitize incoming markup, then render configured premium emojis."""
         text = cls._strip_emoji_markup(text)
         if not text:
             return text, parse_mode
-
-        # Do not turn saved emoji alternatives into Telegram custom-emoji
-        # markup. This keeps raw emoji IDs out of every outgoing message.
-        return text, parse_mode
 
         mapping = await cls._get_emoji_map()
         if not mapping:
@@ -76,7 +67,6 @@ class ProtectedBot(Bot):
             return text, parse_mode
 
         if parse_mode and str(parse_mode).upper() != "HTML":
-            # Do not corrupt Markdown or other explicit parse modes.
             return text, parse_mode
 
         rendered = html.escape(cleaned) if parse_mode != "HTML" else cleaned
