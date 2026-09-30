@@ -53,13 +53,19 @@ class ProtectedBot(Bot):
 
     @classmethod
     async def _render_custom_emoji(cls, text, parse_mode=None):
-        """Sanitize provider markup, then render configured premium emojis."""
+        """Sanitize provider markup without breaking existing HTML formatting."""
         cleaned = cls._strip_emoji_markup(text)
         mapping = await cls._get_emoji_map()
+
         if not mapping:
             return cleaned, parse_mode
 
-        escaped = html.escape(cleaned)
+        is_html = str(parse_mode or "").upper() == "HTML"
+
+        # Do not HTML-escape text that is already intentionally formatted as HTML.
+        # reply_html()/parse_mode="HTML" messages contain trusted <b>, <i>, etc.
+        rendered = cleaned if is_html else html.escape(cleaned)
+
         placeholders = {}
         for index, alt in enumerate(sorted(mapping, key=len, reverse=True)):
             ids = mapping.get(alt) or []
@@ -67,19 +73,22 @@ class ProtectedBot(Bot):
                 continue
             token = f"__VANYA_CE_{index}__"
             placeholders[token] = (alt, str(random.choice(ids)))
-            escaped = escaped.replace(html.escape(alt), token)
+            rendered = rendered.replace(
+                html.escape(alt) if not is_html else alt,
+                token,
+            )
 
         if not placeholders:
-            return escaped, ("HTML" if parse_mode is None else parse_mode)
+            return rendered, ("HTML" if is_html else parse_mode)
 
         for token, (alt, emoji_id) in placeholders.items():
             entity = (
                 f'<tg-emoji emoji-id="{html.escape(emoji_id, quote=True)}">'
                 f'{html.escape(alt)}</tg-emoji>'
             )
-            escaped = escaped.replace(token, entity)
+            rendered = rendered.replace(token, entity)
 
-        return escaped, "HTML"
+        return rendered, "HTML"
 
     @classmethod
     def _sanitize_reply_markup(cls, markup):
