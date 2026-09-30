@@ -5,11 +5,12 @@ import time
 from telegram import InlineKeyboardButton
 
 from games.common import kb, safe_name
-from db import ensure_user, add_coins, add_xp, record_game_result
+from db import ensure_user, add_coins, add_xp, record_game_result, games
 
 
 # One active puzzle per chat.
 WORDSCRAMBLE_GAMES = {}
+_WORDSCRAMBLE_LOCK = None
 
 WORDS = [
     "delhi",
@@ -34,6 +35,30 @@ WORDS = [
 
 REWARD = 50
 GAME_TIMEOUT = 90
+
+
+async def _next_unique_word():
+    """Reserve a word permanently in MongoDB so it never repeats after a restart."""
+    global _WORDSCRAMBLE_LOCK
+    if _WORDSCRAMBLE_LOCK is None:
+        import asyncio
+        _WORDSCRAMBLE_LOCK = asyncio.Lock()
+
+    async with _WORDSCRAMBLE_LOCK:
+        state_id = "wordscramble_pool"
+        state = await games.find_one({"_id": state_id}) or {}
+        used = {str(x).strip().casefold() for x in state.get("used_words", []) if str(x).strip()}
+        available = [word for word in WORDS if word.casefold() not in used]
+        if not available:
+            return None
+        word = random.choice(available)
+        await games.update_one(
+            {"_id": state_id},
+            {"$addToSet": {"used_words": word},
+             "$set": {"updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc)}},
+            upsert=True,
+        )
+        return word
 
 
 def _scramble(word: str) -> str:
@@ -63,7 +88,15 @@ async def wordscramble(update, context):
         )
         return
 
-    answer = random.choice(WORDS)
+    answer = await _next_unique_word()
+    if answer is None:
+        await update.message.reply_text(
+            "🔤 <b>Wordscramble word pool finished!</b>\\n"
+            "All current words have already been used. Add more words to continue.",
+            parse_mode="HTML",
+        )
+        return
+
     scrambled = _scramble(answer)
 
     WORDSCRAMBLE_GAMES[chat_id] = {
