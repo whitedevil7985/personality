@@ -2011,10 +2011,13 @@ async def callback(update,context):
             )
             return
 
-    # Tap handles its own callback answer so Telegram only receives one
-    # answer() call for the same callback query.
+    # Games that answer their own callback query must be routed before the
+    # generic q.answer(), otherwise Telegram receives two callback answers.
     if data.startswith("tap:"):
         await tap_cb(q, data.split(":"))
+        return
+    if data.startswith("mine:"):
+        await mines_cb(q, data.split(":"))
         return
 
     await q.answer()
@@ -2396,8 +2399,6 @@ async def callback(update,context):
     if data.startswith("card:"):
         await card_cb(q, data.split(":"))
         return
-    if data.startswith("mine:"):
-        await mines_cb(q, data.split(":"));return
     if data.startswith("uno:"):
         await uno_cb(q,data.split(":"));return
     if data.startswith("ludo:"):
