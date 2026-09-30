@@ -2011,6 +2011,12 @@ async def callback(update,context):
             )
             return
 
+    # Tap handles its own callback answer so Telegram only receives one
+    # answer() call for the same callback query.
+    if data.startswith("tap:"):
+        await tap_cb(q, data.split(":"))
+        return
+
     await q.answer()
 
     if data == "wordgrid:new":
@@ -2392,8 +2398,6 @@ async def callback(update,context):
         return
     if data.startswith("mine:"):
         await mines_cb(q, data.split(":"));return
-    if data.startswith("tap:"):
-        await tap_cb(q,data.split(":"));return
     if data.startswith("uno:"):
         await uno_cb(q,data.split(":"));return
     if data.startswith("ludo:"):
