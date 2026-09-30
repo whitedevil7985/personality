@@ -2992,7 +2992,12 @@ async def broadcast(update, context):
             user_count += 1
 
     if mode in {"groups", "both"}:
-        async for g in groups.find({}, {"_id": 1}):
+        # Only target groups that are currently marked active. Old database
+        # entries can remain after the bot is removed from a group.
+        async for g in groups.find(
+            {"$or": [{"active": True}, {"active": {"$exists": False}}]},
+            {"_id": 1},
+        ):
             targets.append(g["_id"])
             group_count += 1
 
@@ -3024,35 +3029,111 @@ async def broadcast(update, context):
     )
 
     sent = failed = 0
+    skipped = 0
+    failure_reasons = {}
+
     for chat_id in targets:
-        try:
-            if source:
-                await context.bot.copy_message(
-                    chat_id=chat_id,
-                    from_chat_id=source.chat_id,
-                    message_id=source.message_id,
-                )
-            else:
-                await context.bot.send_message(chat_id=chat_id, text=text)
+        delivered = False
+        last_error = None
+
+        # Telegram can temporarily return 429 during a larger broadcast.
+        # Retry that target instead of counting it as a permanent failure.
+        for attempt in range(3):
+            try:
+                if source:
+                    await context.bot.copy_message(
+                        chat_id=chat_id,
+                        from_chat_id=source.chat_id,
+                        message_id=source.message_id,
+                    )
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text=text)
+                delivered = True
+                break
+            except Exception as exc:
+                last_error = exc
+
+                # python-telegram-bot RetryAfter exposes retry_after.
+                retry_after = getattr(exc, "retry_after", None)
+                if retry_after is not None and attempt < 2:
+                    try:
+                        delay = max(1.0, min(float(retry_after), 30.0))
+                    except (TypeError, ValueError):
+                        delay = 2.0
+                    await asyncio.sleep(delay)
+                    continue
+
+                break
+
+        if delivered:
             sent += 1
-            await asyncio.sleep(0.05)
-        except Exception:
+            await asyncio.sleep(0.08)
+        else:
             failed += 1
+            reason = str(last_error or "Unknown error")
+            reason_lower = reason.lower()
+
+            # These generally mean the bot can no longer deliver to this
+            # group. Mark it inactive so future broadcasts skip it.
+            permanent_group_error = (
+                chat_id < 0 and (
+                    "forbidden" in reason_lower
+                    or "bot was kicked" in reason_lower
+                    or "bot is not a member" in reason_lower
+                    or "chat not found" in reason_lower
+                    or "kicked" in reason_lower
+                )
+            )
+            if permanent_group_error:
+                try:
+                    await groups.update_one(
+                        {"_id": chat_id},
+                        {"$set": {
+                            "active": False,
+                            "broadcast_failed_at": datetime.now(timezone.utc),
+                            "broadcast_failure": reason[:500],
+                        }},
+                    )
+                except Exception as db_exc:
+                    print(f"[Broadcast] failed to mark inactive {chat_id}: {db_exc}")
+
+            # Keep a compact reason summary for the owner.
+            reason_key = (
+                "Bot removed/blocked"
+                if permanent_group_error else
+                "Rate limit"
+                if getattr(last_error, "retry_after", None) is not None else
+                type(last_error).__name__ if last_error else "Unknown"
+            )
+            failure_reasons[reason_key] = failure_reasons.get(reason_key, 0) + 1
 
         if (sent + failed) % 25 == 0:
             try:
+                reason_text = ""
+                if failure_reasons:
+                    reason_text = "\n\n⚠️ " + " • ".join(
+                        f"{html.escape(str(k))}: {v}"
+                        for k, v in failure_reasons.items()
+                    )
                 await status.edit_text(
                     f"📢 <b>Broadcasting…</b>\n\n"
                     f"🎯 Target: <b>{mode_label}</b>\n"
                     f"📨 Sent: <b>{sent:,}</b>\n"
                     f"⚠️ Failed: <b>{failed:,}</b>\n"
-                    f"📊 Progress: <b>{sent + failed:,}/{len(targets):,}</b>",
+                    f"📊 Progress: <b>{sent + failed:,}/{len(targets):,}</b>"
+                    f"{reason_text}",
                     parse_mode="HTML",
                 )
             except Exception:
                 pass
 
     try:
+        reason_text = ""
+        if failure_reasons:
+            reason_text = "\n\n<b>Failure reasons</b>\n" + "\n".join(
+                f"• {html.escape(str(k))}: <b>{v}</b>"
+                for k, v in failure_reasons.items()
+            )
         await status.edit_text(
             f"✅ <b>Broadcast Completed</b>\n\n"
             f"🎯 Target: <b>{mode_label}</b>\n"
@@ -3060,7 +3141,8 @@ async def broadcast(update, context):
             f"💬 Groups targeted: <b>{group_count:,}</b>\n"
             f"📨 Sent: <b>{sent:,}</b>\n"
             f"⚠️ Failed: <b>{failed:,}</b>\n"
-            f"👥 Total targets: <b>{len(targets):,}</b>",
+            f"👥 Total targets: <b>{len(targets):,}</b>"
+            f"{reason_text}",
             parse_mode="HTML",
         )
     except Exception:
