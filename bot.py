@@ -2435,7 +2435,7 @@ async def mention_chat(update,context):
         r"(?:"
         r"(?:hi+|hello+|hey+)(?:\s+@?(?:vanya|itzvanya))?(?:\s+.*)?"
         r"|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+)(?:\s+.*)?"
-        r"|(?:good\s+morning|good\s+night|goodnight)(?:\s+@?(?:vanya|itzvanya))?(?:\s+.*)?"
+        r"|(?:good\s+morning|good\s+night|goodnight)\s+@?(?:vanya|itzvanya)(?:\s+.*)?"
         r"|@?(?:vanya|itzvanya)\s+(?:good\s+morning|good\s+night|goodnight)(?:\s+.*)?"
         r")[\s!.?~]*",
         normalized,
@@ -2452,6 +2452,7 @@ async def mention_chat(update,context):
     # - reply to Vanya
     # - mention Vanya
     # - say hi/hello/hey to Vanya
+    # - say good morning/good night only when explicitly addressing Vanya
     # - or simply send a normal message when group AI is enabled.
     # This is intentionally not tied to bot-admin status.
     # In groups Vanya should not interrupt normal conversations.
