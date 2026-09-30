@@ -1502,7 +1502,7 @@ _AI_HTTP_SESSION_LOCK = asyncio.Lock()
 _AI_RATE_LOCK = asyncio.Lock()
 _AI_RATE_EVENTS_10S = deque()
 _AI_RATE_EVENTS_60S = deque()
-_AI_CONCURRENCY = max(1, int(os.getenv("AI_CONCURRENCY", "8")))
+_AI_CONCURRENCY = max(1, int(os.getenv("AI_CONCURRENCY", "16")))
 _AI_SEMAPHORE = asyncio.Semaphore(_AI_CONCURRENCY)
 
 def _ai_rate_cleanup(now):
