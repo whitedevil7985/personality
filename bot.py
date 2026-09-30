@@ -1678,6 +1678,7 @@ def _ai_headers(api_key):
 
 async def _call_elite_api(text_value):
     """Call the documented OpenAI-compatible Elite endpoint."""
+    import aiohttp
     if not ELITE_LLM_API_KEY:
         await _set_ai_provider_status("elite", False, "ELITE_LLM_API_KEY is not configured")
         return None
@@ -1741,7 +1742,7 @@ async def _call_elite_api(text_value):
                             raise RuntimeError("Empty response")
                         await _set_ai_provider_status("elite", True)
                         return answer
-                except (asyncio.TimeoutError, aiohttp.ClientError if "aiohttp" in globals() else Exception) as exc:
+                except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
                     last_error = exc
                     if attempt < max_attempts - 1:
                         await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
