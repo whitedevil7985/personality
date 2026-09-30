@@ -1,6 +1,7 @@
 import html
 import random
 import time
+import re
 
 from telegram import Bot
 
@@ -31,6 +32,17 @@ class ProtectedBot(Bot):
         return cls._emoji_cache
 
     @classmethod
+    def _strip_emoji_markup(cls, text):
+        """Remove Telegram custom-emoji markup and emoji IDs from outgoing text."""
+        text = str(text or "")
+        text = re.sub(r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>", r"\\1", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"<tg-emoji\\b[^>]*>", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"</tg-emoji>", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"emoji[-_ ]?id\\s*=\\s*[" + chr(92) + """\\\"']?[^\\s>""" + chr(92) + """\\\"']+[" + chr(92) + """\\\"']?""", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"emoji[-_ ]?id\\s*[:=]\\s*\\d+", "", text, flags=re.IGNORECASE)
+        return text
+
+    @classmethod
     async def _render_custom_emoji(cls, text, parse_mode=None):
         """Replace learned Unicode alternatives with Telegram custom emoji.
 
@@ -38,9 +50,13 @@ class ProtectedBot(Bot):
         Owner. Unmapped text is kept unchanged so the bot UI never becomes
         empty just because the emoji library has not been configured yet.
         """
-        text = str(text or "")
-        if not text or "<tg-emoji" in text:
+        text = cls._strip_emoji_markup(text)
+        if not text:
             return text, parse_mode
+
+        # Do not turn saved emoji alternatives into Telegram custom-emoji
+        # markup. This keeps raw emoji IDs out of every outgoing message.
+        return text, parse_mode
 
         mapping = await cls._get_emoji_map()
         if not mapping:
