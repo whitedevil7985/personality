@@ -1,6 +1,8 @@
 import html
+import html
 import random
 import time
+from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton
 
@@ -55,7 +57,7 @@ async def _next_unique_word():
         await games.update_one(
             {"_id": state_id},
             {"$addToSet": {"used_words": word},
-             "$set": {"updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc)}},
+             "$set": {"updated_at": datetime.now(timezone.utc)}},
             upsert=True,
         )
         return word
@@ -91,7 +93,7 @@ async def wordscramble(update, context):
     answer = await _next_unique_word()
     if answer is None:
         await update.message.reply_text(
-            "🔤 <b>Wordscramble word pool finished!</b>\\n"
+            "🔤 <b>Wordscramble word pool finished!</b>\n"
             "All current words have already been used. Add more words to continue.",
             parse_mode="HTML",
         )
