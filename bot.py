@@ -318,6 +318,18 @@ async def log_bot_membership(update, context):
             f"🆔 User ID: <code>{actor.id if actor else 'Unknown'}</code>"
         )
     elif was_removed:
+        # Keep the group record for logging/history, but never target it for
+        # future broadcasts after Vanya has been removed.
+        await groups.update_one(
+            {"_id": cm.chat.id},
+            {"$set": {
+                "title": cm.chat.title or "Group",
+                "type": cm.chat.type,
+                "active": False,
+                "last_seen": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
         await log_event(
             context,
             "📤 <b>VANYA REMOVED FROM GROUP</b>\n\n"
