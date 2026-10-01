@@ -2346,10 +2346,16 @@ async def callback(update,context):
                     "🎯 Create or join a room and play with 2–4 real players.\n"
                     "🤖 Add a bot only if you want one."
                 )
-                markup = kb([
-                    [InlineKeyboardButton("🃏 Play UNO", web_app=WebAppInfo(url=webapp_url))],
-                    [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
-                ])
+                if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+                    markup = kb([
+                        [InlineKeyboardButton("🃏 Play UNO", url=webapp_url)],
+                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
+                    ])
+                else:
+                    markup = kb([
+                        [InlineKeyboardButton("🃏 Play UNO", web_app=WebAppInfo(url=webapp_url))],
+                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
+                    ])
                 await q.edit_message_text(msg, parse_mode="HTML", reply_markup=markup)
             else:
                 await q.edit_message_text(
@@ -2367,15 +2373,56 @@ async def callback(update,context):
                     "🎯 Create or join a room and play with 2–4 real players.\n"
                     "🤖 Add a bot only if you want one."
                 )
-                markup = kb([
-                    [InlineKeyboardButton("🎲 Play Ludo", web_app=WebAppInfo(url=webapp_url))],
-                    [InlineKeyboardButton("💬 Game Chat", callback_data="gchat:LUDO:telegram")],
-                    [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
-                ])
+                if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+                    markup = kb([
+                        [InlineKeyboardButton("🎲 Play Ludo", url=webapp_url)],
+                        [InlineKeyboardButton("💬 Game Chat", callback_data="gchat:LUDO:telegram")],
+                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
+                    ])
+                else:
+                    markup = kb([
+                        [InlineKeyboardButton("🎲 Play Ludo", web_app=WebAppInfo(url=webapp_url))],
+                        [InlineKeyboardButton("💬 Game Chat", callback_data="gchat:LUDO:telegram")],
+                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
+                    ])
                 await q.edit_message_text(msg, parse_mode="HTML", reply_markup=markup)
             else:
                 await q.edit_message_text(
                     "🎲 <b>Ludo Web App is not configured.</b>\n\nSet <code>LUDO_WEBAPP_URL</code> to your public HTTPS /ludo URL in Railway Variables.",
+                    parse_mode="HTML",
+                    reply_markup=back()
+                )
+            return
+        if key.upper() == "SCRIBBLE":
+            webapp_url = (os.getenv("SCRIBBLE_WEBAPP_URL") or "").strip()
+            if not webapp_url:
+                domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().strip("/")
+                if domain:
+                    webapp_url = "https://" + domain + "/scribble"
+            if webapp_url and not webapp_url.startswith(("https://", "http://")):
+                webapp_url = "https://" + webapp_url
+            if webapp_url:
+                msg = (
+                    "╭━━━〔 🖌️ <b>VANYA SCRIBBLE</b> 〕━━━╮\n"
+                    "┃ <i>Real-time drawing room</i> ✦\n"
+                    "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                    "🎨 Create or join a live drawing room.\n"
+                    "💬 Draw and chat together in real time."
+                )
+                if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+                    markup = kb([
+                        [InlineKeyboardButton("🖌️ Open Scribble", url=webapp_url)],
+                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
+                    ])
+                else:
+                    markup = kb([
+                        [InlineKeyboardButton("🖌️ Open Scribble", web_app=WebAppInfo(url=webapp_url))],
+                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
+                    ])
+                await q.edit_message_text(msg, parse_mode="HTML", reply_markup=markup)
+            else:
+                await q.edit_message_text(
+                    "🖌️ <b>Scribble Web App is not configured.</b>\n\nSet <code>SCRIBBLE_WEBAPP_URL</code> to your public HTTPS /scribble URL in Railway Variables.",
                     parse_mode="HTML",
                     reply_markup=back()
                 )
@@ -2388,7 +2435,10 @@ async def callback(update,context):
                      "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
                      "♟️ Create a room, invite one player, or add a bot.\n"
                      "⏱️ Live board, turns, moves and chat.")
-                markup=kb([[InlineKeyboardButton("♟️ Play Chess",web_app=WebAppInfo(url=webapp_url))],[InlineKeyboardButton("⟵ Back to Games",callback_data="cat:games")]])
+                if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+                    markup=kb([[InlineKeyboardButton("♟️ Play Chess",url=webapp_url)],[InlineKeyboardButton("⟵ Back to Games",callback_data="cat:games")]])
+                else:
+                    markup=kb([[InlineKeyboardButton("♟️ Play Chess",web_app=WebAppInfo(url=webapp_url))],[InlineKeyboardButton("⟵ Back to Games",callback_data="cat:games")]])
                 await q.edit_message_text(msg,parse_mode="HTML",reply_markup=markup)
             else:
                 await q.edit_message_text("♟️ <b>Chess Web App is not configured.</b>\n\nSet <code>CHESS_WEBAPP_URL</code> to your public HTTPS /chess URL in Railway Variables.",parse_mode="HTML",reply_markup=back())
