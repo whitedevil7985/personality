@@ -15,6 +15,7 @@ from telegram import (
     BotCommandScopeDefault, BotCommandScopeChat,
 )
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, ContextTypes, filters
+from telegram.request import HTTPXRequest
 
 from config import (
     TOKEN, OWNER_ID, DEVELOPER_NAME, OWNER_PROFILE_URL, UPDATES_URL, SUPPORT_URL, AI_GROUP_MODE, AI_GROUP_REPLY_ALL, AI_DM_MODE,
@@ -3584,10 +3585,12 @@ async def ping(update, context):
 async def main():
     await cleanup_expired_memory()
     web_runner = await start_web_server()
-    app=(Application.builder().bot(ProtectedBot(TOKEN))
+    # Configure the HTTP connection pool on the custom ProtectedBot itself.
+    # ApplicationBuilder cannot change request pool settings after .bot(...).
+    telegram_request = HTTPXRequest(connection_pool_size=32, pool_timeout=5)
+    bot = ProtectedBot(TOKEN, request=telegram_request)
+    app=(Application.builder().bot(bot)
          .concurrent_updates(16)
-         .connection_pool_size(32)
-         .pool_timeout(5)
          .build())
     commands={
         "start":start,"help":help_cmd,"profile":profile,"bal":balance,
