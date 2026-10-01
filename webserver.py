@@ -674,6 +674,8 @@ async def kingdom_ws(request):
                 if not p:
                     if room.get('ended'):
                         await ws.send_json({'type':'error','message':'This battle is already over.'}); continue
+                    if room.get('started'):
+                        await ws.send_json({'type':'error','message':'The battle has already started. Join the next room.'}); continue
                     if len(room['players'])>=6:
                         await ws.send_json({'type':'error','message':'Room is full (6 rulers max).'}); continue
                     p={'id':session_id,'name':name,'connected':True,'ws':ws,'kingdom':{
@@ -1323,7 +1325,7 @@ async def config(request):
     return web.json_response({'bot_username':os.getenv('BOT_USERNAME','ItzVanyaBot').lstrip('@')})
 
 
-async def health(request): return web.json_response({'ok':True,'app':'ItzVanyaBot Games Web Apps','ludo_rooms':sum(1 for k in ROOMS if k.startswith('L:')),'uno_rooms':sum(1 for k in ROOMS if k.startswith('U:'))})
+async def health(request): return web.json_response({'ok':True,'app':'ItzVanyaBot Games Web Apps','ludo_rooms':sum(1 for k in ROOMS if k.startswith('L:')),'uno_rooms':sum(1 for k in ROOMS if k.startswith('U:')),'kingdom_rooms':len(KINGDOM_ROOMS)})
 
 
 async def end_web_rooms_for_group(group_id):
@@ -1400,6 +1402,11 @@ async def cleanup_rooms(app):
             if now-room['updated']>21600: ROOMS.pop(code,None)
         for code,room in list(CHESS_ROOMS.items()):
             if now-room['updated']>21600: CHESS_ROOMS.pop(code,None)
+        for code,room in list(KINGDOM_ROOMS.items()):
+            if now-room['updated']>21600:
+                task=room.get('timer_task')
+                if task and not task.done(): task.cancel()
+                KINGDOM_ROOMS.pop(code,None)
 
 
 async def cleanup_ctx(app):
