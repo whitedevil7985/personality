@@ -2219,11 +2219,40 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
         return answer
 
-    answer = random.choice([
-        "ufff yaar, abhi thoda network nakhre kar raha hai 😭",
-        "ek sec yaar, reply thoda late ho gaya 😵",
-        "arre yaar, abhi thoda busy hoon 😭 phir se bolo na",
-    ])
+    # AI providers can occasionally be unavailable/rate-limited. Keep the
+    # user-facing fallback natural and context-aware instead of exposing
+    # network/API/latency details.
+    fallback_text = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
+    if fallback_text:
+        if fallback_text in {"acha", "accha", "achha", "oh", "ohh", "hmm", "hmmm"}:
+            fallback_pool = [
+                "Haanji 😌 bolo na.",
+                "Hehe, sun rahi hu 😄",
+                "Hmmm 👀 kya hua?",
+                "Acha ji 😌 aur batao.",
+            ]
+        elif "?" in fallback_text:
+            fallback_pool = [
+                "Haan, bolo na 😌",
+                "Hmm, sun rahi hu 👀",
+                "Batao yaar, kya hua? 😄",
+            ]
+        elif any(word in fallback_text.split() for word in ("haha", "hehe", "lol")):
+            fallback_pool = [
+                "Hehe 😂",
+                "Hahaha 😭",
+                "Accha ji 😂",
+            ]
+        else:
+            fallback_pool = [
+                "Haan yaar 😌 bolo.",
+                "Hmm, sun rahi hu 👀",
+                "Achhaaa 😄 aur batao.",
+                "Haanji, bolo na 💕",
+            ]
+        answer = random.choice(fallback_pool)
+    else:
+        answer = "Haanji 😌 bolo na."
     asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
     return answer
 
