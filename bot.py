@@ -1471,8 +1471,8 @@ _AI_LOGGER_BOT = None
 _AI_CONTEXT_CACHE = {}
 _AI_CONTEXT_WARMING = set()
 _AI_CONTEXT_CACHE_TTL = max(30.0, float(os.getenv("AI_CONTEXT_CACHE_TTL_SECONDS", "1800")))
-_AI_FAST_MAX_SECONDS = max(1.0, float(os.getenv("AI_FAST_MAX_SECONDS", "2.1")))
-_AI_HEDGE_DELAY = max(0.0, float(os.getenv("AI_HEDGE_DELAY_SECONDS", "0.20")))
+_AI_FAST_MAX_SECONDS = max(1.0, float(os.getenv("AI_FAST_MAX_SECONDS", "1.8")))
+_AI_HEDGE_DELAY = max(0.0, float(os.getenv("AI_HEDGE_DELAY_SECONDS", "0.12")))
 
 async def _set_ai_provider_status(provider, active, detail=""):
     """Notify the logger when an AI provider changes state."""
@@ -2688,10 +2688,8 @@ async def chat(update,context):
     if not text:
         await update.message.reply_text("💬 Tell me something: /chat hello Vanya")
         return
-    try:
-        await ensure_user(update.effective_user)
-    except Exception as exc:
-        print(f"[Chat][DB] ensure_user skipped: {type(exc).__name__}: {exc}")
+    # Do not block the typing indicator or LLM call on a MongoDB write.
+    # ai_reply() persists the user state in the background.
     typing_stop = asyncio.Event()
     typing_task = asyncio.create_task(
         _typing_heartbeat(context.bot, update.effective_chat.id, typing_stop)
