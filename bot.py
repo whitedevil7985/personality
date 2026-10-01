@@ -1889,6 +1889,8 @@ async def _call_elite_api(text_value):
                     {"role": "user", "content": text_value},
                 ],
                 "stream": False,
+                "reasoning_effort": os.getenv("AI_REASONING_EFFORT", "none"),
+                "max_tokens": int(os.getenv("AI_MAX_OUTPUT_TOKENS", "96")),
             }
             for attempt in range(max_attempts):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
@@ -2028,6 +2030,11 @@ async def _save_chat_state_background(user_id, user_text, answer):
 
 async def ai_reply(user, text_value, chat_type="private", group_title=""):
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
+    quick = _instant_chat_reply(text_value) if chat_type == "private" else None
+    if quick:
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        return quick
+
     quick = _identity_quick_reply(text_value)
     if quick and chat_type == "private":
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
