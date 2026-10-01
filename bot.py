@@ -336,7 +336,7 @@ async def log_bot_membership(update, context):
         actor_username = f" @{html.escape(actor.username)}" if actor and actor.username else ""
         await track_group(cm.chat)
         group_link = await _get_group_log_link(context, cm.chat)
-        link_line = f"\n🔗 <b>Group Link:</b> <a href="{html.escape(group_link, quote=True)}">Open Group</a>" if group_link else ""
+        link_line = (f'\n🔗 <b>Group Link:</b> <a href="{html.escape(group_link, quote=True)}">Open Group</a>' if group_link else "")
         await log_event(
             context,
             "📥 <b>VANYA ADDED TO GROUP</b>\n\n"
