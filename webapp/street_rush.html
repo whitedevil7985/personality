@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Vanya Street Rush</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#07101c;font-family:Inter,system-ui,sans-serif;color:#fff;touch-action:none}
+#wrap{height:100%;display:grid;place-items:center;background:radial-gradient(circle at 50% 20%,#23456a,#07101c 60%)}
+canvas{height:100%;width:auto;max-width:100vw;display:block;background:#111}
+#ui{position:fixed;inset:0;pointer-events:none}
+.top{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;font-weight:800;text-shadow:0 2px 5px #000}
+.badge{background:#07101dcc;border:1px solid #ffffff33;border-radius:14px;padding:8px 12px;backdrop-filter:blur(8px)}
+#start,#gameover{position:fixed;inset:0;display:grid;place-items:center;background:#02071299;backdrop-filter:blur(4px);pointer-events:auto}
+.panel{width:min(88vw,390px);padding:28px;border:1px solid #ffffff2b;border-radius:24px;background:#091322ee;box-shadow:0 25px 80px #0009;text-align:center}
+h1{margin:0 0 8px;font-size:34px}p{color:#b8c6d8;line-height:1.45}
+button{border:0;border-radius:15px;padding:14px 25px;font-size:17px;font-weight:900;background:linear-gradient(135deg,#6ee7ff,#6d7cff);color:#07101c;cursor:pointer}
+.small{font-size:12px;color:#8fa3bc;margin-top:16px}.hide{display:none!important}
+.controls{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:12px;pointer-events:auto}
+.ctrl{width:58px;height:48px;padding:0;border-radius:15px;background:#07101dcc;color:#fff;border:1px solid #ffffff22}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game" width="540" height="960"></canvas></div>
+<div id="ui">
+  <div class="top"><div class="badge">🏃 Vanya Street Rush</div><div class="badge">⭐ <span id="score">0</span> &nbsp; 🪙 <span id="coins">0</span></div></div>
+</div>
+<div id="start"><div class="panel"><h1>🏙️ Street Rush</h1><p>Run through the neon city, switch lanes, jump barriers, slide under signs and collect coins.</p><button id="play">START RUN</button><div class="small">← → lane &nbsp; • &nbsp; ↑ jump &nbsp; • &nbsp; ↓ slide<br>Mobile: swipe left/right/up/down</div></div></div>
+<div id="gameover" class="hide"><div class="panel"><h1>Run Over</h1><p>Score <b id="finalScore">0</b> · Coins <b id="finalCoins">0</b></p><button id="again">RUN AGAIN</button></div></div>
+<div class="controls"><button class="ctrl" data-k="ArrowLeft">←</button><button class="ctrl" data-k="ArrowUp">↑</button><button class="ctrl" data-k="ArrowDown">↓</button><button class="ctrl" data-k="ArrowRight">→</button></div>
+<script>
+const c=document.getElementById('game'),x=c.getContext('2d'),W=c.width,H=c.height;
+let running=false,last=0,score=0,coins=0,speed=430,distance=0,lane=1,targetLane=1,jump=0,slide=0,spawn=0,coinSpawn=0,items=[];
+const lanes=[-1,0,1];
+function laneX(l,z=0){const horizon=210,base=430;return W/2+l*(55+(base-55)*z)}
+function zY(z){return 210+(1-z)*610}
+function scale(z){return .22+(1-z)*.95}
+function reset(){score=coins=distance=0;speed=430;lane=targetLane=1;jump=slide=spawn=coinSpawn=0;items=[]}
+function addItem(type,l,z=0){items.push({type,l,z,hit:false})}
+function spawnThing(){
+ const l=Math.floor(Math.random()*3)-1;
+ const r=Math.random();
+ if(r<.45)addItem('barrier',l,0);
+ else if(r<.7)addItem('train',l,0);
+ else addItem('gate',l,0);
+}
+function spawnCoinLine(){
+ const l=Math.floor(Math.random()*3)-1; for(let i=0;i<6;i++)addItem('coin',l,-i*.11);
+}
+function road(){
+ x.fillStyle='#102033';x.fillRect(0,0,W,H);
+ x.fillStyle='#152a38';x.beginPath();x.moveTo(210,210);x.lineTo(330,210);x.lineTo(535,H);x.lineTo(5,H);x.closePath();x.fill();
+ x.strokeStyle='#80d8ff44';x.lineWidth=5;
+ for(let l=-1;l<=1;l+=2){x.beginPath();x.moveTo(W/2+l*60,210);x.lineTo(W/2+l*270,H);x.stroke()}
+ x.fillStyle='#213b4a';for(let i=0;i<9;i++){let y=230+i*85+(distance%85);x.fillRect(0,y,205,4);x.fillRect(335,y,205,4)}
+ for(let i=0;i<8;i++){let z=(i/8+(distance/500))%1;let y=zY(1-z),s=scale(1-z);x.fillStyle=i%2?'#ffcf5a':'#5de1ff';x.fillRect(35,y,70*s,5*s);x.fillRect(W-105*s,y,70*s,5*s)}
+}
+function city(){for(let side of [0,1])for(let i=0;i<12;i++){let z=(i/12+(distance/850))%1,y=zY(1-z),s=scale(1-z);let bx=side?W-150*s:70*s,bw=75*s,bh=(70+(i%4)*30)*s;x.fillStyle=['#183b59','#28455b','#3a3155'][i%3];x.fillRect(bx,y-bh,bw,bh);x.fillStyle='#ffe48a99';for(let q=0;q<3;q++)x.fillRect(bx+12*s+q*18*s,y-bh+15*s,7*s,10*s)}}
+function drawItem(o){let z=Math.max(0,Math.min(1,o.z)),px=laneX(o.l,z),py=zY(z),s=scale(z);if(o.type==='coin'){x.save();x.translate(px,py-30*s);x.rotate(distance/250);x.fillStyle='#ffd33d';x.beginPath();x.arc(0,0,15*s,0,7);x.fill();x.strokeStyle='#fff0a0';x.stroke();x.restore();return}x.save();x.translate(px,py);if(o.type==='barrier'){x.fillStyle='#f04c55';x.fillRect(-35*s,-45*s,70*s,45*s);x.fillStyle='#fff';x.fillRect(-28*s,-37*s,56*s,8*s)}else if(o.type==='train'){x.fillStyle='#26a6d1';x.fillRect(-48*s,-80*s,96*s,80*s);x.fillStyle='#9be7ff';x.fillRect(-32*s,-62*s,64*s,25*s)}else{x.fillStyle='#f0b54b';x.fillRect(-45*s,-105*s,90*s,20*s);x.fillStyle='#714b24';x.fillRect(-38*s,-85*s,8*s,85*s);x.fillRect(30*s,-85*s,8*s,85*s)}x.restore()}
+function player(){const px=laneX(lane,1),base=830-jump*150,s=1.05;x.save();x.translate(px,base);x.fillStyle='#5ce1ff';x.beginPath();x.arc(0,-70*s,24*s,0,7);x.fill();x.fillStyle='#ffcc9b';x.beginPath();x.arc(0,-105*s,19*s,0,7);x.fill();x.fillStyle='#f5f5f5';x.fillRect(-24*s,-47*s,48*s,55*s);x.fillStyle='#4c6fff';x.fillRect(-20*s,8*s,15*s,45*s);x.fillRect(5*s,8*s,15*s,45*s);x.restore()}
+function draw(){road();city();items.slice().sort((a,b)=>a.z-b.z).forEach(drawItem);player()}
+function hit(o){if(o.hit)return false;if(Math.abs(o.l-targetLane)>0)return false; if(o.z>.87&&o.z<1.03){if(o.type==='coin'){o.hit=true;coins++;score+=25;return false}if(o.type==='barrier'&&jump>.25)return false;if(o.type==='gate'&&slide>.25)return false;return true}return false}
+function update(dt){distance+=speed*dt;speed=Math.min(760,speed+dt*5);score+=Math.floor(dt*speed/10);lane+=(targetLane-lane)*Math.min(1,dt*12);jump=Math.max(0,jump-dt*1.7);slide=Math.max(0,slide-dt*1.3);spawn-=dt;coinSpawn-=dt;if(spawn<=0){spawnThing();spawn=Math.max(.55,1.05-(speed-430)/900)}if(coinSpawn<=0){spawnCoinLine();coinSpawn=.9+Math.random()*.8}for(const o of items){o.z+=dt*(speed/650);if(hit(o)){running=false;document.getElementById('finalScore').textContent=score;document.getElementById('finalCoins').textContent=coins;document.getElementById('gameover').classList.remove('hide')}}items=items.filter(o=>o.z<1.15&&!o.hit);document.getElementById('score').textContent=score;document.getElementById('coins').textContent=coins}
+function loop(t){if(!running){draw();return}const dt=Math.min(.035,(t-last)/1000||0);last=t;update(dt);draw();requestAnimationFrame(loop)}
+function key(k){if(!running)return;if(k==='ArrowLeft'||k==='a')targetLane=Math.max(-1,targetLane-1);if(k==='ArrowRight'||k==='d')targetLane=Math.min(1,targetLane+1);if((k==='ArrowUp'||k==='w'||k===' ')&&jump<=0)jump=1;if(k==='ArrowDown'||k==='s')slide=.8}
+addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key))e.preventDefault();key(e.key)});
+document.querySelectorAll('.ctrl').forEach(b=>b.onpointerdown=()=>key(b.dataset.k));
+let sx=0,sy=0;addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});addEventListener('touchend',e=>{let dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;if(Math.max(Math.abs(dx),Math.abs(dy))>25)key(Math.abs(dx)>Math.abs(dy)?(dx>0?'ArrowRight':'ArrowLeft'):(dy<0?'ArrowUp':'ArrowDown'))},{passive:true});
+function start(){reset();running=true;document.getElementById('start').classList.add('hide');document.getElementById('gameover').classList.add('hide');last=performance.now();requestAnimationFrame(loop)}
+document.getElementById('play').onclick=start;document.getElementById('again').onclick=start;reset();draw();
+</script>
+</body></html>
