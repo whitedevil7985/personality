@@ -15,7 +15,7 @@
 <div class="resources" id="resources"></div>
 <div class="layout">
 <div class="card panel"><h2>Realm Council</h2><div class="players" id="players"></div><div class="card panel" style="margin-top:12px;padding:11px"><h2>Your Kingdom</h2><div class="boardgrid" id="stats"></div></div></div>
-<div class="card map"><div class="maphead"><div class="maptitle">LIVE WAR MAP</div><div class="turn" id="turn">Lobby</div></div><div class="terrain"></div><div class="kingdoms" id="map"></div></div>
+<div class="card map"><div class="maphead"><div class="maptitle">LIVE WAR MAP <span style="font-size:9px;color:var(--muted);font-weight:700">• 2–6 RULERS</span></div><div class="turn" id="turn">Waiting for 2 rulers</div></div><div class="terrain"></div><div class="kingdoms" id="map"></div></div>
 <div class="card panel right"><h2>Command Table</h2><div class="actiongrid">
 <div class="action" style="grid-column:1/-1;padding:8px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">Target</div><select id="target" class="input" style="width:100%;padding:10px"></select></div>
 <button class="action" onclick="act('farm')"><strong>🌾 Harvest</strong><small>collect food</small></button>
@@ -29,7 +29,24 @@
 <button class="action" style="grid-column:1/-1" onclick="act('end_turn')"><strong>⏭ End Turn</strong><small>pass the crown</small></button>
 </div><div class="feed" id="feed"></div></div>
 </div></div>
-<div class="lobby" id="lobby"><div class="lobbybox"><div style="font-size:12px;color:var(--gold);font-weight:900;letter-spacing:.08em">VANYA ARCADE • GRAND STRATEGY</div><h2>🏰 Kingdom Wars</h2><p>Build an economy, recruit an army and conquer territory. Reach the crown target before your rivals.</p><div class="row"><input class="input" id="name" maxlength="24" placeholder="YOUR RULER NAME"></div><div class="row" style="margin-top:8px"><input class="input" id="room" maxlength="6" placeholder="ROOM CODE"><button class="btn alt" onclick="connectRoom()">Join</button></div><div class="row" style="margin-top:9px"><button class="btn" style="flex:1" onclick="createRoom()">Create New Battle</button></div><div class="notice" id="lobbyMsg">Open from Vanya to use your Telegram identity automatically.</div></div></div>
+<div class="lobby" id="lobby"><div class="lobbybox">
+<div style="font-size:12px;color:var(--gold);font-weight:900;letter-spacing:.08em">VANYA ARCADE • GRAND STRATEGY</div>
+<h2>🏰 Kingdom Wars</h2>
+<p style="margin-bottom:10px">Build your kingdom, grow your army, attack rival rulers and reach <b style="color:var(--gold)">70 land</b> to claim the crown.</p>
+<div class="card" style="padding:12px;margin:10px 0 12px">
+  <div style="font-size:11px;font-weight:900;margin-bottom:8px">HOW THIS BATTLE WORKS</div>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:7px;font-size:10px;color:var(--muted);line-height:1.45">
+    <div>👥 <b style="color:#fff">2 rulers are enough</b><br>Battle starts automatically when the 2nd player joins.</div>
+    <div>🏰 <b style="color:#fff">2–6 players</b><br>More rulers can join before the battle starts.</div>
+    <div>⏱️ <b style="color:#fff">45 sec / turn</b><br>Each ruler gets one action per turn.</div>
+    <div>👑 <b style="color:#fff">Win at 70 land</b><br>Build territory or capture it by attacking.</div>
+  </div>
+</div>
+<div class="row"><input class="input" id="name" maxlength="24" placeholder="YOUR RULER NAME"></div>
+<div class="row" style="margin-top:8px"><input class="input" id="room" maxlength="6" placeholder="ROOM CODE"><button class="btn alt" onclick="connectRoom()">Join</button></div>
+<div class="row" style="margin-top:9px"><button class="btn" style="flex:1" onclick="createRoom()">Create New Battle</button></div>
+<div class="notice" id="lobbyMsg">Create a battle, then share the 6-character room code. The game begins automatically at 2 players.</div>
+</div></div>
 <div class="overlay" id="resultOverlay"><div class="result"><div class="trophy">👑</div><h2 id="resultTitle">Crown Claimed</h2><p id="resultText"></p><button class="btn" onclick="location.reload()">Return to lobby</button></div></div>
 <script>
 const qs=new URLSearchParams(location.search);let roomCode=(qs.get('room')||'').toUpperCase(),ws=null,state=null,myId=null,tg=null,reconnectTimer=null,reconnecting=false,ended=false;
@@ -49,7 +66,12 @@ function connectRoom(){
   el('room').value=roomCode;saveName();ended=false;reconnecting=false;
   const p=location.protocol==='https:'?'wss':'ws';
   ws=new WebSocket(p+'://'+location.host+'/ws/kingdom/'+encodeURIComponent(roomCode)+'?initData='+encodeURIComponent(initData)+'&cid='+encodeURIComponent(cid));
-  ws.onopen=()=>{el('conn').textContent='● Live';el('conn').style.color='#67d59a';ws.send(JSON.stringify({type:'join',name:saveName()}))};
+  ws.onopen=()=>{
+  el('conn').textContent='● Live';
+  el('conn').style.color='#67d59a';
+  el('lobbyMsg').textContent='Connected. Waiting for another ruler…';
+  ws.send(JSON.stringify({type:'join',name:saveName()}))
+};
   ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(_){ }};
   ws.onclose=()=>{el('conn').textContent='● Disconnected';el('conn').style.color='#ea6a68';if(!ended&&!reconnecting){reconnecting=true;clearTimeout(reconnectTimer);reconnectTimer=setTimeout(()=>{reconnecting=false;connectRoom()},1500)}};
   ws.onerror=()=>{el('lobbyMsg').textContent='Live connection failed. Retrying…'};
@@ -58,7 +80,14 @@ function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
 function act(action,target){if(!state?.started||state.turnPlayer!==myId)return;if(action==='attack'){target=target||el('target')?.value||null}send({type:'action',action,target})}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function addFeed(s){const d=document.createElement('div');d.className='event';d.innerHTML='<span class="time">'+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+'</span>'+esc(s);el('feed').prepend(d)}
-function render(){if(!state)return;el('lobby').style.display='none';const me=state.players.find(p=>p.id===myId)||state.players[0],r=me?.kingdom||{};const defs=[['🪙','Gold','gold'],['🌾','Food','food'],['🪵','Wood','wood'],['🪨','Stone','stone'],['⚔️','Army','army']];el('resources').innerHTML=defs.map(x=>'<div class="card res"><div class="rline"><span class="rname">'+x[0]+' '+x[1]+'</span><strong>'+Number(r[x[2]]||0).toLocaleString()+'</strong></div><div class="bar"><i style="width:'+Math.min(100,Number(r[x[2]]||0)/10)+'%"></i></div></div>').join('');el('players').innerHTML=state.players.map((p,i)=>{const k=p.kingdom||{};return '<div class="player '+(p.id===myId?'active':'')+'"><div class="avatar">'+(i+1)+'</div><div><div class="pname">'+esc(p.name)+'</div><div class="pmeta">Land '+k.territory+' • Defense '+k.defense+'</div></div><div class="badge">'+(p.id===state.turnPlayer?'TURN':'Lv '+k.level)+'</div></div>'}).join('');el('stats').innerHTML=[['Level',r.level],['Territory',r.territory],['Defense',r.defense],['Population',r.population],['Buildings',r.buildings],['W/L',(r.wins||0)+'/'+(r.losses||0)]].map(x=>'<div class="tile"><b>'+x[1]+'</b><span>'+x[0]+'</span></div>').join('');el('turn').textContent=state.started?(state.turnPlayer===myId?'Your turn • '+state.turnLeft+'s':'Waiting for '+esc(state.players.find(p=>p.id===state.turnPlayer)?.name||'ruler')+' • '+state.turnLeft+'s'):'Waiting for rulers';
+function render(){if(!state)return;el('lobby').style.display='none';const me=state.players.find(p=>p.id===myId)||state.players[0],r=me?.kingdom||{};const defs=[['🪙','Gold','gold'],['🌾','Food','food'],['🪵','Wood','wood'],['🪨','Stone','stone'],['⚔️','Army','army']];el('resources').innerHTML=defs.map(x=>'<div class="card res"><div class="rline"><span class="rname">'+x[0]+' '+x[1]+'</span><strong>'+Number(r[x[2]]||0).toLocaleString()+'</strong></div><div class="bar"><i style="width:'+Math.min(100,Number(r[x[2]]||0)/10)+'%"></i></div></div>').join('');el('players').innerHTML=state.players.map((p,i)=>{const k=p.kingdom||{};return '<div class="player '+(p.id===myId?'active':'')+'"><div class="avatar">'+(i+1)+'</div><div><div class="pname">'+esc(p.name)+(p.id===myId?' <span style="color:var(--gold)">YOU</span>':'')+'</div><div class="pmeta">Land '+k.territory+' • Defense '+k.defense+' • Army '+k.army+'</div></div><div class="badge">'+(p.id===state.turnPlayer?'TURN':'Lv '+k.level)+'</div></div>'}).join('');
+if(!state.started){
+  el('players').insertAdjacentHTML('beforeend','<div style="font-size:10px;color:var(--muted);padding:8px 3px">'+(state.players.length<2?'👥 '+(2-state.players.length)+' more ruler needed to start.':'⚔️ Battle starts automatically.')+'</div>');
+}el('stats').innerHTML=[['Level',r.level],['Territory',r.territory],['Defense',r.defense],['Population',r.population],['Buildings',r.buildings],['W/L',(r.wins||0)+'/'+(r.losses||0)]].map(x=>'<div class="tile"><b>'+x[1]+'</b><span>'+x[0]+'</span></div>').join('');el('turn').textContent=state.started
+  ? (state.turnPlayer===myId
+      ? '⚔️ YOUR TURN • '+state.turnLeft+'s'
+      : '⏳ '+esc(state.players.find(p=>p.id===state.turnPlayer)?.name||'ruler')+' • '+state.turnLeft+'s')
+  : ('Waiting for '+Math.max(0,2-(state.players?.length||0))+' more ruler'+(Math.max(0,2-(state.players?.length||0))===1?'':'s'));
 const targetEl=el('target');
 if(targetEl){
   const rivals=state.players.filter(p=>p.id!==myId);
@@ -69,7 +98,11 @@ document.querySelectorAll('.action').forEach(btn=>{btn.disabled=!state.started||
 renderMap()}
 function renderMap(){const holder=el('map');holder.innerHTML='';const pos=[[20,27],[49,19],[78,27],[24,70],[57,78],[82,68]];state.players.forEach((p,i)=>{const k=p.kingdom||{},d=pos[i%pos.length],div=document.createElement('div');div.className='capital';div.style.left=d[0]+'%';div.style.top=d[1]+'%';div.style.borderColor=p.id===state.turnPlayer?'#dfb45d':'#ffffff55';div.innerHTML='<span>🏰</span><div class="capname">'+esc(p.name)+' • '+k.territory+' land</div>';holder.appendChild(div)});for(let i=0;i<9;i++){const n=document.createElement('div');n.className='node '+['farm','wood','mine'][i%3];n.style.left=(10+(i*17)%82)+'%';n.style.top=(18+(i*13)%65)+'%';holder.appendChild(n)}}
 function handle(m){
-if(m.type==='joined'){myId=m.you;state=m.state;addFeed('You entered the war room.');render()}
+if(m.type==='joined'){
+  myId=m.you;state=m.state;
+  addFeed(state?.started?'⚔️ The war has started — it is turn based.':'🏰 You entered the war room. One more ruler is needed to start.');
+  render()
+}
 else if(m.type==='state'){state=m.state||m;myId=m.you||myId;render()}
 else if(m.type==='event'){addFeed(m.message||'The realm changed.');if(m.state){state=m.state;myId=m.you||myId;render()}}
 else if(m.type==='game_over'){ended=true;state=m.state||state;render();el('resultOverlay').style.display='grid';el('resultTitle').textContent=(m.winnerName||'A ruler')+' claimed the crown';el('resultText').textContent=m.message||'The war is over.'}
