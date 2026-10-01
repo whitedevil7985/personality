@@ -1462,6 +1462,10 @@ Reply only as Vanya. Stay natural, warm, funny, curious, and varied. Never prete
 _AI_HTTP_SESSION = None
 _AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
 _AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0}
+_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_FAILURE_THRESHOLD = max(2, int(os.getenv("AI_PROVIDER_FAILURE_THRESHOLD", "3")))
+_AI_PROVIDER_LOG_COOLDOWN = max(15.0, float(os.getenv("AI_PROVIDER_LOG_COOLDOWN_SECONDS", "60")))
 _AI_PROVIDER_DOWN_COOLDOWN = max(0.0, float(os.getenv("AI_PROVIDER_DOWN_COOLDOWN", "0")))
 _AI_LOGGER_BOT = None
 
@@ -1475,33 +1479,46 @@ _AI_FAST_MAX_SECONDS = max(3.0, float(os.getenv("AI_FAST_MAX_SECONDS", "6.0")))
 _AI_HEDGE_DELAY = max(0.05, float(os.getenv("AI_HEDGE_DELAY_SECONDS", "0.35")))
 
 async def _set_ai_provider_status(provider, active, detail=""):
-    """Notify the logger when an AI provider changes state."""
+    """Track health without treating one slow request as a provider outage."""
     global _AI_PROVIDER_STATUS
     if provider not in _AI_PROVIDER_STATUS:
         return
+
+    now = time.monotonic()
     previous = _AI_PROVIDER_STATUS[provider]
-    _AI_PROVIDER_STATUS[provider] = bool(active)
+
     if active:
+        _AI_PROVIDER_FAILURES[provider] = 0
         _AI_PROVIDER_LAST_FAILURE[provider] = 0.0
+        _AI_PROVIDER_STATUS[provider] = True
+        should_log = previous is None or previous is False
     else:
-        _AI_PROVIDER_LAST_FAILURE[provider] = time.monotonic()
-    # Log the first probe and any later state transition. Avoid flooding logger.
-    if previous is not None and previous == bool(active):
-        return
+        _AI_PROVIDER_FAILURES[provider] = _AI_PROVIDER_FAILURES.get(provider, 0) + 1
+        _AI_PROVIDER_LAST_FAILURE[provider] = now
+        if _AI_PROVIDER_FAILURES[provider] < _AI_PROVIDER_FAILURE_THRESHOLD:
+            return
+        _AI_PROVIDER_STATUS[provider] = False
+        should_log = previous is not False
+
     bot = _AI_LOGGER_BOT
-    if bot is None:
+    if bot is None or not should_log:
         return
+    if now - _AI_PROVIDER_LAST_LOG.get(provider, 0.0) < _AI_PROVIDER_LOG_COOLDOWN:
+        return
+    _AI_PROVIDER_LAST_LOG[provider] = now
+
     label = "Elite LLM" if provider == "elite" else "ChatGP"
     if active:
         message = (
-            f"🟢 <b>{label} API ACTIVE</b>\\n"
+            f"🟢 <b>{label} API ACTIVE</b>\n"
             f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>"
         )
     else:
         message = (
-            f"🔴 <b>{label} API UNAVAILABLE</b>\\n"
-            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>\\n"
-            f"Reason: <code>{html.escape(str(detail)[:350])}</code>"
+            f"🟠 <b>{label} API SLOW/UNSTABLE</b>\n"
+            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>\n"
+            f"Failures: <code>{_AI_PROVIDER_FAILURES[provider]}</code>\n"
+            f"Last error: <code>{html.escape(str(detail)[:250])}</code>"
         )
     await log_event(type("AIStatusContext", (), {"bot": bot})(), message)
 
@@ -1565,7 +1582,10 @@ async def _get_ai_http_session():
     import aiohttp
     async with _AI_HTTP_SESSION_LOCK:
         if _AI_HTTP_SESSION is None or _AI_HTTP_SESSION.closed:
-            timeout = aiohttp.ClientTimeout(total=max(1.8, float(os.getenv("AI_TIMEOUT_SECONDS", "2.2"))))
+            timeout = aiohttp.ClientTimeout(
+                total=max(4.5, float(os.getenv("AI_TIMEOUT_SECONDS", "5.0"))),
+                sock_connect=3.0,
+            )
             connector = aiohttp.TCPConnector(
                 limit=max(20, _AI_CONCURRENCY + 4),
                 ttl_dns_cache=300,
@@ -1744,9 +1764,7 @@ async def _fast_ai_answer(prompt):
             if (
                 CHATGP_API_KEY
                 and not (
-                    _AI_PROVIDER_STATUS.get("chatgp") is False
-                    and time.monotonic() - _AI_PROVIDER_LAST_FAILURE.get("chatgp", 0.0)
-                    < _AI_PROVIDER_DOWN_COOLDOWN
+                    False
                 )
             ):
                 tasks.add(asyncio.create_task(_call_chatgp_api(prompt)))
@@ -1757,7 +1775,7 @@ async def _fast_ai_answer(prompt):
         # Do not kill a healthy Elite request at 1.8s. The old hard cutoff was
         # the reason the bot returned the fake "AI down" message even though
         # the startup probe showed Elite as ACTIVE.
-        deadline = time.monotonic() + max(3.0, _AI_FAST_MAX_SECONDS)
+        deadline = time.monotonic() + max(4.0, _AI_FAST_MAX_SECONDS)
         pending = set(tasks)
         while pending:
             remaining = deadline - time.monotonic()
@@ -2142,14 +2160,6 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         f"User's new message:\\n{text_value}\\n\\n"
         "Reply only as Vanya. Be natural, concise, warm, and context-aware."
     )
-
-    if stream_callback is not None and chat_type == "private":
-        answer = await _call_elite_api_stream(prompt, stream_callback)
-        if answer:
-            asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
-            return answer
-        # Streaming failed before any visible output. Fall back to the normal
-        # provider race rather than leaving the user without a response.
 
     answer = await _fast_ai_answer(prompt)
     if answer:
