@@ -2705,6 +2705,53 @@ async def callback(update,context):
                     reply_markup=back()
                 )
             return
+        if key.upper() == "KINGDOMWARS":
+            webapp_url = (os.getenv("KINGDOM_WARS_WEBAPP_URL") or "").strip().strip('"').strip("'")
+            if not webapp_url:
+                domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().strip("/")
+                if domain:
+                    webapp_url = "https://" + domain + "/kingdom-wars"
+            if webapp_url and not webapp_url.startswith(("https://", "http://")):
+                webapp_url = "https://" + webapp_url
+            if webapp_url:
+                room_url = webapp_url.rstrip("/") + "?room=" + str(getattr(update, "_kingdom_room_code", "") or "")
+                # Create a room for the callback chat so the button opens a ready lobby.
+                try:
+                    from webserver import create_kingdom_room_for_group
+                    room_code = await create_kingdom_room_for_group(
+                        update.effective_chat.id if update.effective_chat and update.effective_chat.type != "private" else None
+                    )
+                    room_url = webapp_url.rstrip("/") + "?room=" + room_code
+                except Exception:
+                    pass
+                msg = (
+                    "╭━━━〔 🏰 <b>KINGDOM WARS</b> 〕━━━╮\n"
+                    "┃ <i>Live Grand Strategy Arena</i> ✦\n"
+                    "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                    "👑 Build your kingdom, gather resources, recruit an army and conquer land.\n"
+                    "⚔️ <b>2–6 rulers</b> • live turns • real-time war map\n"
+                    "🏆 Reach <b>70 land</b> to claim the crown.\n\n"
+                    "💰 Winner: <b>+500 coins +100 XP</b>\n"
+                    "🎁 Participants: <b>+100 coins +25 XP</b>"
+                )
+                if update.effective_chat and update.effective_chat.type in ("group","supergroup"):
+                    markup=kb([
+                        [InlineKeyboardButton("🏰 Enter Kingdom Wars",url=room_url)],
+                        [InlineKeyboardButton("⟵ Back to Games",callback_data="cat:games")]
+                    ])
+                else:
+                    markup=kb([
+                        [InlineKeyboardButton("🏰 Open Kingdom Wars",web_app=WebAppInfo(url=room_url))],
+                        [InlineKeyboardButton("⟵ Back to Games",callback_data="cat:games")]
+                    ])
+                await q.edit_message_text(msg,parse_mode="HTML",reply_markup=markup)
+            else:
+                await q.edit_message_text(
+                    "🏰 <b>Kingdom Wars Web App is not configured.</b>\n\n"
+                    "Set <code>KINGDOM_WARS_WEBAPP_URL</code> or <code>MINIAPP_DOMAIN</code> in Railway Variables.",
+                    parse_mode="HTML",reply_markup=back()
+                )
+            return
         if key.upper() == "CHESS":
             webapp_url=get_chess_webapp_url()
             if webapp_url and webapp_url.startswith("https://"):
