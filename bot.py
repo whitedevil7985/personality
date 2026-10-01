@@ -1797,13 +1797,12 @@ def _sanitize_vanya_reply(answer):
         r"https?://[^\s<>]+",
         r"(?i)\b(?:elite\s*llm|chatgp|gpt[- ]?[0-9.]+|openai|gemini|anthropic|claude|cerebras)\b",
         r"(?i)\b(?:api[_ -]?key|api[_ -]?url|base[_ -]?url|endpoint|system prompt|developer prompt|environment variable|env variable)\b",
-        r"(?i)(?:\b503\b|\b502\b|\b429\b|\b500\b|service\s+(?:unavailable|busy)|temporarily\s+(?:busy|unavailable)|system\s+notification|AI\s+interface|接口暂时繁忙|系统通知)",
+        r"(?i)(?:\b503\b|\b502\b|\b429\b|\b500\b|service\s+(?:unavailable|busy)|temporarily\s+(?:busy|unavailable)|system\s+notification|AI\s+interface|接口暂时繁忙|系统通知|暂无有效回答|暂无有效回复|没有有效回答|没有有效回复|无有效回答|无有效回复|有效回答)",
     )
     if any(re.search(p, text, re.I) for p in private_patterns):
-        return random.choice([
-            "Hehe ye thoda secret zone hai 😜 internal details share nahi karti.",
-            "Areee technical secrets 🤭 bas itna samjho main Vanya hu.",
-        ])
+        # Provider-generated error/status text is not a Vanya reply.
+        # Return empty so _fast_ai_answer can fail over to the next provider.
+        return ""
     return text
 
 async def _fast_ai_answer(prompt):
