@@ -1460,6 +1460,8 @@ Reply only as Vanya. Stay natural, warm, funny, curious, and varied. Never prete
 
 _AI_HTTP_SESSION = None
 _AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
+_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_DOWN_COOLDOWN = max(5.0, float(os.getenv("AI_PROVIDER_DOWN_COOLDOWN", "30")))
 _AI_LOGGER_BOT = None
 
 async def _set_ai_provider_status(provider, active, detail=""):
@@ -1469,6 +1471,10 @@ async def _set_ai_provider_status(provider, active, detail=""):
         return
     previous = _AI_PROVIDER_STATUS[provider]
     _AI_PROVIDER_STATUS[provider] = bool(active)
+    if active:
+        _AI_PROVIDER_LAST_FAILURE[provider] = 0.0
+    else:
+        _AI_PROVIDER_LAST_FAILURE[provider] = time.monotonic()
     # Log the first probe and any later state transition. Avoid flooding logger.
     if previous is not None and previous == bool(active):
         return
@@ -1532,7 +1538,7 @@ async def _get_ai_http_session():
     import aiohttp
     async with _AI_HTTP_SESSION_LOCK:
         if _AI_HTTP_SESSION is None or _AI_HTTP_SESSION.closed:
-            timeout = aiohttp.ClientTimeout(total=max(6, int(os.getenv("AI_TIMEOUT_SECONDS", "8"))))
+            timeout = aiohttp.ClientTimeout(total=max(4, int(os.getenv("AI_TIMEOUT_SECONDS", "6"))))
             connector = aiohttp.TCPConnector(limit=max(20, _AI_CONCURRENCY + 4), ttl_dns_cache=300)
             _AI_HTTP_SESSION = aiohttp.ClientSession(timeout=timeout, connector=connector)
     return _AI_HTTP_SESSION
@@ -1692,8 +1698,10 @@ def _ai_headers(api_key):
 async def _call_elite_api(text_value):
     """Call the documented OpenAI-compatible Elite endpoint."""
     import aiohttp
+    if (_AI_PROVIDER_STATUS.get("elite") is False and
+            time.monotonic() - _AI_PROVIDER_LAST_FAILURE.get("elite", 0.0) < _AI_PROVIDER_DOWN_COOLDOWN):
+        return None
     if not ELITE_LLM_API_KEY:
-        await _set_ai_provider_status("elite", False, "ELITE_LLM_API_KEY is not configured")
         return None
 
     session = await _get_ai_http_session()
@@ -1781,36 +1789,43 @@ async def _call_elite_api(text_value):
 
 async def _call_chatgp_api(text_value):
     """Fallback ChatGP API: POST /api/chat with {prompt} and read {response}."""
+    import aiohttp
     if not CHATGP_API_KEY:
         await _set_ai_provider_status("chatgp", False, "CHATGP_API_KEY is not configured")
         return None
+    if (_AI_PROVIDER_STATUS.get("chatgp") is False and
+            time.monotonic() - _AI_PROVIDER_LAST_FAILURE.get("chatgp", 0.0) < _AI_PROVIDER_DOWN_COOLDOWN):
+        return None
 
-    import aiohttp
-    timeout = aiohttp.ClientTimeout(total=max(10, CHATGP_TIMEOUT_SECONDS))
+    # Reuse the same keep-alive session so fallback requests do not pay a new
+    # DNS/TCP/TLS connection setup cost every time.
+    session = await _get_ai_http_session()
+    timeout = aiohttp.ClientTimeout(total=max(4, CHATGP_TIMEOUT_SECONDS))
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(
-                CHATGP_API_URL,
-                headers=_ai_headers(CHATGP_API_KEY),
-                json={"prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}"},
-            ) as resp:
-                raw = await resp.text()
-                if resp.status >= 400:
-                    detail = f"HTTP {resp.status}: {raw[:300]}"
-                    await _set_ai_provider_status("chatgp", False, detail)
-                    return None
-                data = await resp.json(content_type=None)
-                answer = str(
-                    data.get("response")
-                    or ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
-                    or data.get("output")
-                    or ""
-                ).strip()
-                if not answer:
-                    await _set_ai_provider_status("chatgp", False, "Empty response")
-                    return None
-                await _set_ai_provider_status("chatgp", True)
-                return answer
+        request_url = CHATGP_API_URL
+        async with session.post(
+            request_url,
+            headers=_ai_headers(CHATGP_API_KEY),
+            json={"prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}"},
+            timeout=timeout,
+        ) as resp:
+            raw = await resp.text()
+            if resp.status >= 400:
+                detail = f"HTTP {resp.status}: {raw[:300]}"
+                await _set_ai_provider_status("chatgp", False, detail)
+                return None
+            data = await resp.json(content_type=None)
+            answer = str(
+                data.get("response")
+                or ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+                or data.get("output")
+                or ""
+            ).strip()
+            if not answer:
+                await _set_ai_provider_status("chatgp", False, "Empty response")
+                return None
+            await _set_ai_provider_status("chatgp", True)
+            return answer
     except Exception as exc:
         await _set_ai_provider_status("chatgp", False, f"{type(exc).__name__}: {exc}")
         return None
