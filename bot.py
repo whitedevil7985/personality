@@ -1906,8 +1906,10 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         memory = ""
 
     # Keep the LLM context compact for faster first-token/response latency.
-    history = history[-int(os.getenv("AI_PROMPT_HISTORY_CHARS", "6000")):]
-    memory = memory[-int(os.getenv("AI_PROMPT_MEMORY_CHARS", "2200")):]
+    history_limit = int(os.getenv("AI_PROMPT_HISTORY_CHARS", "3600" if chat_type == "private" else "6000"))
+    memory_limit = int(os.getenv("AI_PROMPT_MEMORY_CHARS", "1400" if chat_type == "private" else "2200"))
+    history = history[-history_limit:]
+    memory = memory[-memory_limit:]
     prompt = (
         f"Chat type: {chat_type}. Group: {group_title or 'DM'}\\n"
         f"User display name: {user.first_name or 'User'}\\n\\n"
@@ -2549,6 +2551,19 @@ async def capture_owner_custom_emojis(update, context):
         pass
 
 
+async def _typing_heartbeat(bot, chat_id, stop_event, interval=4.0):
+    """Keep Telegram's 'typing…' indicator visible while AI is generating."""
+    while not stop_event.is_set():
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+
+
 async def chat(update,context):
     text = " ".join(context.args).strip()
     if not text:
@@ -2558,12 +2573,16 @@ async def chat(update,context):
         await ensure_user(update.effective_user)
     except Exception as exc:
         print(f"[Chat][DB] ensure_user skipped: {type(exc).__name__}: {exc}")
+    typing_stop = asyncio.Event()
+    typing_task = asyncio.create_task(
+        _typing_heartbeat(context.bot, update.effective_chat.id, typing_stop)
+    )
     try:
-        await update.effective_chat.send_action("typing")
-    except Exception:
-        pass
-    answer = await ai_reply(update.effective_user, text, "private")
-    await send_vanya_reply(update, answer)
+        answer = await ai_reply(update.effective_user, text, "private")
+        await send_vanya_reply(update, answer)
+    finally:
+        typing_stop.set()
+        typing_task.cancel()
 
 async def gchat(update,context):
     text=" ".join(context.args).strip()
@@ -2622,8 +2641,16 @@ async def mention_chat(update,context):
             return
         if text.startswith("/"):
             return
-        answer = await ai_reply(update.effective_user, text, "private")
-        await send_vanya_reply(update, answer)
+        typing_stop = asyncio.Event()
+        typing_task = asyncio.create_task(
+            _typing_heartbeat(context.bot, chat.id, typing_stop)
+        )
+        try:
+            answer = await ai_reply(update.effective_user, text, "private")
+            await send_vanya_reply(update, answer)
+        finally:
+            typing_stop.set()
+            typing_task.cancel()
         return
 
     if not AI_GROUP_MODE:
