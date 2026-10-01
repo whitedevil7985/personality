@@ -1525,11 +1525,28 @@ async def _wait_for_ai_slot():
             if len(_AI_RATE_EVENTS_10S) < 10 and len(_AI_RATE_EVENTS_60S) < 60:
                 _AI_RATE_EVENTS_10S.append(now)
                 _AI_RATE_EVENTS_60S.append(now)
-                return
+                return True
             wait_10 = (10 - (now - _AI_RATE_EVENTS_10S[0])) if _AI_RATE_EVENTS_10S else 0
             wait_60 = (60 - (now - _AI_RATE_EVENTS_60S[0])) if _AI_RATE_EVENTS_60S else 0
             delay = max(0.05, wait_10, wait_60)
         await asyncio.sleep(delay)
+
+async def _try_get_ai_slot(max_wait=0.8):
+    """Get an Elite slot quickly; skip to fallback instead of queueing users."""
+    deadline = time.monotonic() + max(0.05, float(max_wait))
+    while time.monotonic() < deadline:
+        async with _AI_RATE_LOCK:
+            now = time.monotonic()
+            _ai_rate_cleanup(now)
+            if len(_AI_RATE_EVENTS_10S) < 10 and len(_AI_RATE_EVENTS_60S) < 60:
+                _AI_RATE_EVENTS_10S.append(now)
+                _AI_RATE_EVENTS_60S.append(now)
+                return True
+            wait_10 = (10 - (now - _AI_RATE_EVENTS_10S[0])) if _AI_RATE_EVENTS_10S else 0
+            wait_60 = (60 - (now - _AI_RATE_EVENTS_60S[0])) if _AI_RATE_EVENTS_60S else 0
+            delay = min(0.15, max(0.01, wait_10, wait_60))
+        await asyncio.sleep(delay)
+    return False
 
 async def _get_ai_http_session():
     global _AI_HTTP_SESSION
@@ -1733,7 +1750,8 @@ async def _call_elite_api(text_value):
                 "stream": False,
             }
             for attempt in range(max_attempts):
-                await _wait_for_ai_slot()
+                if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.8"))):
+                    return None
                 try:
                     async with session.post(
                         f"{ELITE_LLM_BASE_URL}/chat/completions",
@@ -1886,6 +1904,9 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         history = ""
         memory = ""
 
+    # Keep the LLM context compact for faster first-token/response latency.
+    history = history[-int(os.getenv("AI_PROMPT_HISTORY_CHARS", "6000")):]
+    memory = memory[-int(os.getenv("AI_PROMPT_MEMORY_CHARS", "2200")):]
     prompt = (
         f"Chat type: {chat_type}. Group: {group_title or 'DM'}\\n"
         f"User display name: {user.first_name or 'User'}\\n\\n"
@@ -3563,7 +3584,11 @@ async def ping(update, context):
 async def main():
     await cleanup_expired_memory()
     web_runner = await start_web_server()
-    app=Application.builder().bot(ProtectedBot(TOKEN)).build()
+    app=(Application.builder().bot(ProtectedBot(TOKEN))
+         .concurrent_updates(16)
+         .connection_pool_size(32)
+         .pool_timeout(5)
+         .build())
     commands={
         "start":start,"help":help_cmd,"profile":profile,"bal":balance,
         "daily":daily,"work":work,"give":give,"toprich":toprich,"leaderboard":leaderboard,
