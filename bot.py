@@ -45,6 +45,7 @@ from games.wordchain import wordchain, wordchain_join, wordchain_answer, WORDCHA
 from games.wordscramble import wordscramble, wordscramble_answer, WORDSCRAMBLE_GAMES
 from games.hack import hack
 from games.scribble import scribble
+from games.kingdomwars import kingdomwars
 from features import spin, achievements, quest, progress_quest
 from webserver import start_web_server
 
@@ -532,7 +533,7 @@ GAME_ITEMS = [
     ("🔤 Wordgrid","WORDGRID"), ("⚡ Tap","TAP"), ("💥 Crash","CRASH"), ("🐙 Jumble","JUMBLE"),
     ("🎭 Charades","CHARADES"), ("🔗 Wordchain","WORDCHAIN"), ("🔤 Wordscramble","WORDS"),
     ("💣 Hack","HACK"), ("🃏 Card","CARD"), ("♟ Chess","CHESS"), ("🖌 Scribble","SCRIBBLE"),
-    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"),
+    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"), ("🏰 Kingdom Wars","KINGDOMWARS"),
 ]
 
 GAME_INFO = {
@@ -556,6 +557,7 @@ GAME_INFO = {
     "DICE": "/dice — Roll a dice.",
     "COIN": "/coinflip — Flip a coin.",
     "SLOTS": "/slots — Spin the slot machine.",
+    "KINGDOMWARS": "/kingdomwars — Open a live 2–6 player strategy room. Build, recruit, fortify and conquer.",
 }
 
 def game_menu_kb():
@@ -654,7 +656,7 @@ LEADERBOARD_GAMES = [
     ("Tap", "TAP"), ("Wordgrid", "WORDGRID"), ("Wordseek", "WORDSEEK"),
     ("Dice", "DICE"), ("Coinflip", "COINFLIP"), ("Card", "CARD"),
     ("Jumble", "JUMBLE"), ("Wordchain", "WORDCHAIN"), ("Wordscramble", "WORDS"),
-    ("Crash", "CRASH"), ("Charades", "CHARADES"), ("Hack", "HACK"), ("Scribble", "SCRIBBLE"),
+    ("Crash", "CRASH"), ("Charades", "CHARADES"), ("Hack", "HACK"), ("Scribble", "SCRIBBLE"), ("Kingdom Wars", "KINGDOMWARS"),
 ]
 
 def _leaderboard_since(period):
@@ -3935,7 +3937,7 @@ async def main():
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordchainjoin":wordchain_join,"wordscramble":wordscramble,"hack":hack,
-        "scribble":scribble,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
+        "scribble":scribble,"kingdomwars":kingdomwars,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
     }
@@ -3970,7 +3972,7 @@ async def main():
         "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid",
         "crash": "Play Crash", "charades": "Play Charades", "wordchain": "Start multiplayer Wordchain", "wordchainjoin": "Join active Wordchain lobby",
         "wordscramble": "Play Wordscramble", "hack": "Play Hack puzzle",
-        "scribble": "Open Scribble", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
+        "scribble": "Open Scribble", "kingdomwars": "Open Kingdom Wars strategy arena", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
         "panel": "Open owner panel", "ownerpanel": "Open owner panel", "devpanel": "Open owner panel", "broadcast": "Broadcast to users, groups, or both (Owner/Sudo)", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
