@@ -1758,27 +1758,27 @@ async def _save_ai_context_after_reply(user_id):
 
 def _privacy_quick_reply(text_value):
     """Keep internal AI/provider implementation private from end users."""
-    t = re.sub(r"\\s+", " ", str(text_value or "")).strip().casefold()
+    t = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
     if not t:
         return None
 
     technical_patterns = (
-        r"\\bwhich\\s+(?:ai\\s+)?model\\b",
-        r"\\bwhat\\s+(?:ai\\s+)?model\\b",
-        r"\\bmodel\\s*(?:name|version|used|use)\\b",
-        r"\\bwhich\\s+(?:api|provider|service)\\b",
-        r"\\bwhat\\s+(?:api|provider|service)\\b",
-        r"\\b(?:api|provider|endpoint)\\s+(?:name|url|link|used|use)\\b",
-        r"\\b(?:api|provider)\\s+(?:key|token)\\b",
-        r"\\b(?:source|full|original)\\s+code\\b",
-        r"\\bgive\\s+(?:me\\s+)?(?:the\\s+)?code\\b",
-        r"\\bshow\\s+(?:me\\s+)?(?:the\\s+)?code\\b",
-        r"\\b(?:system|developer|hidden)\\s+prompt\\b",
-        r"\\b(?:internal|private)\\s+(?:prompt|config|configuration|implementation)\\b",
-        r"\\b(?:env|environment)\\s+(?:variable|vars?)\\b",
-        r"\\b(?:api|bot)\\s+(?:url|endpoint|base\\s*url)\\b",
-        r"\\bhow\\s+(?:does|do)\\s+(?:you|u)\\s+(?:work|work\\s+internally)\\b",
-        r"\\b(?:fallback|routing)\\s+(?:api|model|provider|logic)\\b",
+        r"\bwhich\s+(?:ai\s+)?model\b",
+        r"\bwhat\s+(?:ai\s+)?model\b",
+        r"\bmodel\s*(?:name|version|used|use)\b",
+        r"\bwhich\s+(?:api|provider|service)\b",
+        r"\bwhat\s+(?:api|provider|service)\b",
+        r"\b(?:api|provider|endpoint)\s+(?:name|url|link|used|use)\b",
+        r"\b(?:api|provider)\s+(?:key|token)\b",
+        r"\b(?:source|full|original)\s+code\b",
+        r"\bgive\s+(?:me\s+)?(?:the\s+)?code\b",
+        r"\bshow\s+(?:me\s+)?(?:the\s+)?code\b",
+        r"\b(?:system|developer|hidden)\s+prompt\b",
+        r"\b(?:internal|private)\s+(?:prompt|config|configuration|implementation)\b",
+        r"\b(?:env|environment)\s+(?:variable|vars?)\b",
+        r"\b(?:api|bot)\s+(?:url|endpoint|base\s*url)\b",
+        r"\bhow\s+(?:does|do)\s+(?:you|u)\s+(?:work|work\s+internally)\b",
+        r"\b(?:fallback|routing)\s+(?:api|model|provider|logic)\b",
     )
     if any(re.search(p, t, re.I) for p in technical_patterns):
         return random.choice([
@@ -1794,9 +1794,10 @@ def _sanitize_vanya_reply(answer):
     if not text:
         return ""
     private_patterns = (
-        r"https?://[^\\s<>]+",
-        r"(?i)\\b(?:elite\\s*llm|chatgp|gpt[- ]?[0-9.]+|openai|gemini|anthropic|claude|cerebras)\\b",
-        r"(?i)\\b(?:api[_ -]?key|api[_ -]?url|base[_ -]?url|endpoint|system prompt|developer prompt|environment variable|env variable)\\b",
+        r"https?://[^\s<>]+",
+        r"(?i)\b(?:elite\s*llm|chatgp|gpt[- ]?[0-9.]+|openai|gemini|anthropic|claude|cerebras)\b",
+        r"(?i)\b(?:api[_ -]?key|api[_ -]?url|base[_ -]?url|endpoint|system prompt|developer prompt|environment variable|env variable)\b",
+        r"(?i)(?:\b503\b|\b502\b|\b429\b|\b500\b|service\s+(?:unavailable|busy)|temporarily\s+(?:busy|unavailable)|system\s+notification|AI\s+interface|接口暂时繁忙|系统通知)",
     )
     if any(re.search(p, text, re.I) for p in private_patterns):
         return random.choice([
@@ -2219,9 +2220,9 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         return answer
 
     answer = random.choice([
-        "ufff yaar, abhi mera AI thoda nakhre kar raha hai 😭",
-        "ek sec yaar, meri AI service dono side se rooth gayi 😵",
-        "arre yaar, reply engine down hai abhi 😭 thoda baad mein try karna",
+        "ufff yaar, abhi thoda network nakhre kar raha hai 😭",
+        "ek sec yaar, reply thoda late ho gaya 😵",
+        "arre yaar, abhi thoda busy hoon 😭 phir se bolo na",
     ])
     asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
     return answer
