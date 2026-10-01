@@ -1748,62 +1748,53 @@ async def _save_ai_context_after_reply(user_id):
 
 
 async def _fast_ai_answer(prompt):
-    """Fast but reliable provider race.
+    """Use Elite first, then immediately fail over to ChatGP.
 
-    Elite gets the first chance. ChatGP is used only when it is configured and
-    not marked down, so a known-timeout fallback does not slow every DM.
+    Both providers are supported. A successful Elite response is returned
+    normally; if Elite is unavailable, times out, returns an error, or returns
+    an empty response, ChatGP is tried automatically.
     """
-    elite_task = asyncio.create_task(_call_elite_api(prompt))
-    tasks = {elite_task}
+    providers = []
 
-    try:
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(elite_task),
-                timeout=max(0.05, _AI_HEDGE_DELAY),
-            )
-        except asyncio.TimeoutError:
-            if (
-                CHATGP_API_KEY
-                and not (
-                    False
-                )
-            ):
-                tasks.add(asyncio.create_task(_call_chatgp_api(prompt)))
-        except Exception:
-            if CHATGP_API_KEY:
-                tasks.add(asyncio.create_task(_call_chatgp_api(prompt)))
+    if ELITE_LLM_API_KEY:
+        providers.append(("elite", _call_elite_api))
 
-        # Do not kill a healthy Elite request at 1.8s. The old hard cutoff was
-        # the reason the bot returned the fake "AI down" message even though
-        # the startup probe showed Elite as ACTIVE.
-        deadline = time.monotonic() + max(4.0, _AI_FAST_MAX_SECONDS)
-        pending = set(tasks)
-        while pending:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            done, pending = await asyncio.wait(
-                pending,
-                timeout=remaining,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in done:
-                try:
-                    answer = await task
-                except Exception:
-                    answer = None
-                if answer:
-                    return answer
+    if CHATGP_API_KEY:
+        providers.append(("chatgp", _call_chatgp_api))
 
+    if not providers:
         return None
-    finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
 
+    # Keep the failover fast: a stuck Elite request must not block ChatGP
+    # forever. The normal Elite HTTP session timeout still applies as well.
+    elite_timeout = max(
+        1.0,
+        float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "5.0")),
+    )
+
+    for provider_name, provider_call in providers:
+        try:
+            if provider_name == "elite":
+                answer = await asyncio.wait_for(
+                    provider_call(prompt),
+                    timeout=elite_timeout,
+                )
+            else:
+                answer = await provider_call(prompt)
+
+            if answer:
+                return str(answer).strip()
+
+            print(f"[AI][FAILOVER] {provider_name} returned no usable response; trying next provider.")
+        except asyncio.TimeoutError:
+            print(f"[AI][FAILOVER] {provider_name} timed out; trying next provider.")
+        except Exception as exc:
+            print(
+                f"[AI][FAILOVER] {provider_name} failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    return None
 def _instant_chat_reply(text_value: str):
     """Instant local replies for very short DM small-talk messages."""
     t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
