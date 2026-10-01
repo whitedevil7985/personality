@@ -1843,18 +1843,9 @@ async def _call_elite_api(text_value):
 
     session = await _get_ai_http_session()
     base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
-    # Use models that are currently listed by the live Elite LLMs catalog.
-    # Do not fall back to retired/unavailable IDs such as gpt-4o-mini.
-    fallback_models = []
-    for model_name in (
-        base_model,
-        "gpt-5.6-luna",
-        "gpt-5.4-mini",
-        "gpt-4o",
-    ):
-        model_name = str(model_name or "").strip()
-        if model_name and model_name not in fallback_models:
-            fallback_models.append(model_name)
+    # Keep one model on the hot path. Extra model fallbacks are opt-in via
+    # AI_FALLBACK_MODELS because serial model retries add latency.
+    fallback_models = [str(base_model).strip()] if str(base_model).strip() else []
 
     max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
     # Keep the default path to one model: trying several models serially can
