@@ -1792,6 +1792,26 @@ async def _fast_ai_answer(prompt):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def _instant_chat_reply(text_value: str):
+    t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
+    if not t:
+        return None
+    replies = {
+        "acha": ["Haan yaar", "Hehe achaaa", "Acha ji"],
+        "accha": ["Haan yaar", "Hehe achaaa", "Acha ji"],
+        "achha": ["Haan yaar", "Hehe achaaa", "Acha ji"],
+        "ohh": ["Hehe", "Ohh haan", "Samjhi"],
+        "hmm": ["Hmm", "Hmmm, bol na", "Haanji"],
+        "okay": ["Okayy", "Theek hai yaar", "Done"],
+        "ok": ["Okayy", "Theek hai yaar", "Done"],
+        "lol": ["Haha", "Hahaha", "Hehe"],
+        "haha": ["Hehe", "Hahaha", "Accha ji"],
+        "hehe": ["Hehe", "Haha", "Haan bolo"],
+    }
+    choices = replies.get(t)
+    return random.choice(choices) if choices else None
+
+
 def _identity_quick_reply(text_value: str):
     t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
     # Keep common identity questions instant and consistent.
