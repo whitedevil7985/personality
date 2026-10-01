@@ -22,7 +22,11 @@ button{font:inherit;font-weight:1000;border:0;border-radius:15px;padding:13px 23
 button:active{transform:translateY(2px);box-shadow:0 3px 0 #9a5d08}
 .small{font-size:12px;color:#b7cad9;line-height:1.55;margin-top:15px}
 .hide{display:none!important}
-.controls{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:8px;z-index:4}
+.controls{display:none}
+.gesture{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:3;width:min(92vw,560px);padding:11px 16px;border-radius:16px;text-align:center;background:#07131dbb;border:1px solid #ffffff25;backdrop-filter:blur(10px);font-size:13px;font-weight:800;color:#fff;opacity:0;pointer-events:none;transition:opacity .35s;box-shadow:0 10px 30px #0006}
+.gesture.show{opacity:1}
+.gesture b{font-size:17px;margin:0 2px}
+
 .ctrl{width:54px;height:48px;padding:0;background:#07131dcc;color:#fff;border:1px solid #ffffff35;box-shadow:none;backdrop-filter:blur(8px)}
 @media(min-width:800px){.controls{bottom:22px}}
 </style>
@@ -67,6 +71,10 @@ button:active{transform:translateY(2px);box-shadow:0 3px 0 #9a5d08}
   </div>
 </div>
 
+<div id="gesture" class="gesture">
+  <b>←</b> <b>→</b> Swipe to move &nbsp; • &nbsp; <b>↑</b> Swipe up to jump &nbsp; • &nbsp; <b>↓</b> Swipe down to slide
+</div>
+
 <div class="controls">
   <button class="ctrl" data-k="ArrowLeft">◀</button>
   <button class="ctrl" data-k="ArrowUp">▲</button>
@@ -79,7 +87,7 @@ const c=document.getElementById('game'),ctx=c.getContext('2d');
 const W=c.width,H=c.height;
 let running=false,paused=false,last=0,time=0,distance=0,score=0,coins=0,mult=1;
 let speed=0.33,lane=1,targetLane=1,jump=0,slide=0,spawn=0,coinTimer=0,items=[];
-let shake=0,flash=0;
+let shake=0,flash=0,gestureTimer=null;
 
 const horizon=245, ground=900, lanes=[-1,0,1];
 
@@ -93,10 +101,16 @@ function project(l,z){
   const roadHalf=lerp(58,345,Math.pow(z,.86));
   return {x:center+l*roadHalf*.67,y:horizon+(ground-horizon)*z,s:lerp(.12,1.28,z),roadHalf};
 }
+function showGesture(){
+  const g=document.getElementById('gesture');
+  g.classList.add('show');
+  clearTimeout(gestureTimer);
+  gestureTimer=setTimeout(()=>g.classList.remove('show'),3500);
+}
 function reset(){
   running=true;paused=false;time=0;distance=0;score=0;coins=0;mult=1;
   speed=.33;lane=targetLane=1;jump=slide=0;spawn=.7;coinTimer=.4;items=[];shake=0;flash=0;
-  hide('start');hide('over');hide('pause');requestAnimationFrame(loop);
+  hide('start');hide('over');hide('pause');showGesture();requestAnimationFrame(loop);
 }
 function hide(id){document.getElementById(id).classList.add('hide')}
 function show(id){document.getElementById(id).classList.remove('hide')}
@@ -248,28 +262,45 @@ function player(){
   const px=lerp(project(-1,1).x,project(1,1).x,lane/2), base=842-jump*190;
   const run=Math.sin(time*18), roll=slide>0;
   ctx.save();ctx.translate(px,base);
-  ctx.globalAlpha=.28;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(0,8,42,12,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
-  if(roll){
-    ctx.rotate(-.45);ctx.scale(1.15,.72);
-  }
-  // legs
-  ctx.strokeStyle='#26384c';ctx.lineWidth=15;ctx.lineCap='round';
-  ctx.beginPath();ctx.moveTo(-10,25);ctx.lineTo(-18+run*10,70);ctx.moveTo(10,25);ctx.lineTo(18-run*10,70);ctx.stroke();
-  // shoes
-  ctx.fillStyle='#ff4f55';ctx.fillRect(-30+run*10,66,28,10);ctx.fillRect(8-run*10,66,28,10);
-  // hoodie/body
-  ctx.fillStyle='#23a9d7';roundRect(-27,-70,54,82,17,'#21a9d8');
-  ctx.fillStyle='#153e62';ctx.fillRect(-27,-8,54,13);
-  // arms
-  ctx.strokeStyle='#20a0cd';ctx.lineWidth=13;
-  ctx.beginPath();ctx.moveTo(-22,-50);ctx.lineTo(-38-run*12,-8);ctx.moveTo(22,-50);ctx.lineTo(38+run*12,-8);ctx.stroke();
-  // head
-  ctx.fillStyle='#f1b68e';ctx.beginPath();ctx.arc(0,-92,24,0,Math.PI*2);ctx.fill();
-  // hair/cap
-  ctx.fillStyle='#202b3a';ctx.beginPath();ctx.arc(0,-101,25,Math.PI,Math.PI*2);ctx.fill();ctx.fillRect(-24,-104,48,9);
-  ctx.fillStyle='#e9f5ff';ctx.fillRect(-20,-105,40,8);
-  // face
-  ctx.fillStyle='#263646';ctx.beginPath();ctx.arc(-8,-91,2.5,0,Math.PI*2);ctx.arc(8,-91,2.5,0,Math.PI*2);ctx.fill();
+  const glow=ctx.createRadialGradient(0,8,8,0,8,50);glow.addColorStop(0,'#0006');glow.addColorStop(1,'#0000');
+  ctx.fillStyle=glow;ctx.beginPath();ctx.ellipse(0,8,52,15,0,0,Math.PI*2);ctx.fill();
+  if(roll){ctx.rotate(-.45);ctx.scale(1.16,.72)}
+  // legs + realistic shoe highlights
+  ctx.strokeStyle='#252b36';ctx.lineWidth=17;ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(-10,25);ctx.lineTo(-18+run*11,70);
+  ctx.moveTo(10,25);ctx.lineTo(18-run*11,70);
+  ctx.stroke();
+  ctx.strokeStyle='#4b5563';ctx.lineWidth=6;
+  ctx.beginPath();
+  ctx.moveTo(-18+run*11,53);ctx.lineTo(-18+run*11,70);
+  ctx.moveTo(18-run*11,53);ctx.lineTo(18-run*11,70);
+  ctx.stroke();
+  ctx.fillStyle='#ffffff';roundRect(-31+run*11,66,30,11,5,'#ffffff');
+  ctx.fillStyle='#d7e4ef';roundRect(3-run*11,66,30,11,5,'#d7e4ef');
+  // hoodie seen from the back
+  const body=ctx.createLinearGradient(-28,-72,28,12);body.addColorStop(0,'#159bcf');body.addColorStop(.65,'#1684b6');body.addColorStop(1,'#0b5e89');
+  roundRect(-28,-70,56,84,16,body);
+  ctx.fillStyle='#0a3c5c';roundRect(-22,-3,44,18,7,'#0a3c5c');
+  // backpack
+  const bag=ctx.createLinearGradient(-19,-58,19,6);bag.addColorStop(0,'#242a34');bag.addColorStop(1,'#111820');
+  roundRect(-20,-58,40,61,11,bag);
+  ctx.fillStyle='#0b1118';roundRect(-17,-48,34,29,8,'#0b1118');
+  ctx.fillStyle='#fff';ctx.font='900 20px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('V',0,-33);
+  // backpack straps
+  ctx.strokeStyle='#343e48';ctx.lineWidth=5;
+  ctx.beginPath();ctx.moveTo(-22,-58);ctx.lineTo(-24,-8);ctx.moveTo(22,-58);ctx.lineTo(24,-8);ctx.stroke();
+  // arms swing
+  ctx.strokeStyle='#1288b9';ctx.lineWidth=14;
+  ctx.beginPath();
+  ctx.moveTo(-23,-48);ctx.lineTo(-40-run*13,-7);
+  ctx.moveTo(23,-48);ctx.lineTo(40+run*13,-7);
+  ctx.stroke();
+  // cap + back of head
+  ctx.fillStyle='#d99a73';ctx.beginPath();ctx.arc(0,-92,24,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#181f28';ctx.beginPath();ctx.arc(0,-102,26,Math.PI,Math.PI*2);ctx.fill();
+  ctx.fillRect(-25,-106,50,9);
+  ctx.fillStyle='#0d141c';ctx.beginPath();ctx.ellipse(0,-94,17,7,0,0,Math.PI*2);ctx.fill();
   ctx.restore();
 }
 
@@ -328,6 +359,7 @@ function loop(t){
 
 function action(k){
   if(!running||paused)return;
+  showGesture();
   if(k==='ArrowLeft'||k==='a')targetLane=Math.max(0,targetLane-1);
   if(k==='ArrowRight'||k==='d')targetLane=Math.min(2,targetLane+1);
   if((k==='ArrowUp'||k==='w'||k===' ')&&jump<=0&&slide<=0)jump=1;
