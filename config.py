@@ -62,7 +62,9 @@ ELITE_LLM_MODEL = os.getenv("ELITE_LLM_MODEL", "gpt-5.6-luna").strip().strip('"'
 # Fallback ChatGP API. The endpoint is OpenAI-unrelated and uses a simple prompt/response contract.
 CHATGP_API_KEY = os.getenv("CHATGP_API_KEY", "").strip().strip('"').strip("'")
 CHATGP_API_URL = os.getenv("CHATGP_API_URL", "https://chatgp-nine.vercel.app/api/chat").strip().rstrip("/")
-CHATGP_TIMEOUT_SECONDS = float(os.getenv("CHATGP_TIMEOUT_SECONDS", "3.5"))
+# Give the fallback enough time for a slow upstream response; the DM provider
+# race still returns as soon as either provider answers.
+CHATGP_TIMEOUT_SECONDS = float(os.getenv("CHATGP_TIMEOUT_SECONDS", "8.0"))
 # Keep AI_MODEL for compatibility with older deployments.
 AI_MODEL = os.getenv("AI_MODEL", "").strip() or ELITE_LLM_MODEL
 AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", "gpt-5.4-mini").strip()
