@@ -515,7 +515,7 @@ def kingdom_snapshot(room, you=None):
         'players':players,'you':you,'you_kingdom':me,
     }
 
-async def broadcast_kingdom(room, event='state', message=None):
+async def broadcast_kingdom(room, event='state', message=None, meta=None):
     sockets=[]
     for p in room['players']:
         ws=p.get('ws')
@@ -524,7 +524,8 @@ async def broadcast_kingdom(room, event='state', message=None):
         try:
             payload=kingdom_snapshot(room,pid)
             if event=='event':
-                payload={'type':'event','message':message or 'The realm changed.','state':kingdom_snapshot(room,pid),'you':pid}
+                payload={'type':'event','message':message or 'The realm changed.','state':kingdom_snapshot(room,pid),
+                         'you':pid,'meta':meta or {}}
             elif event=='game_over':
                 winner=next((p for p in room['players'] if p['id']==room.get('winner')),None)
                 payload={'type':'game_over','winnerName':winner.get('name') if winner else 'A ruler',
@@ -588,7 +589,11 @@ async def _kingdom_timer(room):
             if time.time()-room.get('turn_started',time.time())>=45:
                 p=room['players'][room['turn']]
                 _kingdom_next(room)
-                await broadcast_kingdom(room,'event',f"⏱️ {p.get('name','Ruler')}'s turn expired. The crown passes on.")
+                await broadcast_kingdom(
+                    room,'event',
+                    f"⏱️ {p.get('name','Ruler')}'s turn expired. The crown passes on.",
+                    {'kind':'turn_expired','actorId':p.get('id'),'actorName':p.get('name','Ruler')}
+                )
     except asyncio.CancelledError:
         return
 
@@ -697,28 +702,64 @@ async def kingdom_ws(request):
                     p['name']=name; p['connected']=True; p['ws']=ws
                 room['updated']=time.time()
                 started_now=_kingdom_start_if_ready(room)
-                if started_now: await broadcast_kingdom(room,'event','⚔️ Two kingdoms have entered the war. The first turn begins now.')
+                if started_now:
+                    await broadcast_kingdom(
+                        room,'event',
+                        '⚔️ Two kingdoms have entered the war. The first turn begins now.',
+                        {'kind':'battle_start'}
+                    )
                 else: await ws.send_str(json.dumps({'type':'joined','you':session_id,'state':kingdom_snapshot(room,session_id)},separators=(',',':')))
                 if started_now: await ws.send_str(json.dumps({'type':'joined','you':session_id,'state':kingdom_snapshot(room,session_id)},separators=(',',':')))
             elif typ=='action':
                 if room.get('ended'): continue
                 p=_kingdom_find(room,session_id)
                 if not p or not room.get('started'): continue
-                ok,message=_kingdom_action(room,p,data.get('action'),data.get('target'))
+
+                action=(data.get('action') or '').lower()
+                target=_kingdom_find(room,data.get('target'))
+                before_actor=dict(p.get('kingdom') or {})
+                before_target=dict(target.get('kingdom') or {}) if target else {}
+
+                ok,message=_kingdom_action(room,p,action,data.get('target'))
                 if not ok:
                     await ws.send_json({'type':'error','message':message}); continue
+
                 if p['kingdom']['territory']>=70:
                     await _kingdom_end(room,p['id'],f"👑 {p['name']} reached 70 land and claimed the crown.")
                     continue
+
+                after_actor=p.get('kingdom') or {}
+                after_target=(target.get('kingdom') or {}) if target else {}
+                meta={
+                    'kind':'action',
+                    'action':action,
+                    'actorId':p['id'],
+                    'actorName':p.get('name') or 'Ruler',
+                    'targetId':target.get('id') if target else None,
+                    'targetName':target.get('name') if target else None,
+                    'armyBefore':int(before_actor.get('army',0)),
+                    'armyAfter':int(after_actor.get('army',0)),
+                    'territoryBefore':int(before_actor.get('territory',0)),
+                    'territoryAfter':int(after_actor.get('territory',0)),
+                    'targetTerritoryBefore':int(before_target.get('territory',0)) if target else None,
+                    'targetTerritoryAfter':int(after_target.get('territory',0)) if target else None,
+                    'targetArmyBefore':int(before_target.get('army',0)) if target else None,
+                    'targetArmyAfter':int(after_target.get('army',0)) if target else None,
+                    'success': 'captured' in str(message).lower(),
+                }
                 _kingdom_next(room)
-                await broadcast_kingdom(room,'event',message)
+                await broadcast_kingdom(room,'event',message,meta)
             elif typ=='leave':
                 p=_kingdom_find(room,session_id)
                 if p:
                     p['connected']=False
                     p['ws']=None
                     room['updated']=time.time()
-                    await broadcast_kingdom(room,'event',f"👋 {p.get('name','Ruler')} left the war map.")
+                    await broadcast_kingdom(
+                        room,'event',
+                        f"👋 {p.get('name','Ruler')} left the war map.",
+                        {'kind':'player_left','actorId':p.get('id'),'actorName':p.get('name','Ruler')}
+                    )
     finally:
         p=_kingdom_find(room,session_id)
         if p and p.get('ws') is ws:
