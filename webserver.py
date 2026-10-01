@@ -30,7 +30,7 @@ def new_code():
     alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
     while True:
         code = ''.join(random.choice(alphabet) for _ in range(6))
-        if code not in ROOMS and code not in CHESS_ROOMS:
+        if code not in ROOMS and code not in CHESS_ROOMS and code not in KINGDOM_ROOMS:
             return code
 
 
