@@ -8,7 +8,7 @@ import hmac
 import time
 from pathlib import Path
 from aiohttp import web, WSMsgType
-from db import users, ensure_user
+from db import users, ensure_user, add_coins, add_xp, record_game_result
 try:
     import chess as chesslib
 except Exception:
@@ -20,6 +20,8 @@ ROOMS = {}
 CHESS_ROOMS = {}
 ROOM_LOCK = asyncio.Lock()
 CHESS_LOCK = asyncio.Lock()
+KINGDOM_ROOMS = {}
+KINGDOM_LOCK = asyncio.Lock()
 COLORS = ['red', 'green', 'yellow', 'blue']
 COLOR_NAMES = {'red':'RED','green':'GREEN','yellow':'YELLOW','blue':'BLUE'}
 
@@ -467,6 +469,243 @@ async def ludo_ws(request):
             await broadcast_ludo(room, {'event': 'left', 'player': session_id})
         else:
             room['spectators'] = [x for x in room.get('spectators', []) if x is not ws]
+    return ws
+
+
+# ---------------- KINGDOM WARS ----------------
+
+def kingdom_player_public(p, detailed=False):
+    k=p.get('kingdom',{})
+    data={
+        'id':p['id'],'name':p.get('name') or 'Player','connected':bool(p.get('connected')),
+        'kingdom':{
+            'level':int(k.get('level',1)),
+            'territory':int(k.get('territory',25)),
+            'defense':int(k.get('defense',30)),
+        }
+    }
+    if detailed:
+        data['kingdom']={
+            'gold':int(k.get('gold',500)),'food':int(k.get('food',220)),
+            'wood':int(k.get('wood',180)),'stone':int(k.get('stone',140)),
+            'army':int(k.get('army',80)),'population':int(k.get('population',120)),
+            'level':int(k.get('level',1)),'territory':int(k.get('territory',25)),
+            'defense':int(k.get('defense',30)),'buildings':int(k.get('buildings',3)),
+            'wins':int(k.get('wins',0)),'losses':int(k.get('losses',0)),
+        }
+    return data
+
+def new_kingdom_room(code=None, group_id=None):
+    return {
+        'code':code,'game':'kingdom','players':[],'started':False,'ended':False,
+        'turn':0,'turn_started':0,'winner':None,'created':time.time(),
+        'updated':time.time(),'group_id':group_id,'payout_done':False,'timer_task':None
+    }
+
+def kingdom_snapshot(room, you=None):
+    players=[]
+    for p in room['players']:
+        players.append(kingdom_player_public(p, detailed=(p['id']==you)))
+    turn_player=room['players'][room['turn']]['id'] if room['players'] and room['started'] and room['turn'] < len(room['players']) else None
+    left=max(0,45-int(time.time()-room.get('turn_started',time.time()))) if room['started'] and not room['ended'] else 45
+    me=next((kingdom_player_public(p, detailed=True)['kingdom'] for p in room['players'] if p['id']==you),{})
+    return {
+        'type':'state','room':room['code'],'started':room['started'],'ended':room['ended'],
+        'turnPlayer':turn_player,'turnLeft':left,'winner':room['winner'],
+        'players':players,'you':you,'you_kingdom':me,
+    }
+
+async def broadcast_kingdom(room, event='state', message=None):
+    sockets=[]
+    for p in room['players']:
+        ws=p.get('ws')
+        if ws and not ws.closed: sockets.append((ws,p['id']))
+    for ws,pid in sockets:
+        try:
+            payload=kingdom_snapshot(room,pid)
+            if event=='event':
+                payload={'type':'event','message':message or 'The realm changed.','state':kingdom_snapshot(room,pid),'you':pid}
+            elif event=='game_over':
+                winner=next((p for p in room['players'] if p['id']==room.get('winner')),None)
+                payload={'type':'game_over','winnerName':winner.get('name') if winner else 'A ruler',
+                         'message':message or 'The crown has been claimed.','state':kingdom_snapshot(room,pid),'you':pid}
+            await ws.send_str(json.dumps(payload,separators=(',',':')))
+        except Exception:
+            pass
+
+async def create_kingdom_room_for_group(group_id=None):
+    async with KINGDOM_LOCK:
+        code=new_code()
+        room=new_kingdom_room(code,group_id)
+        KINGDOM_ROOMS[code]=room
+        return code
+
+def _kingdom_find(room,pid):
+    return next((p for p in room['players'] if p['id']==pid),None)
+
+def _kingdom_next(room):
+    if room['players']:
+        room['turn']=(room['turn']+1)%len(room['players'])
+        room['turn_started']=time.time()
+        room['updated']=time.time()
+
+async def _kingdom_award(room):
+    if room.get('payout_done') or not room.get('winner'):
+        return
+    room['payout_done']=True
+    for p in room['players']:
+        uid=p['id']
+        if isinstance(uid,str) and uid.isdigit():
+            uid=int(uid)
+            try:
+                if uid==room['winner']:
+                    await add_coins(uid,500); await add_xp(uid,100)
+                    await record_game_result(uid,'KINGDOMWARS',500,True,room.get('group_id'))
+                else:
+                    await add_coins(uid,100); await add_xp(uid,25)
+                    await record_game_result(uid,'KINGDOMWARS',100,False,room.get('group_id'))
+            except Exception:
+                pass
+
+async def _kingdom_end(room,winner_id,message):
+    room['winner']=winner_id; room['ended']=True; room['started']=False; room['updated']=time.time()
+    if room.get('timer_task') and not room['timer_task'].done():
+        room['timer_task'].cancel()
+    await _kingdom_award(room)
+    await broadcast_kingdom(room,'game_over',message)
+
+async def _kingdom_timer(room):
+    try:
+        while room in KINGDOM_ROOMS.values() and not room.get('ended'):
+            await asyncio.sleep(1)
+            if not room.get('started') or not room.get('players'): continue
+            if time.time()-room.get('turn_started',time.time())>=45:
+                p=room['players'][room['turn']]
+                _kingdom_next(room)
+                await broadcast_kingdom(room,'event',f"⏱️ {p.get('name','Ruler')}'s turn expired. The crown passes on.")
+    except asyncio.CancelledError:
+        return
+
+def _kingdom_start_if_ready(room):
+    if not room['started'] and len(room['players'])>=2:
+        room['started']=True; room['ended']=False; room['turn']=0; room['turn_started']=time.time(); room['updated']=time.time()
+        task=asyncio.create_task(_kingdom_timer(room)); room['timer_task']=task
+        return True
+    return False
+
+def _kingdom_action(room,p,action,target_id=None):
+    k=p['kingdom']; action=(action or '').lower()
+    if room['players'][room['turn']]['id']!=p['id']:
+        return False,'Wait for your turn.'
+    if action=='farm':
+        k['food']+=60; k['gold']+=10
+        return True,'🌾 Farms produced +60 food and +10 gold.'
+    if action=='wood':
+        k['wood']+=55; k['gold']+=8
+        return True,'🪵 Forests produced +55 wood and +8 gold.'
+    if action=='stone':
+        k['stone']+=45
+        return True,'⛏ Quarries produced +45 stone.'
+    if action=='build':
+        if k['gold']<120 or k['wood']<60 or k['stone']<40: return False,'Need 120 gold, 60 wood and 40 stone to build.'
+        k['gold']-=120; k['wood']-=60; k['stone']-=40; k['buildings']+=1; k['level']=1+(k['buildings']-3)//3; k['territory']+=2; k['defense']+=4
+        return True,f"🏗️ Capital upgraded to level {k['level']}."
+    if action=='recruit':
+        if k['gold']<70 or k['food']<35: return False,'Need 70 gold and 35 food to recruit.'
+        k['gold']-=70; k['food']-=35; k['army']+=30; k['population']+=10
+        return True,'⚔️ Recruited 30 soldiers.'
+    if action=='fortify':
+        if k['gold']<50 or k['stone']<30: return False,'Need 50 gold and 30 stone to fortify.'
+        k['gold']-=50; k['stone']-=30; k['defense']+=18
+        return True,'🛡️ Walls strengthened by +18 defense.'
+    if action=='scout':
+        rivals=[x for x in room['players'] if x['id']!=p['id']]
+        if not rivals: return False,'No rival kingdom to scout.'
+        weakest=min(rivals,key=lambda x:x['kingdom']['defense'])
+        return True,f"🔭 Scout report: {weakest['name']} has {weakest['kingdom']['defense']} defense and {weakest['kingdom']['territory']} land."
+    if action=='attack':
+        rivals=[x for x in room['players'] if x['id']!=p['id']]
+        if not rivals: return False,'No rival kingdom to attack.'
+        target=_kingdom_find(room,target_id) or rivals[0]
+        if target['id']==p['id']: return False,'Choose a rival kingdom.'
+        if k['army']<30: return False,'Need at least 30 soldiers to attack.'
+        import random as _random
+        attack_power=int(k['army']*_random.uniform(.82,1.18))+k['level']*8
+        defense_power=int(target['kingdom']['defense']*_random.uniform(.86,1.14))
+        k['army']=max(0,k['army']-25)
+        target['kingdom']['army']=max(0,target['kingdom']['army']-10)
+        if attack_power>=defense_power:
+            target['kingdom']['territory']=max(8,target['kingdom']['territory']-7)
+            k['territory']+=7; k['wins']+=1; target['kingdom']['losses']+=1
+            k['gold']+=120; target['kingdom']['gold']=max(0,target['kingdom']['gold']-80)
+            return True,f"🔥 {p['name']} captured 7 land from {target['name']}!"
+        k['defense']=max(10,k['defense']-4); target['wins']+=1; k['losses']+=1
+        return True,f"🛡️ {target['name']} repelled the attack. The invader lost troops."
+    if action=='end_turn':
+        return True,'⏭️ Turn ended.'
+    return False,'Unknown command.'
+
+async def create_kingdom_room(request):
+    gid=request_group_id(request)
+    code=await create_kingdom_room_for_group(gid)
+    return web.json_response({'ok':True,'room':code})
+
+async def kingdom_page(request):
+    return web.FileResponse(WEB/'kingdom_wars.html')
+
+async def kingdom_ws(request):
+    code=request.match_info['code'].upper()
+    room=KINGDOM_ROOMS.get(code)
+    if not room: return web.json_response({'ok':False,'error':'Room not found'},status=404)
+    ws=web.WebSocketResponse(heartbeat=25,max_msg_size=64*1024)
+    await ws.prepare(request)
+    tg_user=verify_telegram_init_data(request.query.get('initData',''))
+    cid=''.join(ch for ch in (request.query.get('cid') or '') if ch.isalnum() or ch in '_-')[:80]
+    session_id=str(tg_user['id']) if tg_user else ('guest-'+cid if cid else 'guest-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(12)))
+    try:
+        async for msg in ws:
+            if msg.type!=WSMsgType.TEXT: continue
+            try: data=json.loads(msg.data)
+            except Exception: continue
+            typ=data.get('type')
+            if typ=='join':
+                name=(data.get('name') or (tg_user or {}).get('first_name') or 'Player').strip()[:32] or 'Player'
+                p=_kingdom_find(room,session_id)
+                if not p:
+                    if room.get('ended'):
+                        await ws.send_json({'type':'error','message':'This battle is already over.'}); continue
+                    if len(room['players'])>=6:
+                        await ws.send_json({'type':'error','message':'Room is full (6 rulers max).'}); continue
+                    p={'id':session_id,'name':name,'connected':True,'ws':ws,'kingdom':{
+                        'gold':500,'food':220,'wood':180,'stone':140,'army':80,'population':120,
+                        'level':1,'territory':25,'defense':30,'buildings':3,'wins':0,'losses':0}}
+                    room['players'].append(p)
+                else:
+                    p['name']=name; p['connected']=True; p['ws']=ws
+                room['updated']=time.time()
+                started_now=_kingdom_start_if_ready(room)
+                if started_now: await broadcast_kingdom(room,'event','⚔️ Two kingdoms have entered the war. The first turn begins now.')
+                else: await ws.send_str(json.dumps({'type':'joined','you':session_id,'state':kingdom_snapshot(room,session_id)},separators=(',',':')))
+                if started_now: await ws.send_str(json.dumps({'type':'joined','you':session_id,'state':kingdom_snapshot(room,session_id)},separators=(',',':')))
+            elif typ=='action':
+                if room.get('ended'): continue
+                p=_kingdom_find(room,session_id)
+                if not p or not room.get('started'): continue
+                ok,message=_kingdom_action(room,p,data.get('action'),data.get('target'))
+                if not ok:
+                    await ws.send_json({'type':'error','message':message}); continue
+                if p['kingdom']['territory']>=70:
+                    await _kingdom_end(room,p['id'],f"👑 {p['name']} reached 70 land and claimed the crown.")
+                    continue
+                _kingdom_next(room)
+                await broadcast_kingdom(room,'event',message)
+            elif typ=='leave':
+                p=_kingdom_find(room,session_id)
+                if p: p['connected']=False; p['ws']=None; room['updated']=time.time()
+    finally:
+        p=_kingdom_find(room,session_id)
+        if p and p.get('ws') is ws:
+            p['connected']=False; p['ws']=None; room['updated']=time.time()
     return ws
 
 
@@ -1172,14 +1411,14 @@ async def cleanup_ctx(app):
 async def start_web_server():
     app=web.Application()
     app.router.add_get('/',health); app.router.add_get('/health',health); app.router.add_get('/api/config',config)
-    app.router.add_post('/api/rooms',create_ludo_room); app.router.add_post('/api/uno/rooms',create_uno_room); app.router.add_post('/api/chess/rooms',create_chess_room); app.router.add_post('/api/scribble/rooms',create_scribble_room)
+    app.router.add_post('/api/rooms',create_ludo_room); app.router.add_post('/api/uno/rooms',create_uno_room); app.router.add_post('/api/chess/rooms',create_chess_room); app.router.add_post('/api/scribble/rooms',create_scribble_room); app.router.add_post('/api/kingdom/rooms',create_kingdom_room)
     app.router.add_get('/ludo',ludo_page); app.router.add_get('/ws/ludo/{code}',ludo_ws); app.router.add_get('/scribble',scribble_page); app.router.add_get('/ws/scribble/{code}',scribble_ws)
-    app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/ws/chess/{code}',chess_ws)
+    app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/ws/chess/{code}',chess_ws); app.router.add_get('/kingdom-wars',kingdom_page); app.router.add_get('/ws/kingdom/{code}',kingdom_ws)
     # Vanya World aliases all point to the same 3D page; query ?tab= selects City/Room/Pet.
     world_page = lambda request: web.FileResponse(WEB/'vanya_world.html')
     app.router.add_get('/vanya-city', world_page); app.router.add_get('/world', world_page); app.router.add_get('/vanya-world', world_page)
     app.router.add_get('/city', world_page); app.router.add_get('/room', world_page); app.router.add_get('/pet', world_page)
     app.router.add_get('/api/world/state',world_state); app.router.add_post('/api/world/action',world_action)
-    app.router.add_static('/ludo/',WEB,show_index=False); app.router.add_static('/uno/',WEB,show_index=False); app.router.add_static('/chess/',WEB,show_index=False); app.router.add_static('/scribble/',WEB,show_index=False)
+    app.router.add_static('/ludo/',WEB,show_index=False); app.router.add_static('/uno/',WEB,show_index=False); app.router.add_static('/chess/',WEB,show_index=False); app.router.add_static('/scribble/',WEB,show_index=False); app.router.add_static('/kingdom-wars/',WEB,show_index=False)
     app.cleanup_ctx.append(cleanup_ctx)
     runner=web.AppRunner(app); await runner.setup(); port=int(os.getenv('PORT','8080')); await web.TCPSite(runner,'0.0.0.0',port).start(); return runner
