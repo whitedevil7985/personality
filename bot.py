@@ -1462,8 +1462,17 @@ Reply only as Vanya. Stay natural, warm, funny, curious, and varied. Never prete
 _AI_HTTP_SESSION = None
 _AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
 _AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0}
-_AI_PROVIDER_DOWN_COOLDOWN = max(5.0, float(os.getenv("AI_PROVIDER_DOWN_COOLDOWN", "30")))
+_AI_PROVIDER_DOWN_COOLDOWN = max(3.0, float(os.getenv("AI_PROVIDER_DOWN_COOLDOWN", "5")))
 _AI_LOGGER_BOT = None
+
+# Fast-path context cache: DM replies must never wait for Mongo before calling
+# the LLM. The cache is warmed/refreshed in the background and survives for
+# the lifetime of the bot process.
+_AI_CONTEXT_CACHE = {}
+_AI_CONTEXT_WARMING = set()
+_AI_CONTEXT_CACHE_TTL = max(30.0, float(os.getenv("AI_CONTEXT_CACHE_TTL_SECONDS", "1800")))
+_AI_FAST_MAX_SECONDS = max(1.0, float(os.getenv("AI_FAST_MAX_SECONDS", "2.1")))
+_AI_HEDGE_DELAY = max(0.0, float(os.getenv("AI_HEDGE_DELAY_SECONDS", "0.20")))
 
 async def _set_ai_provider_status(provider, active, detail=""):
     """Notify the logger when an AI provider changes state."""
@@ -1556,8 +1565,12 @@ async def _get_ai_http_session():
     import aiohttp
     async with _AI_HTTP_SESSION_LOCK:
         if _AI_HTTP_SESSION is None or _AI_HTTP_SESSION.closed:
-            timeout = aiohttp.ClientTimeout(total=max(4, int(os.getenv("AI_TIMEOUT_SECONDS", "6"))))
-            connector = aiohttp.TCPConnector(limit=max(20, _AI_CONCURRENCY + 4), ttl_dns_cache=300)
+            timeout = aiohttp.ClientTimeout(total=max(1.8, float(os.getenv("AI_TIMEOUT_SECONDS", "2.2"))))
+            connector = aiohttp.TCPConnector(
+                limit=max(20, _AI_CONCURRENCY + 4),
+                ttl_dns_cache=300,
+                enable_cleanup_closed=True,
+            )
             _AI_HTTP_SESSION = aiohttp.ClientSession(timeout=timeout, connector=connector)
     return _AI_HTTP_SESSION
 
@@ -1673,6 +1686,112 @@ async def _append_history(user_id, user_text, assistant_text):
         ],"$slice":-MAX_HISTORY}}},
         upsert=True)
 
+async def _warm_ai_context_cache(user_id, force=False):
+    """Warm one user's chat context without blocking the current reply."""
+    if not user_id:
+        return
+    cached = _AI_CONTEXT_CACHE.get(user_id)
+    now = time.monotonic()
+    if (
+        not force
+        and cached
+        and now - float(cached.get("at", 0.0)) < _AI_CONTEXT_CACHE_TTL
+    ):
+        return
+    if user_id in _AI_CONTEXT_WARMING:
+        return
+    _AI_CONTEXT_WARMING.add(user_id)
+    try:
+        u = await get_user(user_id) or {}
+        _AI_CONTEXT_CACHE[user_id] = {
+            "history": _history_text(u),
+            "memory": _memory_text(u),
+            "at": time.monotonic(),
+        }
+    except Exception as exc:
+        print(f"[AI][DB] context warm skipped: {type(exc).__name__}: {exc}")
+    finally:
+        _AI_CONTEXT_WARMING.discard(user_id)
+
+
+def _get_cached_ai_context(user_id):
+    cached = _AI_CONTEXT_CACHE.get(user_id) or {}
+    return str(cached.get("history", "")), str(cached.get("memory", ""))
+
+
+async def _save_ai_context_after_reply(user_id):
+    # Let the persistent write finish first, then refresh the in-memory view
+    # for the next message. This refresh is deliberately background-only.
+    await _warm_ai_context_cache(user_id, force=True)
+
+
+async def _fast_ai_answer(prompt):
+    """Hedge Elite with the fallback after a tiny delay and return the first answer.
+
+    This keeps normal replies fast without always doubling provider traffic:
+    ChatGP starts only when Elite has not answered quickly enough.
+    """
+    elite_task = asyncio.create_task(_call_elite_api(prompt))
+    tasks = {elite_task}
+    fallback_task = None
+
+    try:
+        if _AI_HEDGE_DELAY > 0:
+            try:
+                await asyncio.wait_for(asyncio.shield(elite_task), timeout=_AI_HEDGE_DELAY)
+            except asyncio.TimeoutError:
+                if CHATGP_API_KEY:
+                    fallback_task = asyncio.create_task(_call_chatgp_api(prompt))
+                    tasks.add(fallback_task)
+            except Exception:
+                if CHATGP_API_KEY:
+                    fallback_task = asyncio.create_task(_call_chatgp_api(prompt))
+                    tasks.add(fallback_task)
+
+        deadline = time.monotonic() + _AI_FAST_MAX_SECONDS
+        pending = set(tasks)
+        while pending and time.monotonic() < deadline:
+            remaining = max(0.05, deadline - time.monotonic())
+            done, pending = await asyncio.wait(
+                pending,
+                timeout=remaining,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in done:
+                try:
+                    answer = await task
+                except Exception:
+                    answer = None
+                if answer:
+                    return answer
+
+        # A provider may have completed with an empty/error result while the
+        # other request is still pending; give the other task whatever tiny
+        # amount remains in the hard latency budget.
+        if pending:
+            remaining = max(0.05, deadline - time.monotonic())
+            if remaining > 0:
+                done, pending = await asyncio.wait(
+                    pending,
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done:
+                    try:
+                        answer = await task
+                    except Exception:
+                        answer = None
+                    if answer:
+                        return answer
+        return None
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def _identity_quick_reply(text_value: str):
     t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
     # Keep common identity questions instant and consistent.
@@ -1738,6 +1857,16 @@ async def _call_elite_api(text_value):
             fallback_models.append(model_name)
 
     max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
+    # Keep the default path to one model: trying several models serially can
+    # add seconds before the ChatGP fallback gets a chance.
+    extra_models = [
+        str(x).strip()
+        for x in os.getenv("AI_FALLBACK_MODELS", "").split(",")
+        if str(x).strip()
+    ]
+    for model_name in extra_models:
+        if model_name not in fallback_models:
+            fallback_models.append(model_name)
     last_error = None
 
     async with _AI_SEMAPHORE:
@@ -1751,7 +1880,7 @@ async def _call_elite_api(text_value):
                 "stream": False,
             }
             for attempt in range(max_attempts):
-                if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.8"))):
+                if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
                     return None
                 try:
                     async with session.post(
@@ -1819,7 +1948,7 @@ async def _call_chatgp_api(text_value):
     # Reuse the same keep-alive session so fallback requests do not pay a new
     # DNS/TCP/TLS connection setup cost every time.
     session = await _get_ai_http_session()
-    timeout = aiohttp.ClientTimeout(total=max(4, CHATGP_TIMEOUT_SECONDS))
+    timeout = aiohttp.ClientTimeout(total=max(1.5, float(CHATGP_TIMEOUT_SECONDS)))
     try:
         request_url = CHATGP_API_URL
         async with session.post(
@@ -1880,30 +2009,25 @@ async def _save_chat_state_background(user_id, user_text, answer):
         await _append_history(user_id, user_text, answer)
     except Exception as exc:
         print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
+    try:
+        await _save_ai_context_after_reply(user_id)
+    except Exception as exc:
+        print(f"[AI][DB] context refresh skipped: {type(exc).__name__}: {exc}")
 
 
 async def ai_reply(user, text_value, chat_type="private", group_title=""):
-    """Fast chat path: one DB read before the API, persistence after the reply."""
-    try:
-        await ensure_user(user)
-    except Exception as exc:
-        print(f"[AI][DB] ensure_user skipped: {type(exc).__name__}: {exc}")
-
+    """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
     quick = _identity_quick_reply(text_value)
     if quick and chat_type == "private":
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
         return quick
 
-    # One Mongo read is enough to build the prompt. Older code performed
-    # remember_facts -> prune -> get_user before contacting the AI provider.
-    try:
-        u = await get_user(user.id) or {}
-        history = _history_text(u)
-        memory = _memory_text(u)
-    except Exception as exc:
-        print(f"[AI][DB] prompt context unavailable: {type(exc).__name__}: {exc}")
-        history = ""
-        memory = ""
+    # Never wait for MongoDB on the hot path. Use warm in-memory context;
+    # for a cold user, the first reply intentionally goes out without history
+    # and the cache is warmed in the background for the next message.
+    history, memory = _get_cached_ai_context(user.id)
+    if not history and not memory:
+        asyncio.create_task(_warm_ai_context_cache(user.id))
 
     # Keep the LLM context compact for faster first-token/response latency.
     history_limit = int(os.getenv("AI_PROMPT_HISTORY_CHARS", "3600" if chat_type == "private" else "6000"))
@@ -1919,12 +2043,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         "Reply only as Vanya. Be natural, concise, warm, and context-aware."
     )
 
-    answer = await _call_elite_api(prompt)
-    if answer:
-        asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
-        return answer
-
-    answer = await _call_chatgp_api(prompt)
+    answer = await _fast_ai_answer(prompt)
     if answer:
         asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
         return answer
