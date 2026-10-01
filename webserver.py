@@ -555,17 +555,23 @@ async def _kingdom_award(room):
     room['payout_done']=True
     for p in room['players']:
         uid=p['id']
-        if isinstance(uid,str) and uid.isdigit():
-            uid=int(uid)
-            try:
-                if uid==room['winner']:
-                    await add_coins(uid,500); await add_xp(uid,100)
-                    await record_game_result(uid,'KINGDOMWARS',500,True,room.get('group_id'))
-                else:
-                    await add_coins(uid,100); await add_xp(uid,25)
-                    await record_game_result(uid,'KINGDOMWARS',100,False,room.get('group_id'))
-            except Exception:
-                pass
+        try:
+            numeric_uid=int(uid)
+        except (TypeError,ValueError):
+            continue
+        try:
+            is_winner = str(uid)==str(room.get('winner')) or numeric_uid==int(room.get('winner'))
+        except (TypeError,ValueError):
+            is_winner = False
+        try:
+            if is_winner:
+                await add_coins(numeric_uid,500); await add_xp(numeric_uid,100)
+                await record_game_result(numeric_uid,'KINGDOMWARS',500,True,room.get('group_id'))
+            else:
+                await add_coins(numeric_uid,100); await add_xp(numeric_uid,25)
+                await record_game_result(numeric_uid,'KINGDOMWARS',100,False,room.get('group_id'))
+        except Exception:
+            pass
 
 async def _kingdom_end(room,winner_id,message):
     room['winner']=winner_id; room['ended']=True; room['started']=False; room['updated']=time.time()
@@ -595,6 +601,8 @@ def _kingdom_start_if_ready(room):
 
 def _kingdom_action(room,p,action,target_id=None):
     k=p['kingdom']; action=(action or '').lower()
+    if not room.get('players') or room.get('turn',0) >= len(room['players']):
+        return False,'The battle state is not ready yet.'
     if room['players'][room['turn']]['id']!=p['id']:
         return False,'Wait for your turn.'
     if action=='farm':
@@ -661,6 +669,9 @@ async def kingdom_ws(request):
     await ws.prepare(request)
     tg_user=verify_telegram_init_data(request.query.get('initData',''))
     cid=''.join(ch for ch in (request.query.get('cid') or '') if ch.isalnum() or ch in '_-')[:80]
+    # Telegram identity is available in real Mini Apps. For normal group URL
+    # buttons, keep a stable browser id so refresh/reconnect does not create
+    # duplicate kingdoms.
     session_id=str(tg_user['id']) if tg_user else ('guest-'+cid if cid else 'guest-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(12)))
     try:
         async for msg in ws:
@@ -703,7 +714,11 @@ async def kingdom_ws(request):
                 await broadcast_kingdom(room,'event',message)
             elif typ=='leave':
                 p=_kingdom_find(room,session_id)
-                if p: p['connected']=False; p['ws']=None; room['updated']=time.time()
+                if p:
+                    p['connected']=False
+                    p['ws']=None
+                    room['updated']=time.time()
+                    await broadcast_kingdom(room,'event',f"👋 {p.get('name','Ruler')} left the war map.")
     finally:
         p=_kingdom_find(room,session_id)
         if p and p.get('ws') is ws:
