@@ -29,7 +29,7 @@ async def kingdomwars(update, context):
 
     room_url = f"{url}?room={code}"
     button = (
-        InlineKeyboardButton("🏰 Enter Kingdom Wars", url=room_url)
+        InlineKeyboardButton("🔐 Join as Telegram", callback_data=f"kingdom:join:{code}")
         if update.effective_chat.type in ("group", "supergroup")
         else InlineKeyboardButton("🏰 Open Kingdom Wars", web_app=WebAppInfo(url=room_url))
     )
@@ -41,7 +41,8 @@ async def kingdomwars(update, context):
         "👑 Build your kingdom, gather resources, recruit an army and fight for the crown.\n"
         "👥 <b>2–6 players</b> can share this live room.\n\n"
         f"🎫 Room: <code>{html.escape(code)}</code>\n"
-        "🔗 Share the button above with the players you want in the battle.",
+        "🔐 <b>Telegram verification is required.</b> Each Telegram ID can occupy only one ruler seat in this room.\n\n"
+        "Click <b>Join as Telegram</b>; Vanya will send you your personal verified game link in DM.",
         reply_markup=InlineKeyboardMarkup([[button]]),
         disable_web_page_preview=True,
     )
