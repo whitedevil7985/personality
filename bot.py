@@ -560,7 +560,7 @@ GAME_ITEMS = [
     ("🔤 Wordgrid","WORDGRID"), ("⚡ Tap","TAP"), ("💥 Crash","CRASH"), ("🐙 Jumble","JUMBLE"),
     ("🎭 Charades","CHARADES"), ("🔗 Wordchain","WORDCHAIN"), ("🔤 Wordscramble","WORDS"),
     ("💣 Hack","HACK"), ("🃏 Card","CARD"), ("♟ Chess","CHESS"), ("🖌 Scribble","SCRIBBLE"),
-    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"), ("🏰 Kingdom Wars","KINGDOMWARS"),
+    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"), ("🏰 Kingdom Wars","KINGDOMWARS"), ("🏃 Street Rush","STREETRUSH"),
 ]
 
 GAME_INFO = {
@@ -585,6 +585,7 @@ GAME_INFO = {
     "COIN": "/coinflip — Flip a coin.",
     "SLOTS": "/slots — Spin the slot machine.",
     "KINGDOMWARS": "/kingdomwars — Open a live 2–6 player strategy room. Build, recruit, fortify and conquer.",
+    "STREETRUSH": "/streetrush — Open the live Street Rush endless runner. Switch lanes, jump, slide and collect coins.",
 }
 
 def game_menu_kb():
@@ -593,6 +594,21 @@ def game_menu_kb():
         rows.append([InlineKeyboardButton(label, callback_data=f"game:{key}") for label,key in GAME_ITEMS[i:i+2]])
     rows.append([InlineKeyboardButton("⟵  Back to categories", callback_data="help")])
     return kb(rows)
+
+async def street_rush_cmd(update, context):
+    domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().strip("/")
+    webapp_url = (os.getenv("STREET_RUSH_WEBAPP_URL") or "").strip().strip('"').strip("'")
+    if not webapp_url and domain:
+        webapp_url = "https://" + domain + "/street-rush"
+    if not webapp_url:
+        await update.message.reply_text("🏃 Street Rush web app is not configured.")
+        return
+    if not webapp_url.startswith(("https://","http://")):
+        webapp_url = "https://" + webapp_url
+    await update.message.reply_html(
+        "🏃 <b>Vanya Street Rush</b>\n\nRun, dodge, jump, slide and collect coins.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏃 Play Street Rush", web_app=WebAppInfo(url=webapp_url))]])
+    )
 
 async def games_cmd(update, context):
     await update.message.reply_html(
@@ -2890,6 +2906,33 @@ async def callback(update,context):
                     reply_markup=back()
                 )
             return
+        if key.upper() == "STREETRUSH":
+            domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().strip("/")
+            webapp_url = (os.getenv("STREET_RUSH_WEBAPP_URL") or "").strip().strip('"').strip("'")
+            if not webapp_url and domain:
+                webapp_url = "https://" + domain + "/street-rush"
+            if webapp_url and not webapp_url.startswith(("https://", "http://")):
+                webapp_url = "https://" + webapp_url
+            if webapp_url:
+                msg = (
+                    "╭━━━〔 🏃 <b>VANYA STREET RUSH</b> 〕━━━╮\n"
+                    "┃ <i>Neon Endless Runner</i> ✦\n"
+                    "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                    "🏙️ Run through the city, change lanes and dodge traffic.\n"
+                    "🪙 Collect coins • 🦘 Jump barriers • 🧎 Slide under gates\n"
+                    "⚡ Speed keeps increasing. How far can you run?"
+                )
+                markup = kb([
+                    [InlineKeyboardButton("🏃 Play Street Rush", web_app=WebAppInfo(url=webapp_url))],
+                    [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
+                ])
+                await q.edit_message_text(msg, parse_mode="HTML", reply_markup=markup)
+            else:
+                await q.edit_message_text(
+                    "🏃 <b>Street Rush</b> is not configured.\n\nSet <code>STREET_RUSH_WEBAPP_URL</code> or your Railway public domain.",
+                    parse_mode="HTML", reply_markup=back()
+                )
+            return
         if key.upper() == "KINGDOMWARS":
             webapp_url = (os.getenv("KINGDOM_WARS_WEBAPP_URL") or "").strip().strip('"').strip("'")
             if not webapp_url:
@@ -4183,7 +4226,7 @@ async def main():
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordchainjoin":wordchain_join,"wordscramble":wordscramble,"hack":hack,
-        "scribble":scribble,"kingdomwars":kingdomwars,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
+        "scribble":scribble,"kingdomwars":kingdomwars,"streetrush":street_rush_cmd,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
     }
