@@ -1808,10 +1808,6 @@ def _sanitize_vanya_reply(answer):
 
 async def _fast_ai_answer(prompt):
     """Use the configured AI providers privately with automatic failover."""
-    quick = _privacy_quick_reply(prompt)
-    if quick:
-        return quick
-
     providers = []
 
     if ELITE_LLM_API_KEY:
@@ -2183,6 +2179,11 @@ async def _save_chat_state_background(user_id, user_text, answer):
 
 async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None):
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
+    quick = _privacy_quick_reply(text_value)
+    if quick:
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        return quick
+
     quick = _instant_chat_reply(text_value) if chat_type == "private" else None
     if quick:
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
