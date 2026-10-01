@@ -3865,7 +3865,10 @@ async def main():
         "⚡ Telegram polling: <b>Active</b>\n"
         "🎮 Games: <b>Ready</b>\n\n"
         f"🤖 <b>Elite LLM:</b> {'🟢 ACTIVE' if provider_status.get('elite') else '🔴 DOWN'}\n"
-        f"🔁 <b>ChatGP Fallback:</b> {'🟢 ACTIVE' if provider_status.get('chatgp') else '🔴 DOWN'}"
+        f"   Model: <code>{html.escape(ELITE_LLM_MODEL or AI_MODEL or 'unset')}</code>\n"
+        f"   Key configured: <b>{'YES' if ELITE_LLM_API_KEY else 'NO'}</b>\n"
+        f"🔁 <b>ChatGP Fallback:</b> {'🟢 ACTIVE' if provider_status.get('chatgp') else '🔴 DOWN'}\n"
+        f"   Key configured: <b>{'YES' if CHATGP_API_KEY else 'NO'}</b>"
     )
     await asyncio.Event().wait()
 
