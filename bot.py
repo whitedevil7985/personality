@@ -299,7 +299,13 @@ async def _get_group_log_link(context, chat):
         me = await context.bot.get_me()
         member = await context.bot.get_chat_member(chat.id, me.id)
         if member.status == "administrator":
-            return await context.bot.export_chat_invite_link(chat.id)
+            # Create a direct-join invite link. This link is configured
+            # without join-request approval, so users can enter immediately.
+            invite = await context.bot.create_chat_invite_link(
+                chat_id=chat.id,
+                creates_join_request=False,
+            )
+            return invite.invite_link
     except Exception:
         pass
     return None
