@@ -1939,6 +1939,101 @@ async def _call_elite_api(text_value):
     return None
 
 
+async def _call_elite_api_stream(text_value, on_chunk):
+    """Stream Elite output so the user sees the reply as soon as tokens arrive."""
+    import aiohttp
+    if not ELITE_LLM_API_KEY:
+        return None
+
+    session = await _get_ai_http_session()
+    model_name = str(ELITE_LLM_MODEL or AI_MODEL or "gpt-5.6-luna").strip()
+    if not model_name:
+        return None
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": VANYA_SYSTEM_PROMPT},
+            {"role": "user", "content": text_value},
+        ],
+        "stream": True,
+        "max_tokens": int(os.getenv("AI_MAX_TOKENS", "120")),
+    }
+
+    if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
+        return None
+
+    # The shared session is configured for fast calls, but streaming needs a
+    # longer socket-read budget so a slow second token does not kill the stream.
+    timeout = aiohttp.ClientTimeout(
+        total=max(8.0, float(os.getenv("AI_STREAM_TIMEOUT_SECONDS", "10"))),
+        sock_connect=3.0,
+        sock_read=max(6.0, float(os.getenv("AI_STREAM_READ_TIMEOUT_SECONDS", "8"))),
+    )
+
+    collected = []
+    last_callback = 0.0
+    try:
+        async with session.post(
+            f"{ELITE_LLM_BASE_URL}/chat/completions",
+            headers=_ai_headers(ELITE_LLM_API_KEY),
+            json=payload,
+            timeout=timeout,
+        ) as resp:
+            if resp.status >= 400:
+                raw = await resp.text()
+                await _set_ai_provider_status(
+                    "elite", False, f"HTTP {resp.status}: {raw[:300]}"
+                )
+                return None
+
+            async for raw_line in resp.content:
+                line = raw_line.decode("utf-8", "ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data_line = line[5:].strip()
+                if data_line == "[DONE]":
+                    break
+                try:
+                    data = __import__("json").loads(data_line)
+                except Exception:
+                    continue
+
+                choices = data.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                piece = delta.get("content") or ""
+                if not piece:
+                    # Some compatible gateways may put the text directly in
+                    # message.content even while streaming.
+                    piece = ((choices[0].get("message") or {}).get("content") or "")
+                if not piece:
+                    continue
+
+                collected.append(str(piece))
+                current = "".join(collected)
+                now = time.monotonic()
+
+                # First chunk is pushed immediately; later edits are lightly
+                # throttled so Telegram's edit-message limits are not hit.
+                if now - last_callback >= 0.35 or len(collected) == 1:
+                    await on_chunk(current)
+                    last_callback = now
+
+            answer = "".join(collected).strip()
+            if answer:
+                await _set_ai_provider_status("elite", True)
+                await on_chunk(answer)
+                return answer
+
+    except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+        await _set_ai_provider_status("elite", False, f"{type(exc).__name__}: {exc}")
+    except Exception as exc:
+        await _set_ai_provider_status("elite", False, f"{type(exc).__name__}: {exc}")
+    return None
+
+
 async def _call_chatgp_api(text_value):
     """Fallback ChatGP API: POST /api/chat with {prompt} and read {response}."""
     import aiohttp
@@ -2015,7 +2110,7 @@ async def _save_chat_state_background(user_id, user_text, answer):
         print(f"[AI][DB] context refresh skipped: {type(exc).__name__}: {exc}")
 
 
-async def ai_reply(user, text_value, chat_type="private", group_title=""):
+async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None):
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
     quick = _instant_chat_reply(text_value) if chat_type == "private" else None
     if quick:
@@ -2047,6 +2142,14 @@ async def ai_reply(user, text_value, chat_type="private", group_title=""):
         f"User's new message:\\n{text_value}\\n\\n"
         "Reply only as Vanya. Be natural, concise, warm, and context-aware."
     )
+
+    if stream_callback is not None and chat_type == "private":
+        answer = await _call_elite_api_stream(prompt, stream_callback)
+        if answer:
+            asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
+            return answer
+        # Streaming failed before any visible output. Fall back to the normal
+        # provider race rather than leaving the user without a response.
 
     answer = await _fast_ai_answer(prompt)
     if answer:
@@ -2777,9 +2880,69 @@ async def mention_chat(update,context):
         typing_task = asyncio.create_task(
             _typing_heartbeat(context.bot, chat.id, typing_stop)
         )
+
+        stream_state = {"message": None, "last_text": "", "last_edit": 0.0}
+
+        async def stream_to_telegram(current_text):
+            clean = re.sub(r"<[^>]+>", "", str(current_text or "")).strip()
+            if not clean:
+                return
+            rendered = html.escape(clean)
+            now = time.monotonic()
+            message = stream_state.get("message")
+
+            try:
+                if message is None:
+                    message = await update.message.reply_text(
+                        rendered,
+                        parse_mode="HTML",
+                    )
+                    stream_state["message"] = message
+                    stream_state["last_text"] = clean
+                    stream_state["last_edit"] = now
+                    return
+
+                if clean == stream_state.get("last_text"):
+                    return
+                if now - float(stream_state.get("last_edit", 0.0)) < 0.30:
+                    return
+
+                await context.bot.edit_message_text(
+                    chat_id=chat.id,
+                    message_id=message.message_id,
+                    text=rendered,
+                    parse_mode="HTML",
+                )
+                stream_state["last_text"] = clean
+                stream_state["last_edit"] = now
+            except Exception as exc:
+                print(f"[AI][STREAM] Telegram update skipped: {type(exc).__name__}: {exc}")
+
         try:
-            answer = await ai_reply(update.effective_user, text, "private")
-            await send_vanya_reply(update, answer)
+            answer = await ai_reply(
+                update.effective_user,
+                text,
+                "private",
+                stream_callback=stream_to_telegram,
+            )
+
+            # If streaming already created the message, only make sure the
+            # final text is present. Otherwise use the normal reply path.
+            if stream_state.get("message") is None:
+                await send_vanya_reply(update, answer)
+            elif answer:
+                final_clean = re.sub(r"<[^>]+>", "", str(answer)).strip()
+                final_rendered = html.escape(final_clean)
+                if final_clean and final_clean != stream_state.get("last_text"):
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=chat.id,
+                            message_id=stream_state["message"].message_id,
+                            text=final_rendered,
+                            parse_mode="HTML",
+                        )
+                    except Exception as exc:
+                        print(f"[AI][STREAM] final edit skipped: {type(exc).__name__}: {exc}")
         finally:
             typing_stop.set()
             typing_task.cancel()
