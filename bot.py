@@ -1815,7 +1815,23 @@ def _privacy_quick_reply(text_value):
         ])
     return None
 
-def _sanitize_vanya_reply(answer):
+def _compact_vanya_reply(answer, max_words=25, max_lines=2):
+    """Keep normal Vanya replies short and Telegram-chat-like."""
+    text = re.sub(r"[ \t]+", " ", str(answer or "").strip())
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    text = "\n".join(lines[:max_lines])
+    words = re.findall(r"\S+", text)
+    if len(words) <= max_words:
+        return text
+    compact = " ".join(words[:max_words]).rstrip(" ,;:-")
+    if compact and compact[-1] not in ".!?…":
+        compact += "…"
+    return compact
+
+
+def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     """Remove accidental internal implementation details before sending."""
     text = str(answer or "").strip()
     if not text:
@@ -1830,9 +1846,9 @@ def _sanitize_vanya_reply(answer):
         # Provider-generated error/status text is not a Vanya reply.
         # Return empty so _fast_ai_answer can fail over to the next provider.
         return ""
-    return text
+    return _compact_vanya_reply(text, max_words=max_words, max_lines=max_lines)
 
-async def _fast_ai_answer(prompt):
+async def _fast_ai_answer(prompt, max_words=25, max_lines=2):
     """Use the configured AI providers privately with automatic failover."""
     providers = []
 
@@ -1863,7 +1879,7 @@ async def _fast_ai_answer(prompt):
                 answer = await provider_call(prompt)
 
             if answer:
-                safe_answer = _sanitize_vanya_reply(answer)
+                safe_answer = _sanitize_vanya_reply(answer, max_words=max_words, max_lines=max_lines)
                 if safe_answer:
                     return safe_answer
 
@@ -2232,16 +2248,31 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
     memory_limit = int(os.getenv("AI_PROMPT_MEMORY_CHARS", "1400" if chat_type == "private" else "2200"))
     history = history[-history_limit:]
     memory = memory[-memory_limit:]
+    detail_request = bool(re.search(
+        r"\b(?:detail|detailed|explain|explain\s+properly|full\s+explanation|"
+        r"poora\s+(?:detail|samjha)|detail\s+mein|vistaar\s+se)\b",
+        str(text_value or "").casefold(),
+    ))
+    max_words = 80 if detail_request else 25
+    max_lines = 4 if detail_request else 2
+
     prompt = (
-        f"Chat type: {chat_type}. Group: {group_title or 'DM'}\\n"
-        f"User display name: {user.first_name or 'User'}\\n\\n"
-        f"Saved memory (last {MEMORY_DAYS} days):\\n{memory}\\n\\n"
-        f"Recent conversation:\\n{history or '- None yet.'}\\n\\n"
-        f"User's new message:\\n{text_value}\\n\\n"
-        "Reply only as Vanya. Be natural, concise, warm, and context-aware."
+        f"Chat type: {chat_type}. Group: {group_title or 'DM'}\n"
+        f"User display name: {user.first_name or 'User'}\n\n"
+        f"Saved memory (last {MEMORY_DAYS} days):\n{memory}\n\n"
+        f"Recent conversation:\n{history or '- None yet.'}\n\n"
+        f"User's new message:\n{text_value}\n\n"
+        "Reply only as Vanya. Be natural, concise, warm, and context-aware. "
+        f"Normal reply: maximum {max_words} words and {max_lines} short lines. "
+        "Do not write long paragraphs, lectures, or repeated explanations. "
+        "Only use the longer limit when the user explicitly asks for detail."
     )
 
-    answer = await _fast_ai_answer(prompt)
+    answer = await _fast_ai_answer(
+        prompt,
+        max_words=max_words,
+        max_lines=max_lines,
+    )
     if answer:
         asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
         return answer
