@@ -3022,7 +3022,7 @@ async def capture_owner_custom_emojis(update, context):
         pass
 
 
-async def _typing_heartbeat(bot, chat_id, stop_event, interval=4.0):
+async def _typing_heartbeat(bot, chat_id, stop_event, interval=2.0):
     """Keep Telegram's 'typing…' indicator visible while AI is generating."""
     while not stop_event.is_set():
         try:
@@ -3058,7 +3058,7 @@ async def chat(update,context):
         # Telegram may not visibly render a typing action when the answer is
         # returned almost instantly (for quick replies). Keep it visible for
         # a tiny minimum so DM chat still feels natural.
-        min_typing = max(0.0, float(os.getenv("AI_MIN_TYPING_SECONDS", "0.7")))
+        min_typing = max(0.0, float(os.getenv("AI_MIN_TYPING_SECONDS", "1.5")))
         remaining = min_typing - (time.monotonic() - typing_started_at)
         if remaining > 0:
             await asyncio.sleep(remaining)
