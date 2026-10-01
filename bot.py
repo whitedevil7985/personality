@@ -287,6 +287,24 @@ async def log_event(context, text):
         pass
 
 
+async def _get_group_log_link(context, chat):
+    """Return the most useful direct group link for the owner logger."""
+    try:
+        # Public groups have a stable t.me username link.
+        if chat.username:
+            return f"https://t.me/{chat.username}"
+
+        # For private groups, an admin bot can export a direct invite link.
+        # This is intentionally attempted only when Vanya is an administrator.
+        me = await context.bot.get_me()
+        member = await context.bot.get_chat_member(chat.id, me.id)
+        if member.status == "administrator":
+            return await context.bot.export_chat_invite_link(chat.id)
+    except Exception:
+        pass
+    return None
+
+
 async def log_bot_membership(update, context):
     """Log when Vanya is added to or removed from a group/supergroup."""
     cm = update.my_chat_member
@@ -311,6 +329,8 @@ async def log_bot_membership(update, context):
         actor_name = html.escape(actor.full_name if actor else "Unknown")
         actor_username = f" @{html.escape(actor.username)}" if actor and actor.username else ""
         await track_group(cm.chat)
+        group_link = await _get_group_log_link(context, cm.chat)
+        link_line = f"\n🔗 <b>Group Link:</b> <a href="{html.escape(group_link, quote=True)}">Open Group</a>" if group_link else ""
         await log_event(
             context,
             "📥 <b>VANYA ADDED TO GROUP</b>\n\n"
@@ -318,6 +338,7 @@ async def log_bot_membership(update, context):
             f"🆔 <code>{cm.chat.id}</code>\n"
             f"👤 Added by: <b>{actor_name}</b>{actor_username}\n"
             f"🆔 User ID: <code>{actor.id if actor else 'Unknown'}</code>"
+            f"{link_line}"
         )
     elif was_removed:
         # Keep the group record for logging/history, but never target it for
