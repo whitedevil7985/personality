@@ -50,6 +50,39 @@ def new_room(game='ludo'):
     }
 
 
+def create_kingdom_join_token(room_code, user_id, ttl=None):
+    """Create a signed room token bound to one Telegram user ID."""
+    room_code = str(room_code or "").upper().strip()
+    uid = int(user_id)
+    ttl = int(ttl or os.getenv("KINGDOM_JOIN_TOKEN_TTL_SECONDS", "21600"))
+    expires = int(time.time()) + max(300, ttl)
+    secret = (os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").encode()
+    if not secret or not room_code:
+        return ""
+    payload = f"{room_code}:{uid}:{expires}"
+    signature = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{uid}.{expires}.{signature}"
+
+
+def verify_kingdom_join_token(room_code, token):
+    """Verify a signed Kingdom Wars token and return its Telegram user ID."""
+    room_code = str(room_code or "").upper().strip()
+    try:
+        uid_s, exp_s, signature = str(token or "").split(".", 2)
+        uid = int(uid_s)
+        expires = int(exp_s)
+    except (TypeError, ValueError):
+        return None
+    if not room_code or time.time() > expires:
+        return None
+    secret = (os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").encode()
+    if not secret:
+        return None
+    payload = f"{room_code}:{uid}:{expires}"
+    expected = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    return uid if hmac.compare_digest(expected, signature) else None
+
+
 def verify_telegram_init_data(init_data: str):
     if not init_data:
         return None
@@ -659,6 +692,14 @@ def _kingdom_action(room,p,action,target_id=None):
     return False,'Unknown command.'
 
 async def create_kingdom_room(request):
+    # A web-created Kingdom Wars room must have a verified Telegram identity.
+    # Group-created rooms use the bot command/callback flow below.
+    tg_user=verify_telegram_init_data(request.query.get('initData',''))
+    if not tg_user:
+        return web.json_response(
+            {'ok':False,'error':'Telegram verification required.'},
+            status=401,
+        )
     gid=request_group_id(request)
     code=await create_kingdom_room_for_group(gid)
     return web.json_response({'ok':True,'room':code})
@@ -673,11 +714,20 @@ async def kingdom_ws(request):
     ws=web.WebSocketResponse(heartbeat=25,max_msg_size=64*1024)
     await ws.prepare(request)
     tg_user=verify_telegram_init_data(request.query.get('initData',''))
-    cid=''.join(ch for ch in (request.query.get('cid') or '') if ch.isalnum() or ch in '_-')[:80]
-    # Telegram identity is available in real Mini Apps. For normal group URL
-    # buttons, keep a stable browser id so refresh/reconnect does not create
-    # duplicate kingdoms.
-    session_id=str(tg_user['id']) if tg_user else ('guest-'+cid if cid else 'guest-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(12)))
+    token_uid=verify_kingdom_join_token(code,request.query.get('token',''))
+    if token_uid is None and tg_user is None:
+        await ws.send_json({'type':'error','message':'Telegram verification required. Open the Join button from Vanya.'})
+        await ws.close()
+        return ws
+    if token_uid is not None and tg_user is not None and int(tg_user.get('id')) != int(token_uid):
+        await ws.send_json({'type':'error','message':'Telegram account verification mismatch.'})
+        await ws.close()
+        return ws
+    # A signed room token can authenticate a player even when Telegram's
+    # Mini App initData is absent (for example when the link originated in a
+    # group). This token is cryptographically bound to exactly one Telegram ID.
+    verified_user_id=int(token_uid if token_uid is not None else tg_user['id'])
+    session_id=str(verified_user_id)
     try:
         async for msg in ws:
             if msg.type!=WSMsgType.TEXT: continue
