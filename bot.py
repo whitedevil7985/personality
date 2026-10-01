@@ -560,7 +560,7 @@ GAME_ITEMS = [
     ("🔤 Wordgrid","WORDGRID"), ("⚡ Tap","TAP"), ("💥 Crash","CRASH"), ("🐙 Jumble","JUMBLE"),
     ("🎭 Charades","CHARADES"), ("🔗 Wordchain","WORDCHAIN"), ("🔤 Wordscramble","WORDS"),
     ("💣 Hack","HACK"), ("🃏 Card","CARD"), ("♟ Chess","CHESS"), ("🖌 Scribble","SCRIBBLE"),
-    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"), ("🏰 Kingdom Wars","KINGDOMWARS"), ("🏃 Street Rush","STREETRUSH"),
+    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"), ("🏰 Kingdom Wars","KINGDOMWARS"), ("🚇 Subway","SUBWAY"),
 ]
 
 GAME_INFO = {
@@ -585,7 +585,7 @@ GAME_INFO = {
     "COIN": "/coinflip — Flip a coin.",
     "SLOTS": "/slots — Spin the slot machine.",
     "KINGDOMWARS": "/kingdomwars — Open a live 2–6 player strategy room. Build, recruit, fortify and conquer.",
-    "STREETRUSH": "/streetrush — Open the live Street Rush endless runner. Switch lanes, jump, slide and collect coins.",
+    "STREETRUSH": "/subway — Open the live Subway endless runner. Switch lanes, jump, slide and collect coins.",
 }
 
 def game_menu_kb():
@@ -2910,7 +2910,7 @@ async def callback(update,context):
                     reply_markup=back()
                 )
             return
-        if key.upper() == "STREETRUSH":
+        if key.upper() == "SUBWAY":
             domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "personality-production-6405.up.railway.app").strip().strip("/")
             webapp_url = (os.getenv("STREET_RUSH_WEBAPP_URL") or "").strip().strip('"').strip("'")
             if not webapp_url and domain:
@@ -4271,7 +4271,7 @@ async def main():
         "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid",
         "crash": "Play Crash", "charades": "Play Charades", "wordchain": "Start multiplayer Wordchain", "wordchainjoin": "Join active Wordchain lobby",
         "wordscramble": "Play Wordscramble", "hack": "Play Hack puzzle",
-        "scribble": "Open Scribble", "kingdomwars": "Open Kingdom Wars strategy arena", "subway": "Play Street Rush endless runner", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
+        "scribble": "Open Scribble", "kingdomwars": "Open Kingdom Wars strategy arena", "subway": "Play Subway endless runner", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
         "panel": "Open owner panel", "ownerpanel": "Open owner panel", "devpanel": "Open owner panel", "broadcast": "Broadcast to users, groups, or both (Owner/Sudo)", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
