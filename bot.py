@@ -1890,7 +1890,7 @@ async def _call_elite_api(text_value):
                 ],
                 "stream": False,
                 "reasoning_effort": os.getenv("AI_REASONING_EFFORT", "none"),
-                "max_tokens": int(os.getenv("AI_MAX_OUTPUT_TOKENS", "96")),
+                "max_completion_tokens": int(os.getenv("AI_MAX_OUTPUT_TOKENS", "96")),
             }
             for attempt in range(max_attempts):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
