@@ -1784,6 +1784,32 @@ async def _fast_ai_answer(prompt):
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+def _instant_chat_reply(text_value: str):
+    """Instant local replies for very short DM small-talk messages."""
+    t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
+    if not t:
+        return None
+    replies = {
+        "hi": ["Hii 😄", "Hii yaar 💕", "Heyy 😌"],
+        "hii": ["Hii 😄", "Hii yaar 💕", "Heyy 😌"],
+        "hiii": ["Hiii 😄", "Heyy yaar 💕", "Hii 😌"],
+        "hello": ["Helloo 😄", "Hii yaar 💕", "Heyy 😌"],
+        "hey": ["Heyyy 😄", "Haan bolo 😌", "Hii yaar 💕"],
+        "acha": ["Haan yaar 😌", "Hehe achaaa 😄", "Acha ji 😄"],
+        "accha": ["Haan yaar 😌", "Hehe achaaa 😄", "Acha ji 😄"],
+        "achha": ["Haan yaar 😌", "Hehe achaaa 😄", "Acha ji 😄"],
+        "ohh": ["Hehe 😄", "Ohh haan 😌", "Samjhi 😄"],
+        "hmm": ["Hmm 😌", "Hmmm, bol na 😄", "Haanji 👀"],
+        "ok": ["Okayy 😌", "Theek hai yaar 😄", "Done 😌"],
+        "okay": ["Okayy 😌", "Theek hai yaar 😄", "Done 😌"],
+        "lol": ["😂", "Hahaha 😭", "Hehe 😄"],
+        "haha": ["Hehe 😄", "Hahaha 😂", "Accha ji 😂"],
+        "hehe": ["Hehe 😌", "😂", "Haan bolo 😄"],
+    }
+    choices = replies.get(t)
+    return random.choice(choices) if choices else None
+
+
 def _identity_quick_reply(text_value: str):
     t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
     # Keep common identity questions instant and consistent.
@@ -1832,13 +1858,9 @@ async def _call_elite_api(text_value):
 
     session = await _get_ai_http_session()
     base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
-    fast_model = str(os.getenv("AI_FAST_MODEL", "gpt-5.4-mini")).strip()
-    # Prefer the configured fast model, then the configured production model.
-    fallback_models = []
-    for model_name in (fast_model, base_model):
-        model_name = str(model_name or "").strip()
-        if model_name and model_name not in fallback_models:
-            fallback_models.append(model_name)
+    # Use the configured model directly. Trying a second model first can
+    # turn a healthy provider into an unnecessary 400/404 + latency.
+    fallback_models = [str(base_model).strip()] if str(base_model).strip() else []
     max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
     extra_models = [
         str(x).strip()
