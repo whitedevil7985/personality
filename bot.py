@@ -1471,8 +1471,8 @@ _AI_LOGGER_BOT = None
 _AI_CONTEXT_CACHE = {}
 _AI_CONTEXT_WARMING = set()
 _AI_CONTEXT_CACHE_TTL = max(30.0, float(os.getenv("AI_CONTEXT_CACHE_TTL_SECONDS", "1800")))
-_AI_FAST_MAX_SECONDS = max(1.0, float(os.getenv("AI_FAST_MAX_SECONDS", "1.8")))
-_AI_HEDGE_DELAY = max(0.0, float(os.getenv("AI_HEDGE_DELAY_SECONDS", "0.12")))
+_AI_FAST_MAX_SECONDS = max(3.0, float(os.getenv("AI_FAST_MAX_SECONDS", "6.0")))
+_AI_HEDGE_DELAY = max(0.05, float(os.getenv("AI_HEDGE_DELAY_SECONDS", "0.35")))
 
 async def _set_ai_provider_status(provider, active, detail=""):
     """Notify the logger when an AI provider changes state."""
@@ -1726,32 +1726,43 @@ async def _save_ai_context_after_reply(user_id):
 
 
 async def _fast_ai_answer(prompt):
-    """Hedge Elite with the fallback after a tiny delay and return the first answer.
+    """Fast but reliable provider race.
 
-    This keeps normal replies fast without always doubling provider traffic:
-    ChatGP starts only when Elite has not answered quickly enough.
+    Elite gets the first chance. ChatGP is used only when it is configured and
+    not marked down, so a known-timeout fallback does not slow every DM.
     """
     elite_task = asyncio.create_task(_call_elite_api(prompt))
     tasks = {elite_task}
-    fallback_task = None
 
     try:
-        if _AI_HEDGE_DELAY > 0:
-            try:
-                await asyncio.wait_for(asyncio.shield(elite_task), timeout=_AI_HEDGE_DELAY)
-            except asyncio.TimeoutError:
-                if CHATGP_API_KEY:
-                    fallback_task = asyncio.create_task(_call_chatgp_api(prompt))
-                    tasks.add(fallback_task)
-            except Exception:
-                if CHATGP_API_KEY:
-                    fallback_task = asyncio.create_task(_call_chatgp_api(prompt))
-                    tasks.add(fallback_task)
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(elite_task),
+                timeout=max(0.05, _AI_HEDGE_DELAY),
+            )
+        except asyncio.TimeoutError:
+            if (
+                CHATGP_API_KEY
+                and not (
+                    _AI_PROVIDER_STATUS.get("chatgp") is False
+                    and time.monotonic() - _AI_PROVIDER_LAST_FAILURE.get("chatgp", 0.0)
+                    < _AI_PROVIDER_DOWN_COOLDOWN
+                )
+            ):
+                tasks.add(asyncio.create_task(_call_chatgp_api(prompt)))
+        except Exception:
+            if CHATGP_API_KEY:
+                tasks.add(asyncio.create_task(_call_chatgp_api(prompt)))
 
-        deadline = time.monotonic() + _AI_FAST_MAX_SECONDS
+        # Do not kill a healthy Elite request at 1.8s. The old hard cutoff was
+        # the reason the bot returned the fake "AI down" message even though
+        # the startup probe showed Elite as ACTIVE.
+        deadline = time.monotonic() + max(3.0, _AI_FAST_MAX_SECONDS)
         pending = set(tasks)
-        while pending and time.monotonic() < deadline:
-            remaining = max(0.05, deadline - time.monotonic())
+        while pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             done, pending = await asyncio.wait(
                 pending,
                 timeout=remaining,
@@ -1765,24 +1776,6 @@ async def _fast_ai_answer(prompt):
                 if answer:
                     return answer
 
-        # A provider may have completed with an empty/error result while the
-        # other request is still pending; give the other task whatever tiny
-        # amount remains in the hard latency budget.
-        if pending:
-            remaining = max(0.05, deadline - time.monotonic())
-            if remaining > 0:
-                done, pending = await asyncio.wait(
-                    pending,
-                    timeout=remaining,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in done:
-                    try:
-                        answer = await task
-                    except Exception:
-                        answer = None
-                    if answer:
-                        return answer
         return None
     finally:
         for task in tasks:
@@ -1790,27 +1783,6 @@ async def _fast_ai_answer(prompt):
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-
-
-def _instant_chat_reply(text_value: str):
-    t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
-    if not t:
-        return None
-    replies = {
-        "acha": ["Haan yaar", "Hehe achaaa", "Acha ji"],
-        "accha": ["Haan yaar", "Hehe achaaa", "Acha ji"],
-        "achha": ["Haan yaar", "Hehe achaaa", "Acha ji"],
-        "ohh": ["Hehe", "Ohh haan", "Samjhi"],
-        "hmm": ["Hmm", "Hmmm, bol na", "Haanji"],
-        "okay": ["Okayy", "Theek hai yaar", "Done"],
-        "ok": ["Okayy", "Theek hai yaar", "Done"],
-        "lol": ["Haha", "Hahaha", "Hehe"],
-        "haha": ["Hehe", "Hahaha", "Accha ji"],
-        "hehe": ["Hehe", "Haha", "Haan bolo"],
-    }
-    choices = replies.get(t)
-    return random.choice(choices) if choices else None
-
 
 def _identity_quick_reply(text_value: str):
     t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
@@ -1866,10 +1838,12 @@ async def _call_elite_api(text_value):
     # Keep one model on the hot path. Extra model fallbacks are opt-in via
     # AI_FALLBACK_MODELS because serial model retries add latency.
     fallback_models = [str(base_model).strip()] if str(base_model).strip() else []
+    # If a configured alias is rejected by the gateway, try known live models.
+    for model_name in ("gpt-5.4-mini", "gpt-5-mini"):
+        if model_name not in fallback_models:
+            fallback_models.append(model_name)
 
     max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
-    # Keep the default path to one model: trying several models serially can
-    # add seconds before the ChatGP fallback gets a chance.
     extra_models = [
         str(x).strip()
         for x in os.getenv("AI_FALLBACK_MODELS", "").split(",")
@@ -1889,8 +1863,6 @@ async def _call_elite_api(text_value):
                     {"role": "user", "content": text_value},
                 ],
                 "stream": False,
-                "reasoning_effort": os.getenv("AI_REASONING_EFFORT", "none"),
-                "max_completion_tokens": int(os.getenv("AI_MAX_OUTPUT_TOKENS", "96")),
             }
             for attempt in range(max_attempts):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
