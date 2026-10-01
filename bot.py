@@ -2290,6 +2290,53 @@ async def cleanup_expired_memory():
 async def callback(update,context):
     q=update.callback_query;data=q.data
 
+    if data.startswith("kingdom:join:"):
+        parts=data.split(":")
+        if len(parts)!=3:
+            await q.answer("Invalid Kingdom Wars room.", show_alert=True)
+            return
+        room_code=parts[2].strip().upper()
+        if not re.fullmatch(r"[A-HJ-NP-Z2-9]{6}", room_code):
+            await q.answer("Invalid room code.", show_alert=True)
+            return
+        try:
+            from webserver import create_kingdom_join_token
+            token=create_kingdom_join_token(room_code, q.from_user.id)
+            base=(os.getenv("KINGDOM_WARS_WEBAPP_URL") or "").strip().strip('"').strip("'")
+            if not base:
+                domain=(os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().strip("/")
+                if domain:
+                    base="https://"+domain+"/kingdom-wars"
+            if base and not base.startswith(("https://","http://")):
+                base="https://"+base
+            room_url=base.rstrip("/")+"?room="+room_code+"&token="+token
+            try:
+                await context.bot.send_message(
+                    chat_id=q.from_user.id,
+                    text=(
+                        "🏰 <b>Kingdom Wars</b>\n\n"
+                        "✅ Telegram account verified.\n"
+                        "Your ruler seat is tied to your Telegram ID. "
+                        "Use the button below to enter the battle."
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🏰 Enter Verified Kingdom", web_app=WebAppInfo(url=room_url))
+                    ]]),
+                    disable_web_page_preview=True,
+                )
+                await q.answer("✅ Verified link sent to your DM.", show_alert=False)
+            except Exception:
+                bot_username=(getattr(context.bot,"username",None) or os.getenv("BOT_USERNAME","ItzVanyaBot")).lstrip("@")
+                await q.answer(
+                    f"Start @{bot_username} in DM first, then click Join again.",
+                    show_alert=True,
+                )
+        except Exception as exc:
+            print(f"[KingdomVerify] {type(exc).__name__}: {exc}")
+            await q.answer("Could not create your verified join link. Try again.", show_alert=True)
+        return
+
     if data.startswith("proposal:"):
         parts=data.split(":")
         if len(parts) == 4:
@@ -2736,7 +2783,7 @@ async def callback(update,context):
                 )
                 if update.effective_chat and update.effective_chat.type in ("group","supergroup"):
                     markup=kb([
-                        [InlineKeyboardButton("🏰 Enter Kingdom Wars",url=room_url)],
+                        [InlineKeyboardButton("🔐 Join as Telegram",callback_data=f"kingdom:join:{room_code}")],
                         [InlineKeyboardButton("⟵ Back to Games",callback_data="cat:games")]
                     ])
                 else:
