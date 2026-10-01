@@ -3043,6 +3043,7 @@ async def chat(update,context):
     # Do not block the typing indicator or LLM call on a MongoDB write.
     # ai_reply() persists the user state in the background.
     typing_stop = asyncio.Event()
+    typing_started_at = time.monotonic()
     try:
         await context.bot.send_chat_action(
             chat_id=update.effective_chat.id, action="typing"
@@ -3054,6 +3055,13 @@ async def chat(update,context):
     )
     try:
         answer = await ai_reply(update.effective_user, text, "private")
+        # Telegram may not visibly render a typing action when the answer is
+        # returned almost instantly (for quick replies). Keep it visible for
+        # a tiny minimum so DM chat still feels natural.
+        min_typing = max(0.0, float(os.getenv("AI_MIN_TYPING_SECONDS", "0.7")))
+        remaining = min_typing - (time.monotonic() - typing_started_at)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
         await send_vanya_reply(update, answer)
     finally:
         typing_stop.set()
@@ -3117,6 +3125,7 @@ async def mention_chat(update,context):
         if text.startswith("/"):
             return
         typing_stop = asyncio.Event()
+        typing_started_at = time.monotonic()
         try:
             await context.bot.send_chat_action(chat_id=chat.id, action="typing")
         except Exception:
@@ -3169,6 +3178,11 @@ async def mention_chat(update,context):
                 "private",
                 stream_callback=stream_to_telegram,
             )
+
+            min_typing = max(0.0, float(os.getenv("AI_MIN_TYPING_SECONDS", "0.7")))
+            remaining = min_typing - (time.monotonic() - typing_started_at)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
 
             # If streaming already created the message, only make sure the
             # final text is present. Otherwise use the normal reply path.
