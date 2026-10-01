@@ -1462,7 +1462,7 @@ Reply only as Vanya. Stay natural, warm, funny, curious, and varied. Never prete
 _AI_HTTP_SESSION = None
 _AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
 _AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0}
-_AI_PROVIDER_DOWN_COOLDOWN = max(3.0, float(os.getenv("AI_PROVIDER_DOWN_COOLDOWN", "5")))
+_AI_PROVIDER_DOWN_COOLDOWN = max(0.0, float(os.getenv("AI_PROVIDER_DOWN_COOLDOWN", "0")))
 _AI_LOGGER_BOT = None
 
 # Fast-path context cache: DM replies must never wait for Mongo before calling
@@ -1827,22 +1827,18 @@ def _ai_headers(api_key):
 async def _call_elite_api(text_value):
     """Call the documented OpenAI-compatible Elite endpoint."""
     import aiohttp
-    if (_AI_PROVIDER_STATUS.get("elite") is False and
-            time.monotonic() - _AI_PROVIDER_LAST_FAILURE.get("elite", 0.0) < _AI_PROVIDER_DOWN_COOLDOWN):
-        return None
     if not ELITE_LLM_API_KEY:
         return None
 
     session = await _get_ai_http_session()
     base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
-    # Keep one model on the hot path. Extra model fallbacks are opt-in via
-    # AI_FALLBACK_MODELS because serial model retries add latency.
-    fallback_models = [str(base_model).strip()] if str(base_model).strip() else []
-    # If a configured alias is rejected by the gateway, try known live models.
-    for model_name in ("gpt-5.4-mini", "gpt-5-mini"):
-        if model_name not in fallback_models:
+    fast_model = str(os.getenv("AI_FAST_MODEL", "gpt-5.4-mini")).strip()
+    # Prefer the configured fast model, then the configured production model.
+    fallback_models = []
+    for model_name in (fast_model, base_model):
+        model_name = str(model_name or "").strip()
+        if model_name and model_name not in fallback_models:
             fallback_models.append(model_name)
-
     max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
     extra_models = [
         str(x).strip()
@@ -1863,6 +1859,7 @@ async def _call_elite_api(text_value):
                     {"role": "user", "content": text_value},
                 ],
                 "stream": False,
+                "max_tokens": int(os.getenv("AI_MAX_TOKENS", "120")),
             }
             for attempt in range(max_attempts):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
@@ -1926,10 +1923,6 @@ async def _call_chatgp_api(text_value):
     if not CHATGP_API_KEY:
         await _set_ai_provider_status("chatgp", False, "CHATGP_API_KEY is not configured")
         return None
-    if (_AI_PROVIDER_STATUS.get("chatgp") is False and
-            time.monotonic() - _AI_PROVIDER_LAST_FAILURE.get("chatgp", 0.0) < _AI_PROVIDER_DOWN_COOLDOWN):
-        return None
-
     # Reuse the same keep-alive session so fallback requests do not pay a new
     # DNS/TCP/TLS connection setup cost every time.
     session = await _get_ai_http_session()
@@ -2681,6 +2674,12 @@ async def chat(update,context):
     # Do not block the typing indicator or LLM call on a MongoDB write.
     # ai_reply() persists the user state in the background.
     typing_stop = asyncio.Event()
+    try:
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, action="typing"
+        )
+    except Exception:
+        pass
     typing_task = asyncio.create_task(
         _typing_heartbeat(context.bot, update.effective_chat.id, typing_stop)
     )
@@ -2749,6 +2748,10 @@ async def mention_chat(update,context):
         if text.startswith("/"):
             return
         typing_stop = asyncio.Event()
+        try:
+            await context.bot.send_chat_action(chat_id=chat.id, action="typing")
+        except Exception:
+            pass
         typing_task = asyncio.create_task(
             _typing_heartbeat(context.bot, chat.id, typing_stop)
         )
