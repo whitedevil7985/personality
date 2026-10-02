@@ -424,7 +424,7 @@ def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
         return ""
     return _compact_vanya_reply(text, max_words=max_words, max_lines=max_lines)
 
-async def _fast_ai_answer(prompt, max_words=25, max_lines=2):
+async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None):
     """Use Elite + ChatGP first, then Ollama Cloud as the final fallback."""
     primary = []
     if ELITE_LLM_API_KEY:
@@ -448,6 +448,16 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2):
                 answer, max_words=max_words, max_lines=max_lines
             ) if answer else ""
             if safe:
+                if usage_context:
+                    asyncio.create_task(record_ai_usage(
+                        name,
+                        usage_context.get("user_id"),
+                        usage_context.get("user_name"),
+                        usage_context.get("username"),
+                        usage_context.get("chat_id"),
+                        usage_context.get("chat_type"),
+                        usage_context.get("chat_title"),
+                    ))
                 return name, safe, None
             return name, None, "no usable response"
         except asyncio.TimeoutError:
@@ -936,6 +946,14 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         prompt,
         max_words=max_words,
         max_lines=max_lines,
+        usage_context={
+            "user_id": user.id,
+            "user_name": getattr(user, "first_name", None),
+            "username": getattr(user, "username", None),
+            "chat_id": None,
+            "chat_type": chat_type,
+            "chat_title": group_title if chat_type == "group" else "",
+        },
     )
     if answer:
         asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
