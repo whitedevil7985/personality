@@ -14,7 +14,7 @@ from telegram import (
     BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats,
     BotCommandScopeDefault, BotCommandScopeChat,
 )
-from telegram.ext import Application, ApplicationHandlerStop, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, ContextTypes, filters
 from telegram.request import HTTPXRequest
 
 from config import (
