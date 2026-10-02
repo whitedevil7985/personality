@@ -3463,8 +3463,10 @@ STAFF_COMMANDS = {
     "addemoji": "Save premium custom emoji",
     "addsudo": "Add sudo user",
     "delsudo": "Remove sudo user",
+    "blacklist": "Blacklist a user (Owner only)",
+    "unblacklist": "Remove a user from blacklist (Owner only)",
 }
-OWNER_ONLY_COMMANDS = {"addsudo", "delsudo", "addemoji"}
+OWNER_ONLY_COMMANDS = {"addsudo", "delsudo", "addemoji", "blacklist", "unblacklist"}
 
 
 def staff_command_objects(owner=False):
@@ -3482,6 +3484,153 @@ async def is_owner_or_sudo(update):
         return True
     u = await get_user(uid)
     return bool(u and u.get("is_sudo"))
+
+
+async def _resolve_user_id(update, context):
+    """Resolve a moderation target from a replied message or a numeric user ID."""
+    if update.message and update.message.reply_to_message and update.message.reply_to_message.from_user:
+        return update.message.reply_to_message.from_user.id, update.message.reply_to_message.from_user
+    if context.args:
+        try:
+            uid = int(context.args[0])
+            if uid > 0:
+                return uid, None
+        except (TypeError, ValueError):
+            pass
+    return None, None
+
+
+async def blacklist(update, context):
+    """Owner-only permanent bot blacklist. Supports reply or /blacklist <user_id>."""
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.effective_message.reply_text("⛔ Owner only.")
+        return
+
+    target_id, target_user_obj = await _resolve_user_id(update, context)
+    if not target_id:
+        await update.effective_message.reply_html(
+            "🚫 <b>Blacklist User</b>\n\n"
+            "Reply to the user's message with <code>/blacklist</code>\n"
+            "or use <code>/blacklist &lt;user_id&gt;</code>."
+        )
+        return
+
+    if target_id == OWNER_ID:
+        await update.effective_message.reply_text("⚠️ Owner ko blacklist nahi kiya ja sakta.")
+        return
+
+    target_name = (
+        target_user_obj.full_name
+        if target_user_obj
+        else f"User {target_id}"
+    )
+    now = datetime.now(timezone.utc)
+    await users.update_one(
+        {"_id": target_id},
+        {"$set": {
+            "blacklisted": True,
+            "blacklisted_at": now,
+            "blacklisted_by": update.effective_user.id,
+            "name": target_name,
+            "username": getattr(target_user_obj, "username", None) if target_user_obj else None,
+        }},
+        upsert=True,
+    )
+
+    await update.effective_message.reply_html(
+        "🚫 <b>USER BLACKLISTED</b>\n\n"
+        f"👤 <b>{html.escape(target_name)}</b>\n"
+        f"🆔 <code>{target_id}</code>\n\n"
+        "🔒 Ab ye user Vanya ko use nahi kar sakta."
+    )
+
+
+async def unblacklist(update, context):
+    """Owner-only removal from the bot blacklist."""
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.effective_message.reply_text("⛔ Owner only.")
+        return
+
+    target_id, target_user_obj = await _resolve_user_id(update, context)
+    if not target_id:
+        await update.effective_message.reply_html(
+            "♻️ <b>Unblacklist User</b>\n\n"
+            "Reply to the user's message with <code>/unblacklist</code>\n"
+            "or use <code>/unblacklist &lt;user_id&gt;</code>."
+        )
+        return
+
+    existing = await get_user(target_id)
+    if not existing or not existing.get("blacklisted", False):
+        await update.effective_message.reply_text("ℹ️ Ye user blacklist mein nahi hai.")
+        return
+
+    await users.update_one(
+        {"_id": target_id},
+        {"$set": {"blacklisted": False},
+         "$unset": {"blacklisted_at": "", "blacklisted_by": ""}},
+    )
+
+    target_name = (
+        target_user_obj.full_name
+        if target_user_obj
+        else str(existing.get("name") or f"User {target_id}")
+    )
+    await update.effective_message.reply_html(
+        "♻️ <b>USER UNBLACKLISTED</b>\n\n"
+        f"👤 <b>{html.escape(target_name)}</b>\n"
+        f"🆔 <code>{target_id}</code>\n\n"
+        "✅ Ab ye user Vanya ko dobara use kar sakta hai."
+    )
+
+
+async def blacklist_message_guard(update, context):
+    """Stop blacklisted users before any normal command/chat/game handler runs."""
+    user = update.effective_user
+    if not user or user.id == OWNER_ID:
+        return
+
+    try:
+        record = await get_user(user.id)
+    except Exception:
+        return
+
+    if not record or not record.get("blacklisted", False):
+        return
+
+    message = update.effective_message
+    if not message:
+        return
+
+    await message.reply_html(
+        "🚫 <b>ACCESS BLOCKED</b>\n\n"
+        "Aap Vanya se blacklisted ho.\n"
+        "Bot ke commands, chat aur games aapke liye disabled hain."
+    )
+
+
+async def blacklist_callback_guard(update, context):
+    """Block blacklisted users from using inline buttons too."""
+    query = update.callback_query
+    user = query.from_user if query else None
+    if not query or not user or user.id == OWNER_ID:
+        return
+
+    try:
+        record = await get_user(user.id)
+    except Exception:
+        return
+
+    if not record or not record.get("blacklisted", False):
+        return
+
+    try:
+        await query.answer(
+            "🚫 Aap Vanya se blacklisted ho.",
+            show_alert=True,
+        )
+    except Exception:
+        pass
 
 def broadcast_target_kb():
     return kb([
@@ -4239,6 +4388,7 @@ async def main():
         "scribble":scribble,"kingdomwars":kingdomwars,"subway":street_rush_cmd,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
+        "blacklist":blacklist,"unblacklist":unblacklist,
     }
     for name,fn in commands.items():
         app.add_handler(CommandHandler(name,fn))
@@ -4278,6 +4428,7 @@ async def main():
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
         "unmute": "Unmute a user", "purge": "Delete recent messages", "chatstatus": "Check group chat access", "end": "End all active games in this group",
+        "blacklist": "Blacklist a user (Owner only)", "unblacklist": "Remove a user from blacklist (Owner only)",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
@@ -4312,9 +4463,13 @@ async def main():
                 scope=BotCommandScopeChat(chat_id=sudo_id),
             )
 
+    # Blacklist guard runs before every normal message/command handler.
+    # Owner is always exempt so /unblacklist can be used safely.
+    app.add_handler(MessageHandler(filters.ALL, blacklist_message_guard, block=True), group=-3)
     app.add_handler(MessageHandler(filters.ALL, capture_owner_custom_emojis, block=False), group=-2)
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
     app.add_handler(ChatMemberHandler(log_bot_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=-1)
+    app.add_handler(CallbackQueryHandler(blacklist_callback_guard, block=True), group=-3)
     app.add_handler(CallbackQueryHandler(callback))
 
     # Word games accept a plain typed word. This handler runs before Vanya's
