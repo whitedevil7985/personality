@@ -56,6 +56,19 @@ if not TOKEN:
         "(or create a local .env file for local development)."
     )
 
+# Shared AI runtime state. Keep these in the entrypoint for now because the
+# provider handlers update them across requests; this also makes startup
+# deterministic after the handler modularization.
+_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
+_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0}
+_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_FAILURE_THRESHOLD = max(1, int(os.getenv("AI_PROVIDER_FAILURE_THRESHOLD", "3")))
+_AI_PROVIDER_LOG_COOLDOWN = max(10.0, float(os.getenv("AI_PROVIDER_LOG_COOLDOWN_SECONDS", "300")))
+_AI_HTTP_SESSION = None
+_AI_LOGGER_BOT = None
+
+
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                        VANYA UI                             ║
 # ╚══════════════════════════════════════════════════════════════╝
