@@ -30,7 +30,7 @@ STAFF_COMMANDS = {
     "blacklist": "Blacklist a user (Owner only)",
     "unblacklist": "Remove a user from blacklist (Owner only)",
     "log": "View recent logger events (Owner only)",
-    "aistats": "View today's AI API usage by provider (Owner only)",
+    "aistats": "View today's AI API request usage by provider (Owner only)",
     "revealgrid": "Reveal the Wordgrid answer (Owner/Sudo)",
     "revealwordseek": "Reveal the Wordseek answer (Owner/Sudo)",
 }
@@ -108,7 +108,7 @@ async def aistats(update, context):
 
         for provider in providers:
             count = totals.get(provider, 0)
-            lines.append(f"🔹 <b>{html.escape(labels[provider])}</b>: <b>{count}</b> messages")
+            lines.append(f"🔹 <b>{html.escape(labels[provider])}</b>: <b>{count}</b> API requests")
             rows = users_by_provider.get(provider, [])[:limit]
             if rows:
                 lines.append("   👤 <b>Used for:</b>")
@@ -129,7 +129,7 @@ async def aistats(update, context):
             lines.append("")
 
         lines.append(f"╭━━━〔 🧮 <b>TOTAL</b> 〕━━━╮")
-        lines.append(f"┃ 💬 AI API replies today: <b>{total}</b>")
+        lines.append(f"┃ 💬 AI API requests today: <b>{total}</b>")
         lines.append("╰━━━━━━━━━━━━━━━━━━━━╯")
         output = "\n".join(lines)
 
