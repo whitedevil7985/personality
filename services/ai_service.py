@@ -371,6 +371,35 @@ def _compact_vanya_reply(answer, max_words=25, max_lines=2):
     return compact
 
 
+def _extract_chatgp_text(data):
+    """Extract text from common nested JSON response shapes."""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data.strip()
+    if isinstance(data, list):
+        for item in data:
+            value = _extract_chatgp_text(item)
+            if value:
+                return value
+        return ""
+    if isinstance(data, dict):
+        for key in ("response", "answer", "reply", "text", "output", "content", "message"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, (dict, list)):
+                value = _extract_chatgp_text(value)
+                if value:
+                    return value
+        for key in ("choices", "data", "result", "completion"):
+            value = data.get(key)
+            if isinstance(value, (dict, list, str)):
+                value = _extract_chatgp_text(value)
+                if value:
+                    return value
+    return ""
+
 def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     """Remove accidental internal implementation details before sending."""
     text = str(answer or "").strip()
@@ -717,20 +746,12 @@ async def _call_chatgp_api(text_value):
                 data = await resp.json(content_type=None)
             except Exception:
                 data = {"response": raw}
-            if isinstance(data, str):
-                answer = data.strip()
-            else:
-                answer = str(
-                    data.get("response")
-                    or data.get("answer")
-                    or data.get("reply")
-                    or data.get("text")
-                    or ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
-                    or data.get("output")
-                    or ""
-                ).strip()
+            answer = _extract_chatgp_text(data)
             if not answer:
-                await _set_ai_provider_status("chatgp", False, "Empty response")
+                shape = type(data).__name__
+                if isinstance(data, dict):
+                    shape = "dict:" + ",".join(list(data.keys())[:8])
+                await _set_ai_provider_status("chatgp", False, f"Empty response ({shape})")
                 return None
             await _set_ai_provider_status("chatgp", True)
             return answer
