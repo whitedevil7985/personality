@@ -443,21 +443,24 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
 
     async def run_provider(name, fn):
         try:
+            if usage_context:
+                # Count the provider request as soon as it is launched. With
+                # the primary-provider race, both APIs may receive the same
+                # user message even though only one reply is selected.
+                asyncio.create_task(record_ai_usage(
+                    name,
+                    usage_context.get("user_id"),
+                    usage_context.get("user_name"),
+                    usage_context.get("username"),
+                    usage_context.get("chat_id"),
+                    usage_context.get("chat_type"),
+                    usage_context.get("chat_title"),
+                ))
             answer = await asyncio.wait_for(fn(prompt), timeout=timeouts[name])
             safe = _sanitize_vanya_reply(
                 answer, max_words=max_words, max_lines=max_lines
             ) if answer else ""
             if safe:
-                if usage_context:
-                    asyncio.create_task(record_ai_usage(
-                        name,
-                        usage_context.get("user_id"),
-                        usage_context.get("user_name"),
-                        usage_context.get("username"),
-                        usage_context.get("chat_id"),
-                        usage_context.get("chat_type"),
-                        usage_context.get("chat_title"),
-                    ))
                 return name, safe, None
             return name, None, "no usable response"
         except asyncio.TimeoutError:
