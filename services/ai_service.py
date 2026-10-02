@@ -1,0 +1,934 @@
+"""Vanya AI service.
+
+Owns provider fallback, rate limiting, memory context, reply sanitization and
+AI-related runtime state. It is loaded after the core bot namespace and UI
+logging helpers are initialized.
+"""
+import sys as _sys
+_core = _sys.modules.get("bot") or _sys.modules["__main__"]
+globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")})
+del _core, _sys
+
+# AI runtime state lives here so assignments made by AI functions stay in the
+# same module that owns the provider/session lifecycle.
+_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
+_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0}
+_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_FAILURE_THRESHOLD = max(1, int(os.getenv("AI_PROVIDER_FAILURE_THRESHOLD", "3")))
+_AI_PROVIDER_LOG_COOLDOWN = max(10.0, float(os.getenv("AI_PROVIDER_LOG_COOLDOWN_SECONDS", "300")))
+_AI_HTTP_SESSION = None
+_AI_LOGGER_BOT = None
+
+def set_ai_logger_bot(bot):
+    global _AI_LOGGER_BOT
+    _AI_LOGGER_BOT = bot
+
+def _set_ai_provider_status(provider, active, detail=""):
+    """Track health without treating one slow request as a provider outage."""
+    global _AI_PROVIDER_STATUS
+    if provider not in _AI_PROVIDER_STATUS:
+        return
+
+    now = time.monotonic()
+    previous = _AI_PROVIDER_STATUS[provider]
+
+    if active:
+        _AI_PROVIDER_FAILURES[provider] = 0
+        _AI_PROVIDER_LAST_FAILURE[provider] = 0.0
+        _AI_PROVIDER_STATUS[provider] = True
+        should_log = previous is None or previous is False
+    else:
+        _AI_PROVIDER_FAILURES[provider] = _AI_PROVIDER_FAILURES.get(provider, 0) + 1
+        _AI_PROVIDER_LAST_FAILURE[provider] = now
+        if _AI_PROVIDER_FAILURES[provider] < _AI_PROVIDER_FAILURE_THRESHOLD:
+            return
+        _AI_PROVIDER_STATUS[provider] = False
+        should_log = previous is not False
+
+    bot = _AI_LOGGER_BOT
+    if bot is None or not should_log:
+        return
+    if now - _AI_PROVIDER_LAST_LOG.get(provider, 0.0) < _AI_PROVIDER_LOG_COOLDOWN:
+        return
+    _AI_PROVIDER_LAST_LOG[provider] = now
+
+    label = "Elite LLM" if provider == "elite" else "ChatGP"
+    if active:
+        message = (
+            f"🟢 <b>{label} API ACTIVE</b>\n"
+            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>"
+        )
+    else:
+        message = (
+            f"🟠 <b>{label} API SLOW/UNSTABLE</b>\n"
+            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>\n"
+            f"Failures: <code>{_AI_PROVIDER_FAILURES[provider]}</code>\n"
+            f"Last error: <code>{html.escape(str(detail)[:250])}</code>"
+        )
+    await log_event(type("AIStatusContext", (), {"bot": bot})(), message)
+
+_AI_PROVIDER_MESSAGES = {
+    "elite": "Elite LLM",
+    "chatgp": "ChatGP",
+}
+
+_AI_HTTP_SESSION_LOCK = asyncio.Lock()
+
+# Elite LLM public defaults are 10 chat requests/10 seconds and
+# 60 chat requests/60 seconds. Keep a local limiter so a busy group does
+# not create a thundering herd of 429s at the provider.
+_AI_RATE_LOCK = asyncio.Lock()
+_AI_RATE_EVENTS_10S = deque()
+_AI_RATE_EVENTS_60S = deque()
+_AI_CONCURRENCY = max(1, int(os.getenv("AI_CONCURRENCY", "16")))
+_AI_SEMAPHORE = asyncio.Semaphore(_AI_CONCURRENCY)
+
+def _ai_rate_cleanup(now):
+    while _AI_RATE_EVENTS_10S and now - _AI_RATE_EVENTS_10S[0] >= 10:
+        _AI_RATE_EVENTS_10S.popleft()
+    while _AI_RATE_EVENTS_60S and now - _AI_RATE_EVENTS_60S[0] >= 60:
+        _AI_RATE_EVENTS_60S.popleft()
+
+async def _wait_for_ai_slot():
+    while True:
+        async with _AI_RATE_LOCK:
+            now = time.monotonic()
+            _ai_rate_cleanup(now)
+            if len(_AI_RATE_EVENTS_10S) < 10 and len(_AI_RATE_EVENTS_60S) < 60:
+                _AI_RATE_EVENTS_10S.append(now)
+                _AI_RATE_EVENTS_60S.append(now)
+                return True
+            wait_10 = (10 - (now - _AI_RATE_EVENTS_10S[0])) if _AI_RATE_EVENTS_10S else 0
+            wait_60 = (60 - (now - _AI_RATE_EVENTS_60S[0])) if _AI_RATE_EVENTS_60S else 0
+            delay = max(0.05, wait_10, wait_60)
+        await asyncio.sleep(delay)
+
+async def _try_get_ai_slot(max_wait=0.8):
+    """Get an Elite slot quickly; skip to fallback instead of queueing users."""
+    deadline = time.monotonic() + max(0.05, float(max_wait))
+    while time.monotonic() < deadline:
+        async with _AI_RATE_LOCK:
+            now = time.monotonic()
+            _ai_rate_cleanup(now)
+            if len(_AI_RATE_EVENTS_10S) < 10 and len(_AI_RATE_EVENTS_60S) < 60:
+                _AI_RATE_EVENTS_10S.append(now)
+                _AI_RATE_EVENTS_60S.append(now)
+                return True
+            wait_10 = (10 - (now - _AI_RATE_EVENTS_10S[0])) if _AI_RATE_EVENTS_10S else 0
+            wait_60 = (60 - (now - _AI_RATE_EVENTS_60S[0])) if _AI_RATE_EVENTS_60S else 0
+            delay = min(0.15, max(0.01, wait_10, wait_60))
+        await asyncio.sleep(delay)
+    return False
+
+async def _get_ai_http_session():
+    global _AI_HTTP_SESSION
+    if _AI_HTTP_SESSION is not None and not _AI_HTTP_SESSION.closed:
+        return _AI_HTTP_SESSION
+    import aiohttp
+    async with _AI_HTTP_SESSION_LOCK:
+        if _AI_HTTP_SESSION is None or _AI_HTTP_SESSION.closed:
+            timeout = aiohttp.ClientTimeout(
+                total=max(4.5, float(os.getenv("AI_TIMEOUT_SECONDS", "5.0"))),
+                sock_connect=3.0,
+            )
+            connector = aiohttp.TCPConnector(
+                limit=max(20, _AI_CONCURRENCY + 4),
+                ttl_dns_cache=300,
+                enable_cleanup_closed=True,
+            )
+            _AI_HTTP_SESSION = aiohttp.ClientSession(timeout=timeout, connector=connector)
+    return _AI_HTTP_SESSION
+
+async def close_ai_http_session():
+    global _AI_HTTP_SESSION
+    if _AI_HTTP_SESSION is not None and not _AI_HTTP_SESSION.closed:
+        await _AI_HTTP_SESSION.close()
+    _AI_HTTP_SESSION = None
+
+def _parse_ts(ts):
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        if ts.tzinfo:
+            return ts.astimezone(timezone.utc).replace(tzinfo=None)
+        return ts
+    if isinstance(ts, str):
+        try:
+            v=datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            if v.tzinfo:
+                v=v.astimezone(timezone.utc).replace(tzinfo=None)
+            return v
+        except Exception:
+            return None
+    return None
+
+def _memory_entry_text(entry):
+    return str(entry.get("text", "")).strip() if isinstance(entry, dict) else str(entry).strip()
+
+def _memory_entry_ts(entry):
+    return entry.get("ts") if isinstance(entry, dict) else None
+
+def _active_memories(u):
+    memories=(u or {}).get("memory", []) if u else []
+    cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
+    active=[]
+    changed=False
+    for entry in memories:
+        value=_memory_entry_text(entry)
+        if not value:
+            changed=True; continue
+        ts=_parse_ts(_memory_entry_ts(entry))
+        if ts is not None and ts < cutoff:
+            changed=True; continue
+        if not isinstance(entry, dict) or ts is None:
+            active.append({"text":value[:180],"ts":datetime.utcnow()}); changed=True
+        else:
+            active.append({"text":value[:180],"ts":ts})
+    dedup={}
+    for item in active:
+        dedup[item["text"].casefold()]=item
+    return list(dedup.values())[-MAX_MEMORY:], changed
+
+def _history_text(u):
+    hist=u.get("chat_history", []) if u else []
+    cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
+    kept=[]
+    for x in hist:
+        if not isinstance(x, dict):
+            continue
+        ts=_parse_ts(x.get("ts"))
+        if ts is None or ts >= cutoff:
+            kept.append(x)
+    return "\n".join(f"{x.get('role','user')}: {str(x.get('text',''))[:1200]}" for x in kept[-MAX_HISTORY:])
+
+def _memory_text(u):
+    active,_=_active_memories(u)
+    return "\n".join(f"- {m['text']}" for m in active) or "- No saved facts yet."
+
+async def _prune_and_get_memories(user_id):
+    u=await get_user(user_id)
+    active,changed=_active_memories(u)
+    if changed:
+        await users.update_one({"_id":user_id},{"$set":{"memory":active[-MAX_MEMORY:]}})
+    return active
+
+async def remember_facts(user_id, text_value):
+    if not MEMORY_ENABLED or not text_value:
+        return
+    t=re.sub(r"\s+", " ", text_value.strip())
+    patterns=[
+        r"\b(?:my name is|call me) ([^.!?]{1,60})",
+        r"\b(?:mera naam) ([^.!?]{1,60})\s*(?:hai|he)",
+        r"\b(?:i am from|i'm from) ([^.!?]{1,60})",
+        r"\b(?:main|mai) ([^.!?]{1,60})\s*(?:se hoon|se hu|se ho)",
+        r"\b(?:i live in|i stay in) ([^.!?]{1,60})",
+        r"\b(?:mujhe|mujhko) ([^.!?]{1,80}) (?:pasand hai|accha lagta hai|achha lagta hai)",
+        r"\b(?:i like|i love|i enjoy) ([^.!?]{1,80})",
+        r"\b(?:my favorite|my favourite|mera fav(?:orite|ourite)?) (?:thing|game|movie|song|food|color|colour) is ([^.!?]{1,80})",
+        r"\bremember(?: this| that)?[:\-]?\s*(.{3,160})$",
+    ]
+    found=[]
+    for pat in patterns:
+        m=re.search(pat,t,re.I)
+        if m:
+            found.append(m.group(0).strip()[:180])
+    if not found:
+        return
+    current=await _prune_and_get_memories(user_id)
+    by_text={m["text"].casefold():m for m in current}
+    now=datetime.utcnow()
+    for fact in found:
+        by_text[fact.casefold()]={"text":fact,"ts":now}
+    await users.update_one({"_id":user_id},{"$set":{"memory":list(by_text.values())[-MAX_MEMORY:]}})
+
+async def _append_history(user_id, user_text, assistant_text):
+    now=datetime.utcnow()
+    await users.update_one(
+        {"_id":user_id},
+        {"$push":{"chat_history":{"$each":[
+            {"role":"user","text":str(user_text)[:3500],"ts":now},
+            {"role":"assistant","text":str(assistant_text)[:3500],"ts":now}
+        ],"$slice":-MAX_HISTORY}}},
+        upsert=True)
+
+async def _warm_ai_context_cache(user_id, force=False):
+    """Warm one user's chat context without blocking the current reply."""
+    if not user_id:
+        return
+    cached = _AI_CONTEXT_CACHE.get(user_id)
+    now = time.monotonic()
+    if (
+        not force
+        and cached
+        and now - float(cached.get("at", 0.0)) < _AI_CONTEXT_CACHE_TTL
+    ):
+        return
+    if user_id in _AI_CONTEXT_WARMING:
+        return
+    _AI_CONTEXT_WARMING.add(user_id)
+    try:
+        u = await get_user(user_id) or {}
+        _AI_CONTEXT_CACHE[user_id] = {
+            "history": _history_text(u),
+            "memory": _memory_text(u),
+            "at": time.monotonic(),
+        }
+    except Exception as exc:
+        print(f"[AI][DB] context warm skipped: {type(exc).__name__}: {exc}")
+    finally:
+        _AI_CONTEXT_WARMING.discard(user_id)
+
+
+def _get_cached_ai_context(user_id):
+    cached = _AI_CONTEXT_CACHE.get(user_id) or {}
+    return str(cached.get("history", "")), str(cached.get("memory", ""))
+
+
+async def _save_ai_context_after_reply(user_id):
+    # Let the persistent write finish first, then refresh the in-memory view
+    # for the next message. This refresh is deliberately background-only.
+    await _warm_ai_context_cache(user_id, force=True)
+
+
+def _privacy_quick_reply(text_value):
+    """Keep internal AI/provider implementation private from end users."""
+    t = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
+    if not t:
+        return None
+
+    technical_patterns = (
+        r"\bwhich\s+(?:ai\s+)?model\b",
+        r"\bwhat\s+(?:ai\s+)?model\b",
+        r"\bmodel\s*(?:name|version|used|use)\b",
+        r"\bwhich\s+(?:api|provider|service)\b",
+        r"\bwhat\s+(?:api|provider|service)\b",
+        r"\b(?:api|provider|endpoint)\s+(?:name|url|link|used|use)\b",
+        r"\b(?:api|provider)\s+(?:key|token)\b",
+        r"\b(?:source|full|original)\s+code\b",
+        r"\bgive\s+(?:me\s+)?(?:the\s+)?code\b",
+        r"\bshow\s+(?:me\s+)?(?:the\s+)?code\b",
+        r"\b(?:system|developer|hidden)\s+prompt\b",
+        r"\b(?:internal|private)\s+(?:prompt|config|configuration|implementation)\b",
+        r"\b(?:env|environment)\s+(?:variable|vars?)\b",
+        r"\b(?:api|bot)\s+(?:url|endpoint|base\s*url)\b",
+        r"\bhow\s+(?:does|do)\s+(?:you|u)\s+(?:work|work\s+internally)\b",
+        r"\b(?:fallback|routing)\s+(?:api|model|provider|logic)\b",
+    )
+    if any(re.search(p, t, re.I) for p in technical_patterns):
+        return random.choice([
+            "Hehe itne technical sawaal kyun 😜 main Vanya hu, bas mujhse baat karo.",
+            "Areee secret hai na 😌 main Vanya hu, technical details nahi batati.",
+            "Ufff tum toh meri wiring tak pahunch gaye 😂 internal cheezein private hain.",
+        ])
+    return None
+
+def _compact_vanya_reply(answer, max_words=25, max_lines=2):
+    """Keep normal Vanya replies short and Telegram-chat-like."""
+    text = re.sub(r"[ \t]+", " ", str(answer or "").strip())
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    text = "\n".join(lines[:max_lines])
+    words = re.findall(r"\S+", text)
+    if len(words) <= max_words:
+        return text
+    compact = " ".join(words[:max_words]).rstrip(" ,;:-")
+    if compact and compact[-1] not in ".!?…":
+        compact += "…"
+    return compact
+
+
+def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
+    """Remove accidental internal implementation details before sending."""
+    text = str(answer or "").strip()
+    if not text:
+        return ""
+    private_patterns = (
+        r"https?://[^\s<>]+",
+        r"(?i)\b(?:elite\s*llm|chatgp|gpt[- ]?[0-9.]+|openai|gemini|anthropic|claude|cerebras)\b",
+        r"(?i)\b(?:api[_ -]?key|api[_ -]?url|base[_ -]?url|endpoint|system prompt|developer prompt|environment variable|env variable)\b",
+        r"(?i)(?:\b503\b|\b502\b|\b429\b|\b500\b|service\s+(?:unavailable|busy)|temporarily\s+(?:busy|unavailable)|system\s+notification|AI\s+interface|接口暂时繁忙|系统通知|暂无有效回答|暂无有效回复|没有有效回答|没有有效回复|无有效回答|无有效回复|有效回答)",
+    )
+    if any(re.search(p, text, re.I) for p in private_patterns):
+        # Provider-generated error/status text is not a Vanya reply.
+        # Return empty so _fast_ai_answer can fail over to the next provider.
+        return ""
+    return _compact_vanya_reply(text, max_words=max_words, max_lines=max_lines)
+
+async def _fast_ai_answer(prompt, max_words=25, max_lines=2):
+    """Use the configured AI providers privately with automatic failover."""
+    providers = []
+
+    if ELITE_LLM_API_KEY:
+        providers.append(("elite", _call_elite_api))
+
+    if CHATGP_API_KEY:
+        providers.append(("chatgp", _call_chatgp_api))
+
+    if not providers:
+        return None
+
+    # Keep the failover fast: a stuck Elite request must not block ChatGP
+    # forever. The normal Elite HTTP session timeout still applies as well.
+    elite_timeout = max(
+        1.0,
+        float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "5.0")),
+    )
+
+    for provider_name, provider_call in providers:
+        try:
+            if provider_name == "elite":
+                answer = await asyncio.wait_for(
+                    provider_call(prompt),
+                    timeout=elite_timeout,
+                )
+            else:
+                answer = await provider_call(prompt)
+
+            if answer:
+                safe_answer = _sanitize_vanya_reply(answer, max_words=max_words, max_lines=max_lines)
+                if safe_answer:
+                    return safe_answer
+
+            print(f"[AI][FAILOVER] {provider_name} returned no usable response; trying next provider.")
+        except asyncio.TimeoutError:
+            print(f"[AI][FAILOVER] {provider_name} timed out; trying next provider.")
+        except Exception as exc:
+            print(
+                f"[AI][FAILOVER] {provider_name} failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    return None
+def _instant_chat_reply(text_value: str):
+    """Instant local replies for very short DM small-talk messages."""
+    t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
+    if not t:
+        return None
+    replies = {
+        "hi": ["Hii 😄", "Hii yaar 💕", "Heyy 😌"],
+        "hii": ["Hii 😄", "Hii yaar 💕", "Heyy 😌"],
+        "hiii": ["Hiii 😄", "Heyy yaar 💕", "Hii 😌"],
+        "hello": ["Helloo 😄", "Hii yaar 💕", "Heyy 😌"],
+        "hey": ["Heyyy 😄", "Haan bolo 😌", "Hii yaar 💕"],
+        "acha": ["Haan yaar 😌", "Hehe achaaa 😄", "Acha ji 😄"],
+        "accha": ["Haan yaar 😌", "Hehe achaaa 😄", "Acha ji 😄"],
+        "achha": ["Haan yaar 😌", "Hehe achaaa 😄", "Acha ji 😄"],
+        "ohh": ["Hehe 😄", "Ohh haan 😌", "Samjhi 😄"],
+        "hmm": ["Hmm 😌", "Hmmm, bol na 😄", "Haanji 👀"],
+        "ok": ["Okayy 😌", "Theek hai yaar 😄", "Done 😌"],
+        "okay": ["Okayy 😌", "Theek hai yaar 😄", "Done 😌"],
+        "lol": ["😂", "Hahaha 😭", "Hehe 😄"],
+        "haha": ["Hehe 😄", "Hahaha 😂", "Accha ji 😂"],
+        "hehe": ["Hehe 😌", "😂", "Haan bolo 😄"],
+    }
+    choices = replies.get(t)
+    return random.choice(choices) if choices else None
+
+
+def _identity_quick_reply(text_value: str):
+    t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
+    # Keep common identity questions instant and consistent.
+    who = [
+        r"^who (?:are|r) (?:you|u)\??$",
+        r"^who are u\??$",
+        r"^tum (?:kon|kaun) ho\??$",
+        r"^aap (?:kon|kaun) ho\??$",
+        r"^(?:tumhara|aapka|tera|apka) naam kya hai\??$",
+        r"^(?:name|naam) kya hai\??$",
+        r"^what(?:s| is) your name\??$",
+        r"^kya naam hai\??$",
+    ]
+    for pat in who:
+        if re.search(pat, t):
+            return random.choice([
+                "Main Vanya hu 😊 Jaipur se, aur Pune mein design padh rahi hu.",
+                "Main Vanya hu 😊 Bas Vanya hi samjho, yaar.",
+                "Main Vanya hu 😊 Achha, introduction bhi dena padega kya? 😄",
+            ])
+    origin = [
+        r"^kahan se ho\??$", r"^kaha se ho\??$", r"^where are you from\??$",
+        r"^jaipur se ho\??$", r"^tum jaipur se ho\??$",
+    ]
+    for pat in origin:
+        if re.search(pat, t):
+            return random.choice([
+                "Jaipur se hu 😊",
+                "Jaipur meri hai yaar ✨",
+                "Jaipur se hu, Pune mein design padh rahi hu 😌",
+            ])
+    return None
+
+def _ai_headers(api_key):
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+async def _call_elite_api(text_value):
+    """Call the documented OpenAI-compatible Elite endpoint."""
+    import aiohttp
+    if not ELITE_LLM_API_KEY:
+        return None
+
+    session = await _get_ai_http_session()
+    base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
+    # Use the configured model directly. Trying a second model first can
+    # turn a healthy provider into an unnecessary 400/404 + latency.
+    fallback_models = [str(base_model).strip()] if str(base_model).strip() else []
+    max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
+    extra_models = [
+        str(x).strip()
+        for x in os.getenv("AI_FALLBACK_MODELS", "").split(",")
+        if str(x).strip()
+    ]
+    for model_name in extra_models:
+        if model_name not in fallback_models:
+            fallback_models.append(model_name)
+    last_error = None
+
+    async with _AI_SEMAPHORE:
+        for model_index, model_name in enumerate(fallback_models):
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": VANYA_SYSTEM_PROMPT},
+                    {"role": "user", "content": text_value},
+                ],
+                "stream": False,
+                "max_tokens": int(os.getenv("AI_MAX_TOKENS", "120")),
+            }
+            for attempt in range(max_attempts):
+                if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
+                    return None
+                try:
+                    async with session.post(
+                        f"{ELITE_LLM_BASE_URL}/chat/completions",
+                        headers=_ai_headers(ELITE_LLM_API_KEY),
+                        json=payload,
+                    ) as resp:
+                        raw = await resp.text()
+                        if resp.status == 429:
+                            last_error = RuntimeError(f"HTTP 429: {raw[:250]}")
+                            if attempt < max_attempts - 1:
+                                retry_after = resp.headers.get("Retry-After")
+                                try:
+                                    delay = float(retry_after) if retry_after else min(8.0, 1.5 ** attempt)
+                                except Exception:
+                                    delay = min(8.0, 1.5 ** attempt)
+                                await asyncio.sleep(max(0.25, delay))
+                                continue
+                            break
+                        if resp.status >= 500:
+                            last_error = RuntimeError(f"HTTP {resp.status}: {raw[:250]}")
+                            if attempt < max_attempts - 1:
+                                await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
+                                continue
+                            break
+                        if resp.status in (400, 404) and model_index < len(fallback_models) - 1:
+                            last_error = RuntimeError(f"Model rejected ({resp.status}): {raw[:220]}")
+                            break
+                        if resp.status >= 400:
+                            # Provider errors must not crash the Telegram handler.
+                            # Try the next configured fallback model when possible.
+                            last_error = RuntimeError(f"HTTP {resp.status}: {raw[:300]}")
+                            if model_index < len(fallback_models) - 1:
+                                break
+                            break
+                        data = await resp.json(content_type=None)
+                        answer = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+                        answer = str(answer or "").strip()
+                        if not answer:
+                            raise RuntimeError("Empty response")
+                        await _set_ai_provider_status("elite", True)
+                        return answer
+                except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+                    last_error = exc
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(min(8.0, 1.0 * (2 ** attempt)))
+                        continue
+                    break
+
+    detail = str(last_error or "request failed")
+    await _set_ai_provider_status("elite", False, detail)
+    return None
+
+
+async def _call_elite_api_stream(text_value, on_chunk):
+    """Stream Elite output so the user sees the reply as soon as tokens arrive."""
+    import aiohttp
+    if not ELITE_LLM_API_KEY:
+        return None
+
+    session = await _get_ai_http_session()
+    model_name = str(ELITE_LLM_MODEL or AI_MODEL or "gpt-5.6-luna").strip()
+    if not model_name:
+        return None
+
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": VANYA_SYSTEM_PROMPT},
+            {"role": "user", "content": text_value},
+        ],
+        "stream": True,
+        "max_tokens": int(os.getenv("AI_MAX_TOKENS", "120")),
+    }
+
+    if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
+        return None
+
+    # The shared session is configured for fast calls, but streaming needs a
+    # longer socket-read budget so a slow second token does not kill the stream.
+    timeout = aiohttp.ClientTimeout(
+        total=max(8.0, float(os.getenv("AI_STREAM_TIMEOUT_SECONDS", "10"))),
+        sock_connect=3.0,
+        sock_read=max(6.0, float(os.getenv("AI_STREAM_READ_TIMEOUT_SECONDS", "8"))),
+    )
+
+    collected = []
+    last_callback = 0.0
+    try:
+        async with session.post(
+            f"{ELITE_LLM_BASE_URL}/chat/completions",
+            headers=_ai_headers(ELITE_LLM_API_KEY),
+            json=payload,
+            timeout=timeout,
+        ) as resp:
+            if resp.status >= 400:
+                raw = await resp.text()
+                await _set_ai_provider_status(
+                    "elite", False, f"HTTP {resp.status}: {raw[:300]}"
+                )
+                return None
+
+            async for raw_line in resp.content:
+                line = raw_line.decode("utf-8", "ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data_line = line[5:].strip()
+                if data_line == "[DONE]":
+                    break
+                try:
+                    data = __import__("json").loads(data_line)
+                except Exception:
+                    continue
+
+                choices = data.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                piece = delta.get("content") or ""
+                if not piece:
+                    # Some compatible gateways may put the text directly in
+                    # message.content even while streaming.
+                    piece = ((choices[0].get("message") or {}).get("content") or "")
+                if not piece:
+                    continue
+
+                collected.append(str(piece))
+                current = "".join(collected)
+                now = time.monotonic()
+
+                # First chunk is pushed immediately; later edits are lightly
+                # throttled so Telegram's edit-message limits are not hit.
+                if now - last_callback >= 0.35 or len(collected) == 1:
+                    await on_chunk(current)
+                    last_callback = now
+
+            answer = "".join(collected).strip()
+            if answer:
+                await _set_ai_provider_status("elite", True)
+                await on_chunk(answer)
+                return answer
+
+    except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+        await _set_ai_provider_status("elite", False, f"{type(exc).__name__}: {exc}")
+    except Exception as exc:
+        await _set_ai_provider_status("elite", False, f"{type(exc).__name__}: {exc}")
+    return None
+
+
+async def _call_chatgp_api(text_value):
+    """Fallback ChatGP API: POST /api/chat with {prompt} and read {response}."""
+    import aiohttp
+    if not CHATGP_API_KEY:
+        await _set_ai_provider_status("chatgp", False, "CHATGP_API_KEY is not configured")
+        return None
+    # Reuse the same keep-alive session so fallback requests do not pay a new
+    # DNS/TCP/TLS connection setup cost every time.
+    session = await _get_ai_http_session()
+    timeout = aiohttp.ClientTimeout(total=max(1.5, float(CHATGP_TIMEOUT_SECONDS)))
+    try:
+        request_url = CHATGP_API_URL
+        async with session.post(
+            request_url,
+            headers=_ai_headers(CHATGP_API_KEY),
+            json={"prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}"},
+            timeout=timeout,
+        ) as resp:
+            raw = await resp.text()
+            if resp.status >= 400:
+                detail = f"HTTP {resp.status}: {raw[:300]}"
+                await _set_ai_provider_status("chatgp", False, detail)
+                return None
+            data = await resp.json(content_type=None)
+            answer = str(
+                data.get("response")
+                or ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+                or data.get("output")
+                or ""
+            ).strip()
+            if not answer:
+                await _set_ai_provider_status("chatgp", False, "Empty response")
+                return None
+            await _set_ai_provider_status("chatgp", True)
+            return answer
+    except Exception as exc:
+        await _set_ai_provider_status("chatgp", False, f"{type(exc).__name__}: {exc}")
+        return None
+
+
+async def probe_ai_providers():
+    """Probe providers at startup without allowing a bad model/config to crash the bot."""
+    probe = "Reply with only: OK"
+    results = {"elite": False, "chatgp": False}
+
+    if ELITE_LLM_API_KEY:
+        try:
+            results["elite"] = bool(await _call_elite_api(probe))
+        except Exception as exc:
+            print(f"[AI][PROBE] Elite probe failed: {type(exc).__name__}: {exc}")
+
+    if CHATGP_API_KEY:
+        try:
+            results["chatgp"] = bool(await _call_chatgp_api(probe))
+        except Exception as exc:
+            print(f"[AI][PROBE] ChatGP probe failed: {type(exc).__name__}: {exc}")
+
+    return results
+
+
+async def _save_chat_state_background(user_id, user_text, answer):
+    """Persist memory/history after the user already received the fast reply."""
+    try:
+        await remember_facts(user_id, user_text)
+    except Exception as exc:
+        print(f"[AI][DB] remember skipped: {type(exc).__name__}: {exc}")
+    try:
+        await _append_history(user_id, user_text, answer)
+    except Exception as exc:
+        print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
+    try:
+        await _save_ai_context_after_reply(user_id)
+    except Exception as exc:
+        print(f"[AI][DB] context refresh skipped: {type(exc).__name__}: {exc}")
+
+
+async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None):
+    """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
+    quick = _privacy_quick_reply(text_value)
+    if quick:
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        return quick
+
+    quick = _instant_chat_reply(text_value) if chat_type == "private" else None
+    if quick:
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        return quick
+
+    quick = _identity_quick_reply(text_value)
+    if quick and chat_type == "private":
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        return quick
+
+    # Never wait for MongoDB on the hot path. Use warm in-memory context;
+    # for a cold user, the first reply intentionally goes out without history
+    # and the cache is warmed in the background for the next message.
+    history, memory = _get_cached_ai_context(user.id)
+    if not history and not memory:
+        asyncio.create_task(_warm_ai_context_cache(user.id))
+
+    # Keep the LLM context compact for faster first-token/response latency.
+    history_limit = int(os.getenv("AI_PROMPT_HISTORY_CHARS", "3600" if chat_type == "private" else "6000"))
+    memory_limit = int(os.getenv("AI_PROMPT_MEMORY_CHARS", "1400" if chat_type == "private" else "2200"))
+    history = history[-history_limit:]
+    memory = memory[-memory_limit:]
+    detail_request = bool(re.search(
+        r"\b(?:detail|detailed|explain|explain\s+properly|full\s+explanation|"
+        r"poora\s+(?:detail|samjha)|detail\s+mein|vistaar\s+se)\b",
+        str(text_value or "").casefold(),
+    ))
+    max_words = 80 if detail_request else 25
+    max_lines = 4 if detail_request else 2
+
+    prompt = (
+        f"Chat type: {chat_type}. Group: {group_title or 'DM'}\n"
+        f"User display name: {user.first_name or 'User'}\n\n"
+        f"Saved memory (last {MEMORY_DAYS} days):\n{memory}\n\n"
+        f"Recent conversation:\n{history or '- None yet.'}\n\n"
+        f"User's new message:\n{text_value}\n\n"
+        "Reply only as Vanya. Be natural, concise, warm, and context-aware. "
+        f"Normal reply: maximum {max_words} words and {max_lines} short lines. "
+        "Do not write long paragraphs, lectures, or repeated explanations. "
+        "Only use the longer limit when the user explicitly asks for detail."
+    )
+
+    answer = await _fast_ai_answer(
+        prompt,
+        max_words=max_words,
+        max_lines=max_lines,
+    )
+    if answer:
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
+        return answer
+
+    # AI providers can occasionally be unavailable/rate-limited. Keep the
+    # user-facing fallback natural and context-aware instead of exposing
+    # network/API/latency details.
+    fallback_text = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
+    if fallback_text:
+        if fallback_text in {"acha", "accha", "achha", "oh", "ohh", "hmm", "hmmm"}:
+            fallback_pool = [
+                "Haanji 😌 bolo na.",
+                "Hehe, sun rahi hu 😄",
+                "Hmmm 👀 kya hua?",
+                "Acha ji 😌 aur batao.",
+            ]
+        elif "?" in fallback_text:
+            fallback_pool = [
+                "Haan, bolo na 😌",
+                "Hmm, sun rahi hu 👀",
+                "Batao yaar, kya hua? 😄",
+            ]
+        elif any(word in fallback_text.split() for word in ("haha", "hehe", "lol")):
+            fallback_pool = [
+                "Hehe 😂",
+                "Hahaha 😭",
+                "Accha ji 😂",
+            ]
+        else:
+            fallback_pool = [
+                "Haan yaar 😌 bolo.",
+                "Hmm, sun rahi hu 👀",
+                "Achhaaa 😄 aur batao.",
+                "Haanji, bolo na 💕",
+            ]
+        answer = random.choice(fallback_pool)
+    else:
+        answer = "Haanji 😌 bolo na."
+    asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
+    return answer
+
+async def _load_custom_emoji_map():
+    global _CUSTOM_EMOJI_CACHE, _CUSTOM_EMOJI_CACHE_AT
+    now = time.monotonic()
+    if _CUSTOM_EMOJI_CACHE and now - _CUSTOM_EMOJI_CACHE_AT < 300:
+        return _CUSTOM_EMOJI_CACHE
+    try:
+        _CUSTOM_EMOJI_CACHE = await get_custom_emoji_map()
+        _CUSTOM_EMOJI_CACHE_AT = now
+    except Exception as exc:
+        print(f"[CustomEmoji] {type(exc).__name__}: {exc}")
+    return _CUSTOM_EMOJI_CACHE
+
+
+def _is_emoji_codepoint(ch):
+    cp = ord(ch)
+    return (
+        0x1F000 <= cp <= 0x1FAFF or
+        0x2600 <= cp <= 0x27BF or
+        0x2300 <= cp <= 0x23FF or
+        cp in {0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122, 0x2139, 0x3030, 0x303D, 0x3297, 0x3299}
+    )
+
+
+def _strip_non_custom_emoji(text_value):
+    """Remove plain Unicode emoji while leaving normal text untouched."""
+    out = []
+    i = 0
+    value = str(text_value or "")
+    while i < len(value):
+        ch = value[i]
+        if _is_emoji_codepoint(ch):
+            i += 1
+            while i < len(value):
+                cp = ord(value[i])
+                if cp in (0xFE0E, 0xFE0F, 0x200D) or 0x1F3FB <= cp <= 0x1F3FF or 0x20E3 <= cp <= 0x20FF:
+                    i += 1
+                    continue
+                if _is_emoji_codepoint(value[i]):
+                    i += 1
+                    continue
+                break
+            continue
+        if ord(ch) in (0xFE0E, 0xFE0F):
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+async def _premiumize_text(text_value):
+    """Sanitize AI text before sending it to Telegram.
+
+    AI/provider output must never expose Telegram custom-emoji markup or
+    emoji-id values. Keep the visible text only; custom emoji rendering is
+    intentionally disabled here so raw IDs can never leak to users.
+    """
+    text_value = str(text_value or "")
+
+    # Remove complete custom-emoji tags and their attributes.
+    text_value = re.sub(
+        r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
+        r"\\1",
+        text_value,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # Also handle malformed/incomplete tags produced by an AI provider.
+    text_value = re.sub(r"<tg-emoji\\b[^>]*>", "", text_value, flags=re.IGNORECASE)
+    text_value = re.sub(r"</tg-emoji>", "", text_value, flags=re.IGNORECASE)
+    # Never let an emoji-id attribute/value appear as visible chat text.
+    text_value = re.sub(r"\\bemoji-id\\s*=\\s*[\\\"']?[^\\s>\\\"']+[\\\"']?", "", text_value, flags=re.IGNORECASE)
+    text_value = re.sub(r"\\bemoji[_ -]?id\\s*[:=]\\s*\\d+", "", text_value, flags=re.IGNORECASE)
+
+    # Remove any other raw HTML tags that a provider may emit.
+    text_value = re.sub(r"<[^>]+>", "", text_value)
+
+    # Telegram parse_mode=HTML requires HTML escaping.
+    return html.escape(text_value), False
+
+
+async def send_vanya_reply(update, text_value):
+    try:
+        rendered, _ = await _premiumize_text(text_value)
+    except Exception as exc:
+        print(f"[CustomEmoji] sanitizing failed: {type(exc).__name__}: {exc}")
+        rendered = html.escape(str(text_value or ""))
+
+    if AI_DISCLOSURE and update.effective_chat.type=="private":
+        u=await get_user(update.effective_user.id)
+        if not u.get("ai_disclosure_sent"):
+            disclosure, _ = await _premiumize_text(
+                "Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
+            )
+            await update.effective_chat.send_message(disclosure, parse_mode="HTML")
+            await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
+
+    await update.message.reply_text(rendered, parse_mode="HTML")
+
+async def cleanup_expired_memory():
+    cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
+    try:
+        await users.update_many({}, {"$pull":{
+            "chat_history":{"ts":{"$lt":cutoff}},
+            "memory":{"ts":{"$lt":cutoff}},
+            "memories":{"ts":{"$lt":cutoff}}
+        }})
+    except Exception as exc:
+        print(f"[MemoryCleanup] {type(exc).__name__}: {exc}")
+
+# ───────────────────── callbacks + chat ─────────────────────
