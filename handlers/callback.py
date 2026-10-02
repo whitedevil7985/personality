@@ -314,7 +314,7 @@ async def callback(update,context):
                 "After choosing, send <code>/broadcast Your message</code> "
                 "or reply to any message/media with <code>/broadcast</code>.\n\n"
                 "🔒 <i>Owner/Sudo only.</i>",
-                parse_mode="HTML", reply_markup=broadcast_target_kb()
+                parse_mode="HTML", reply_markup=await broadcast_target_kb()
             )
             return
         if action.startswith("broadcastmode:"):
