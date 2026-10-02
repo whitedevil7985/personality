@@ -815,6 +815,9 @@ async def authlist(update, context):
 
 async def memory(update, context):
     await ensure_user(update.effective_user)
+    # ai_service is imported after owner.py during bot startup, so resolve
+    # the memory helper at call time rather than during module import.
+    from services.ai_service import _prune_and_get_memories
     facts = await _prune_and_get_memories(update.effective_user.id)
     if not facts:
         await update.message.reply_text("🧠 I don't have any saved facts about you yet.")
