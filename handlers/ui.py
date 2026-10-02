@@ -63,11 +63,25 @@ def game_room_ui(key, body, target="cat:games"):
     ), game_chat_kb(key, target)
 
 async def log_event(context, text):
-    """Send an owner-configured event log to the logger chat."""
+    """Persist an event and send it to the configured logger chat."""
+    # Keep a MongoDB copy so the owner can inspect recent logs later with /log.
+    try:
+        await logs.insert_one({
+            "text": str(text),
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as exc:
+        print(f"[LoggerDB] {type(exc).__name__}: {exc}")
+
     if not LOGGER_CHAT_ID:
         return
     try:
-        await context.bot.send_message(chat_id=LOGGER_CHAT_ID, text=text, parse_mode="HTML", disable_web_page_preview=True)
+        await context.bot.send_message(
+            chat_id=LOGGER_CHAT_ID,
+            text=text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
     except Exception:
         # Logging must never break normal bot operation.
         pass
