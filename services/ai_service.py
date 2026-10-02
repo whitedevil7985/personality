@@ -389,52 +389,45 @@ def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     return _compact_vanya_reply(text, max_words=max_words, max_lines=max_lines)
 
 async def _fast_ai_answer(prompt, max_words=25, max_lines=2):
-    """Use the configured AI providers privately with automatic failover."""
+    """Race configured providers so one slow endpoint does not block chat."""
     providers = []
-
-    # ChatGP can be public or authenticated; the API key must not
-    # determine whether fallback is attempted.
     if ELITE_LLM_API_KEY:
         providers.append(("elite", _call_elite_api))
-
     if CHATGP_API_URL:
         providers.append(("chatgp", _call_chatgp_api))
-
     if not providers:
         return None
 
-    # Keep the failover fast: a stuck Elite request must not block ChatGP
-    # forever. The normal Elite HTTP session timeout still applies as well.
-    elite_timeout = max(
-        1.0,
-        float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "5.0")),
+    elite_timeout = max(1.0, float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "4.0")))
+    chatgp_timeout = max(1.5, float(os.getenv("CHATGP_TIMEOUT_SECONDS", "6.0")))
+
+    async def run_provider(name, fn):
+        timeout = elite_timeout if name == "elite" else chatgp_timeout
+        try:
+            answer = await asyncio.wait_for(fn(prompt), timeout=timeout)
+            safe = _sanitize_vanya_reply(
+                answer, max_words=max_words, max_lines=max_lines
+            ) if answer else ""
+            if safe:
+                return name, safe, None
+            return name, None, "no usable response"
+        except asyncio.TimeoutError:
+            return name, None, "timeout"
+        except Exception as exc:
+            return name, None, f"{type(exc).__name__}: {exc}"
+
+    results = await asyncio.gather(
+        *(run_provider(name, fn) for name, fn in providers),
+        return_exceptions=False,
     )
 
-    for provider_name, provider_call in providers:
-        try:
-            if provider_name == "elite":
-                answer = await asyncio.wait_for(
-                    provider_call(prompt),
-                    timeout=elite_timeout,
-                )
-            else:
-                answer = await provider_call(prompt)
-
-            if answer:
-                safe_answer = _sanitize_vanya_reply(answer, max_words=max_words, max_lines=max_lines)
-                if safe_answer:
-                    return safe_answer
-
-            print(f"[AI][FAILOVER] {provider_name} returned no usable response; trying next provider.")
-        except asyncio.TimeoutError:
-            print(f"[AI][FAILOVER] {provider_name} timed out; trying next provider.")
-        except Exception as exc:
-            print(
-                f"[AI][FAILOVER] {provider_name} failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
+    for name, answer, error in results:
+        if answer:
+            return answer
+        print(f"[AI][FAILOVER] {name} {error}; no usable AI reply.")
 
     return None
+
 def _instant_chat_reply(text_value: str):
     """Instant local replies for very short DM small-talk messages."""
     t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
