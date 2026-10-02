@@ -500,7 +500,15 @@ async def _call_elite_api(text_value):
     base_model = ELITE_LLM_MODEL or AI_MODEL or "gpt-5-mini"
     # Use the configured model directly. Trying a second model first can
     # turn a healthy provider into an unnecessary 400/404 + latency.
-    fallback_models = [str(base_model).strip()] if str(base_model).strip() else []
+    fallback_models = []
+    for candidate in (
+        base_model,
+        "gpt-5-mini",
+        "gpt-4o-mini",
+    ):
+        candidate = str(candidate or "").strip()
+        if candidate and candidate not in fallback_models:
+            fallback_models.append(candidate)
     max_attempts = max(1, int(os.getenv("AI_RETRY_ATTEMPTS", "1")))
     extra_models = [
         str(x).strip()
@@ -521,8 +529,9 @@ async def _call_elite_api(text_value):
                     {"role": "user", "content": text_value},
                 ],
                 "stream": False,
-                "max_tokens": int(os.getenv("AI_MAX_TOKENS", "120")),
             }
+            # Some GPT-5-compatible gateways reject the legacy max_tokens
+            # field. Keep the request to the portable chat-completions fields.
             for attempt in range(max_attempts):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
                     return None
@@ -677,19 +686,23 @@ async def _call_elite_api_stream(text_value, on_chunk):
 async def _call_chatgp_api(text_value):
     """Fallback ChatGP API: POST /api/chat with {prompt} and read {response}."""
     import aiohttp
-    if not CHATGP_API_KEY:
-        await _set_ai_provider_status("chatgp", False, "CHATGP_API_KEY is not configured")
-        return None
-    # Reuse the same keep-alive session so fallback requests do not pay a new
-    # DNS/TCP/TLS connection setup cost every time.
+    # The ChatGP endpoint may be configured with or without an auth token.
+    # Do not disable the fallback just because CHATGP_API_KEY is empty.
     session = await _get_ai_http_session()
     timeout = aiohttp.ClientTimeout(total=max(1.5, float(CHATGP_TIMEOUT_SECONDS)))
     try:
         request_url = CHATGP_API_URL
+        headers = {"Content-Type": "application/json"}
+        if CHATGP_API_KEY:
+            headers["Authorization"] = f"Bearer {CHATGP_API_KEY}"
+        payload = {
+            "prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}",
+            "message": text_value,
+        }
         async with session.post(
             request_url,
-            headers=_ai_headers(CHATGP_API_KEY),
-            json={"prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}"},
+            headers=headers,
+            json=payload,
             timeout=timeout,
         ) as resp:
             raw = await resp.text()
@@ -697,13 +710,22 @@ async def _call_chatgp_api(text_value):
                 detail = f"HTTP {resp.status}: {raw[:300]}"
                 await _set_ai_provider_status("chatgp", False, detail)
                 return None
-            data = await resp.json(content_type=None)
-            answer = str(
-                data.get("response")
-                or ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
-                or data.get("output")
-                or ""
-            ).strip()
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = {"response": raw}
+            if isinstance(data, str):
+                answer = data.strip()
+            else:
+                answer = str(
+                    data.get("response")
+                    or data.get("answer")
+                    or data.get("reply")
+                    or data.get("text")
+                    or ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+                    or data.get("output")
+                    or ""
+                ).strip()
             if not answer:
                 await _set_ai_provider_status("chatgp", False, "Empty response")
                 return None
