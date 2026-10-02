@@ -4,6 +4,66 @@ _core = _sys.modules.get("bot") or _sys.modules["__main__"]
 globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")})
 del _core, _sys
 
+CATEGORIES = {
+    "chat": (
+        "💬 <b>Chat</b>",
+        [
+            "/chat — Chat with Vanya",
+            "/gchat — Send a group chat message",
+            "/persona — Change your chat persona",
+            "/memory — View saved memory",
+            "/remember — Save a memory",
+            "/forgetme — Clear saved memory",
+        ],
+    ),
+    "economy": (
+        "💰 <b>Economy</b>",
+        [
+            "/bal — Check your balance",
+            "/daily — Claim daily coins and XP",
+            "/work — Work for coins",
+            "/give — Give coins to another user",
+            "/toprich — Richest users",
+            "/leaderboard — View leaderboard",
+            "/rank — View your rank",
+        ],
+    ),
+    "actions": (
+        "🗡 <b>Actions</b>",
+        [
+            "/rob — Rob another player",
+            "/protect — Buy protection",
+            "/shield — Check protection",
+            "/kill — Attack another player",
+            "/revive — Revive yourself",
+        ],
+    ),
+    "romance": (
+        "💕 <b>Romance</b>",
+        [
+            "/propose — Propose to another user",
+            "/accept — Accept a proposal",
+            "/reject — Reject a proposal",
+            "/divorce — End a marriage",
+            "/marriage — View marriage status",
+            "/couple — Pair group players",
+            "/topcouples — View group couples",
+        ],
+    ),
+    "admin": (
+        "🔐 <b>Admin</b>",
+        [
+            "/owner — Open the owner panel",
+            "/broadcast — Broadcast a message",
+            "/stats — View bot statistics",
+        ],
+    ),
+    "games": (
+        "🎮 <b>Games</b>",
+        [],
+    ),
+}
+
 async def category(update, context, name):
     title, lines = CATEGORIES[name]
     body = title + "\n\n" + "\n".join(lines)
