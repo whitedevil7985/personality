@@ -19,7 +19,7 @@ from telegram.request import HTTPXRequest
 
 from config import (
     TOKEN, OWNER_ID, DEVELOPER_NAME, OWNER_PROFILE_URL, UPDATES_URL, SUPPORT_URL, AI_GROUP_MODE, AI_GROUP_REPLY_ALL, AI_DM_MODE,
-    AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
+    AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, OLLAMA_API_KEY, OLLAMA_API_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
     MEMORY_DAYS, SUDO_IDS, LOGGER_CHAT_ID
 )
 from db import db, ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, logs, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
@@ -68,7 +68,7 @@ from handlers.owner import STAFF_COMMANDS, OWNER_ONLY_COMMANDS, staff_command_ob
 from handlers.menus import category, category_kb, help_cmd, help_menu_kb, game_menu_kb, street_rush_cmd, games_cmd, game_info, GAME_ITEMS, GAME_INFO, CATEGORIES
 
 # AI service must load before chat handlers so their module globals can see ai_reply/send_vanya_reply.
-from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait_for_ai_slot, _try_get_ai_slot, _get_ai_http_session, close_ai_http_session, _parse_ts, _memory_entry_text, _memory_entry_ts, _active_memories, _history_text, _memory_text, _prune_and_get_memories, remember_facts, _append_history, _warm_ai_context_cache, _get_cached_ai_context, _save_ai_context_after_reply, _privacy_quick_reply, _compact_vanya_reply, _sanitize_vanya_reply, _fast_ai_answer, _instant_chat_reply, _identity_quick_reply, _ai_headers, _call_elite_api, _call_elite_api_stream, _call_chatgp_api, probe_ai_providers, _save_chat_state_background, ai_reply, _load_custom_emoji_map, _is_emoji_codepoint, _strip_non_custom_emoji, _premiumize_text, send_vanya_reply, cleanup_expired_memory, set_ai_logger_bot
+from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait_for_ai_slot, _try_get_ai_slot, _get_ai_http_session, close_ai_http_session, _parse_ts, _memory_entry_text, _memory_entry_ts, _active_memories, _history_text, _memory_text, _prune_and_get_memories, remember_facts, _append_history, _warm_ai_context_cache, _get_cached_ai_context, _save_ai_context_after_reply, _privacy_quick_reply, _compact_vanya_reply, _sanitize_vanya_reply, _fast_ai_answer, _instant_chat_reply, _identity_quick_reply, _ai_headers, _call_elite_api, _call_elite_api_stream, _call_chatgp_api, _call_ollama_api, probe_ai_providers, _save_chat_state_background, ai_reply, _load_custom_emoji_map, _is_emoji_codepoint, _strip_non_custom_emoji, _premiumize_text, send_vanya_reply, cleanup_expired_memory, set_ai_logger_bot
 
 from handlers.callback import callback
 from handlers.chat import capture_owner_custom_emojis, _typing_heartbeat, chat, gchat, direct_game_answer, mention_chat
