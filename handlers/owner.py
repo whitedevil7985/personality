@@ -29,6 +29,7 @@ STAFF_COMMANDS = {
     "stats": "View bot group and user statistics (Owner/Sudo only)",
     "blacklist": "Blacklist a user (Owner only)",
     "unblacklist": "Remove a user from blacklist (Owner only)",
+    "log": "View recent logger events (Owner only)",
     "revealgrid": "Reveal the Wordgrid answer (Owner/Sudo)",
     "revealwordseek": "Reveal the Wordseek answer (Owner/Sudo)",
 }
@@ -36,7 +37,7 @@ OWNER_ONLY_COMMANDS = {
     "owner", "ownerpanel", "panel", "devpanel",
     "addemoji", "addsudo", "delsudo", "sudolist",
     "auth", "unauth", "authlist", "blacklist", "unblacklist",
-    "revealgrid", "revealwordseek",
+    "revealgrid", "revealwordseek", "log",
 }
 
 def staff_command_objects(owner=False):
@@ -47,6 +48,68 @@ def staff_command_objects(owner=False):
         items.append(BotCommand(command, description))
     return items
 
+
+
+async def log(update, context):
+    """Owner-only viewer for recent events saved by the logger."""
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.effective_message.reply_text("⛔ Owner only.")
+        return
+
+    try:
+        limit = int((context.args or ["10"])[0])
+    except (TypeError, ValueError):
+        limit = 10
+
+    limit = max(1, min(limit, 20))
+    rows = []
+    try:
+        cursor = logs.find(
+            {},
+            {"_id": 0, "text": 1, "created_at": 1},
+        ).sort("created_at", -1).limit(limit)
+        async for item in cursor:
+            timestamp = item.get("created_at")
+            if timestamp:
+                try:
+                    stamp = timestamp.astimezone(timezone.utc).strftime("%d-%m-%Y %H:%M:%S UTC")
+                except Exception:
+                    stamp = str(timestamp)
+            else:
+                stamp = "Unknown time"
+            body = str(item.get("text", "")).strip()
+            if body:
+                rows.append(f"🕒 <b>{html.escape(stamp)}</b>\n{body}")
+
+    except Exception as exc:
+        print(f"[OwnerLog] {type(exc).__name__}: {exc}")
+        await update.effective_message.reply_text("❌ Logger database read failed.")
+        return
+
+    if not rows:
+        await update.effective_message.reply_text(
+            "📋 Logger empty. Abhi koi saved event nahi hai."
+        )
+        return
+
+    # Telegram messages have a 4096-character limit. Keep the newest entries
+    # and trim each entry so /log remains reliable even for large events.
+    output = "╭━━━〔 📋 LOGGER LOGS 〕━━━╮\n╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+    for row in rows:
+        chunk = row[:900]
+        candidate = output + chunk + "\n\n"
+        if len(candidate) > 3900:
+            break
+        output = candidate
+
+    output += f"\nShowing latest <b>{min(limit, len(rows))}</b> events."
+    try:
+        await update.effective_message.reply_html(output)
+    except Exception as exc:
+        print(f"[OwnerLogRender] {type(exc).__name__}: {exc}")
+        await update.effective_message.reply_text(
+            "📋 Logs mil gaye, lekin Telegram message render nahi kar saka."
+        )
 
 async def is_owner_or_sudo(update):
     uid = update.effective_user.id if update.effective_user else 0
