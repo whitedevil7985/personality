@@ -65,15 +65,18 @@ from handlers.ui import kb, developer_button, home, start_menu, back, game_chat_
 from handlers.economy import toprich, balance, daily, work, _leaderboard_since, _leaderboard_label, leaderboard_kb, _render_leaderboard, leaderboard, give, target_user, _protection_until, _is_dead, rob, protect, shield, propose, _complete_proposal_callback, accept, divorce, couple, topcouples
 from handlers.moderation import is_admin, _moderation_ready, ban, unban, warn, mute, unmute, purge
 from handlers.owner import STAFF_COMMANDS, OWNER_ONLY_COMMANDS, staff_command_objects, is_owner_or_sudo, broadcast_target_kb, owner_panel_kb, owner_panel, owner_panel_command, _coin_admin_target, addcoins_admin, removecoins_admin, broadcast, addemoji, addsudo, delsudo, sudolist, auth, unauth, authlist, memory, remember_cmd, forgetme
+from handlers.menus import category, category_kb, help_cmd, help_menu_kb, game_menu_kb, street_rush_cmd, games_cmd, game_info, GAME_ITEMS, GAME_INFO
+
+# AI service must load before chat handlers so their module globals can see ai_reply/send_vanya_reply.
+from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait_for_ai_slot, _try_get_ai_slot, _get_ai_http_session, close_ai_http_session, _parse_ts, _memory_entry_text, _memory_entry_ts, _active_memories, _history_text, _memory_text, _prune_and_get_memories, remember_facts, _append_history, _warm_ai_context_cache, _get_cached_ai_context, _save_ai_context_after_reply, _privacy_quick_reply, _compact_vanya_reply, _sanitize_vanya_reply, _fast_ai_answer, _instant_chat_reply, _identity_quick_reply, _ai_headers, _call_elite_api, _call_elite_api_stream, _call_chatgp_api, probe_ai_providers, _save_chat_state_background, ai_reply, _load_custom_emoji_map, _is_emoji_codepoint, _strip_non_custom_emoji, _premiumize_text, send_vanya_reply, cleanup_expired_memory, set_ai_logger_bot
 
 from handlers.callback import callback
 from handlers.chat import capture_owner_custom_emojis, _typing_heartbeat, chat, gchat, direct_game_answer, mention_chat
 from handlers.social import persona, rank, kill, revive, topkill, marriage, reject
-
-from handlers.menus import category, category_kb, help_cmd, help_menu_kb, game_menu_kb, street_rush_cmd, games_cmd, game_info, GAME_ITEMS, GAME_INFO
 from handlers.system import stats, answer, end_game, chatstatus, ping
 from handlers.middleware import track_incoming_chat
-from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait_for_ai_slot, _try_get_ai_slot, _get_ai_http_session, close_ai_http_session, _parse_ts, _memory_entry_text, _memory_entry_ts, _active_memories, _history_text, _memory_text, _prune_and_get_memories, remember_facts, _append_history, _warm_ai_context_cache, _get_cached_ai_context, _save_ai_context_after_reply, _privacy_quick_reply, _compact_vanya_reply, _sanitize_vanya_reply, _fast_ai_answer, _instant_chat_reply, _identity_quick_reply, _ai_headers, _call_elite_api, _call_elite_api_stream, _call_chatgp_api, probe_ai_providers, _save_chat_state_background, ai_reply, _load_custom_emoji_map, _is_emoji_codepoint, _strip_non_custom_emoji, _premiumize_text, send_vanya_reply, cleanup_expired_memory, set_ai_logger_bot
+
+
 async def main():
     await cleanup_expired_memory()
     web_runner = await start_web_server()
