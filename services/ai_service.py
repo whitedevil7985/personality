@@ -893,7 +893,7 @@ async def _save_chat_state_background(user_id, user_text, answer):
         print(f"[AI][DB] context refresh skipped: {type(exc).__name__}: {exc}")
 
 
-async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None):
+async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None, chat_id=None):
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
     quick = _privacy_quick_reply(text_value)
     if quick:
@@ -950,7 +950,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
             "user_id": user.id,
             "user_name": getattr(user, "first_name", None),
             "username": getattr(user, "username", None),
-            "chat_id": None,
+            "chat_id": chat_id if chat_id is not None else (user.id if chat_type == "private" else None),
             "chat_type": chat_type,
             "chat_title": group_title if chat_type == "group" else "",
         },
