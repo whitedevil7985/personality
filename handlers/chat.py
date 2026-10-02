@@ -319,5 +319,12 @@ async def mention_chat(update,context):
     except Exception:
         pass
     group_title = getattr(update.effective_chat, "title", "") or ""
-    answer = await ai_reply(update.effective_user, text, "group", group_title)
-    await send_vanya_reply(update, answer)
+    try:
+        answer = await ai_reply(update.effective_user, text, "group", group_title)
+        await send_vanya_reply(update, answer)
+    except Exception as exc:
+        print(f"[GroupChat] {type(exc).__name__}: {exc}")
+        try:
+            await update.message.reply_text("Haanji 😌 bolo na.")
+        except Exception as reply_exc:
+            print(f"[GroupChat][Fallback] {type(reply_exc).__name__}: {reply_exc}")
