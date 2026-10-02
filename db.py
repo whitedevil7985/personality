@@ -21,6 +21,7 @@ games = db.games
 game_stats = db.game_stats
 custom_emojis = db.custom_emojis
 logs = db.logs
+ai_usage = db.ai_usage
 
 async def ensure_user(user):
     if not user:
@@ -55,6 +56,24 @@ async def track_group(chat):
 
 async def get_user(uid):
     return await users.find_one({"_id": uid})
+
+async def record_ai_usage(provider, user_id, user_name=None, username=None, chat_id=None, chat_type=None, chat_title=None):
+    """Persist one successful AI response for daily provider usage statistics."""
+    if not provider or not user_id:
+        return
+    now = datetime.now(timezone.utc)
+    await ai_usage.insert_one({
+        "provider": str(provider),
+        "user_id": int(user_id),
+        "user_name": str(user_name or "User")[:120],
+        "username": str(username or "")[:64],
+        "chat_id": int(chat_id) if chat_id is not None else None,
+        "chat_type": str(chat_type or ""),
+        "chat_title": str(chat_title or "")[:160],
+        "created_at": now,
+        "date_key": now.strftime("%Y-%m-%d"),
+    })
+
 
 async def add_coins(uid, amount):
     await users.update_one({"_id": uid}, {"$inc": {"coins": amount}}, upsert=True)
