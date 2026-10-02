@@ -11,10 +11,10 @@ del _core, _sys
 
 # AI runtime state lives here so assignments made by AI functions stay in the
 # same module that owns the provider/session lifecycle.
-_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None}
-_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0}
-_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0}
-_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0}
+_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None, "ollama": None}
+_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0, "ollama": 0}
+_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0, "ollama": 0.0}
+_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0, "ollama": 0.0}
 _AI_PROVIDER_FAILURE_THRESHOLD = max(1, int(os.getenv("AI_PROVIDER_FAILURE_THRESHOLD", "3")))
 _AI_PROVIDER_LOG_COOLDOWN = max(10.0, float(os.getenv("AI_PROVIDER_LOG_COOLDOWN_SECONDS", "300")))
 _AI_HTTP_SESSION = None
@@ -85,16 +85,23 @@ async def _set_ai_provider_status(provider, active, detail=""):
         return
     _AI_PROVIDER_LAST_LOG[provider] = now
 
-    label = "Elite LLM" if provider == "elite" else "ChatGP"
+    label = {"elite": "Elite LLM", "chatgp": "ChatGP", "ollama": "Ollama Cloud"}.get(provider, provider)
+    endpoint = (
+        (ELITE_LLM_BASE_URL + "/chat/completions")
+        if provider == "elite"
+        else CHATGP_API_URL
+        if provider == "chatgp"
+        else OLLAMA_API_URL
+    )
     if active:
         message = (
             f"🟢 <b>{label} API ACTIVE</b>\n"
-            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>"
+            f"Endpoint: <code>{html.escape(endpoint)}</code>"
         )
     else:
         message = (
             f"🟠 <b>{label} API SLOW/UNSTABLE</b>\n"
-            f"Endpoint: <code>{html.escape((ELITE_LLM_BASE_URL + '/chat/completions') if provider == 'elite' else CHATGP_API_URL)}</code>\n"
+            f"Endpoint: <code>{html.escape(endpoint)}</code>\n"
             f"Failures: <code>{_AI_PROVIDER_FAILURES[provider]}</code>\n"
             f"Last error: <code>{html.escape(str(detail)[:250])}</code>"
         )
@@ -424,14 +431,21 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2):
         providers.append(("elite", _call_elite_api))
     if CHATGP_API_URL:
         providers.append(("chatgp", _call_chatgp_api))
+    if OLLAMA_API_KEY and OLLAMA_API_URL:
+        providers.append(("ollama", _call_ollama_api))
     if not providers:
         return None
 
     elite_timeout = max(1.0, float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "4.0")))
     chatgp_timeout = max(1.5, float(os.getenv("CHATGP_TIMEOUT_SECONDS", "6.0")))
+    ollama_timeout = max(1.5, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "6.0")))
 
     async def run_provider(name, fn):
-        timeout = elite_timeout if name == "elite" else chatgp_timeout
+        timeout = (
+            elite_timeout if name == "elite"
+            else chatgp_timeout if name == "chatgp"
+            else ollama_timeout
+        )
         try:
             answer = await asyncio.wait_for(fn(prompt), timeout=timeout)
             safe = _sanitize_vanya_reply(
@@ -715,6 +729,68 @@ async def _call_elite_api_stream(text_value, on_chunk):
     return None
 
 
+async def _call_ollama_api(text_value):
+    """Call Ollama Cloud /api/chat and read message.content."""
+    import aiohttp
+    if not OLLAMA_API_KEY or not OLLAMA_API_URL:
+        return None
+
+    session = await _get_ai_http_session()
+    timeout = aiohttp.ClientTimeout(
+        total=max(1.5, float(OLLAMA_TIMEOUT_SECONDS))
+    )
+    headers = {
+        "Authorization": f"Bearer {OLLAMA_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": OLLAMA_MODEL or "gemma4:31b",
+        "messages": [
+            {"role": "system", "content": VANYA_SYSTEM_PROMPT},
+            {"role": "user", "content": text_value},
+        ],
+        "stream": False,
+    }
+
+    try:
+        async with session.post(
+            OLLAMA_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=timeout,
+        ) as resp:
+            raw = await resp.text()
+            if resp.status >= 400:
+                await _set_ai_provider_status(
+                    "ollama", False, f"HTTP {resp.status}: {raw[:300]}"
+                )
+                return None
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = {}
+
+            answer = ""
+            if isinstance(data, dict):
+                message = data.get("message")
+                if isinstance(message, dict):
+                    answer = str(message.get("content") or "").strip()
+                if not answer:
+                    answer = str(data.get("response") or data.get("content") or "").strip()
+
+            if not answer:
+                await _set_ai_provider_status("ollama", False, "Empty response")
+                return None
+
+            await _set_ai_provider_status("ollama", True)
+            return answer
+    except Exception as exc:
+        await _set_ai_provider_status(
+            "ollama", False, f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
 async def _call_chatgp_api(text_value):
     """Fallback ChatGP API: POST /api/chat with {prompt} and read {response}."""
     import aiohttp
@@ -763,7 +839,7 @@ async def _call_chatgp_api(text_value):
 async def probe_ai_providers():
     """Probe providers at startup without allowing a bad model/config to crash the bot."""
     probe = "Reply with only: OK"
-    results = {"elite": False, "chatgp": False}
+    results = {"elite": False, "chatgp": False, "ollama": False}
 
     if ELITE_LLM_API_KEY:
         try:
@@ -776,6 +852,12 @@ async def probe_ai_providers():
             results["chatgp"] = bool(await _call_chatgp_api(probe))
         except Exception as exc:
             print(f"[AI][PROBE] ChatGP probe failed: {type(exc).__name__}: {exc}")
+
+    if OLLAMA_API_KEY and OLLAMA_API_URL:
+        try:
+            results["ollama"] = bool(await _call_ollama_api(probe))
+        except Exception as exc:
+            print(f"[AI][PROBE] Ollama probe failed: {type(exc).__name__}: {exc}")
 
     return results
 
