@@ -29,7 +29,7 @@ async def ensure_user(user):
         {"$set": {"name": user.first_name or "User", "username": user.username},
          "$setOnInsert": {"coins": 1000, "xp": 0, "level": 1,
                           "warnings": 0, "protected_until": None,
-                          "partner": None, "pending_proposal": None, "group_ids": [], "daily": None, "kills": 0, "chat_history": [], "memories": [], "memory": [], "ai_disclosure_sent": False, "kills": 0, "is_sudo": False, "revived": False, "mines_active": False, "mines_set": [], "mines_safe": [], "mines_bet": 0, "streak": 0, "last_active": None, "spin_at": None, "quest_day": None, "quest_progress": 0, "achievements": []}},
+                          "partner": None, "pending_proposal": None, "group_ids": [], "daily": None, "kills": 0, "chat_history": [], "memories": [], "memory": [], "ai_disclosure_sent": False, "kills": 0, "is_sudo": False, "revived": False, "mines_active": False, "mines_set": [], "mines_safe": [], "mines_bet": 0, "streak": 0, "last_active": None, "spin_at": None, "quest_day": None, "quest_progress": 0, "achievements": [], "blacklisted": False}},
         upsert=True
     )
 
