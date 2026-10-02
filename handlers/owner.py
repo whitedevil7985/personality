@@ -231,67 +231,123 @@ async def broadcast_target_kb():
 
 
 def owner_panel_kb(owner_only=False, staff_access=False):
-    """Compact dashboard-style owner panel keyboard."""
-    rows = [
-        [InlineKeyboardButton("📢 Broadcast Center", callback_data="owner:broadcast")],
+    """Polished dashboard and category menus for Owner/Sudo controls."""
+    return kb([
+        [
+            InlineKeyboardButton("📡 Monitoring", callback_data="owner:monitor"),
+            InlineKeyboardButton("🛠 Management", callback_data="owner:manage"),
+        ],
+        [
+            InlineKeyboardButton("💰 Economy", callback_data="owner:economy"),
+            InlineKeyboardButton("🎮 Game Tools", callback_data="owner:games"),
+        ],
+        [
+            InlineKeyboardButton("📢 Broadcast", callback_data="owner:broadcast"),
+            InlineKeyboardButton("🧾 Commands", callback_data="owner:commands"),
+        ],
+        [InlineKeyboardButton("👑 User Access", callback_data="owner:users")],
+        [InlineKeyboardButton("❌ Close Panel", callback_data="owner:close")],
+    ])
+
+
+def owner_monitor_kb():
+    return kb([
         [
             InlineKeyboardButton("📊 AI API Stats", callback_data="owner:aistats"),
             InlineKeyboardButton("📈 Bot Stats", callback_data="owner:stats"),
         ],
+        [InlineKeyboardButton("📋 Logger", callback_data="owner:log")],
+        [InlineKeyboardButton("⟵ Dashboard", callback_data="owner:home")],
+    ])
+
+
+def owner_manage_kb(owner_only=False):
+    rows = [
+        [InlineKeyboardButton("📢 Broadcast Center", callback_data="owner:broadcast")],
         [
-            InlineKeyboardButton("📋 Logger", callback_data="owner:log"),
-            InlineKeyboardButton("🧾 Commands", callback_data="owner:commands"),
+            InlineKeyboardButton("🔐 Auth Groups", callback_data="owner:auth"),
+            InlineKeyboardButton("👑 Sudo Users", callback_data="owner:sudo"),
         ],
+        [InlineKeyboardButton("⟵ Dashboard", callback_data="owner:home")],
+    ]
+    if owner_only:
+        rows.insert(1, [
+            InlineKeyboardButton("➕ Add Sudo", callback_data="owner:addsudo"),
+            InlineKeyboardButton("➖ Del Sudo", callback_data="owner:delsudo"),
+        ])
+    return kb(rows)
+
+
+def owner_economy_kb():
+    return kb([
+        [InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")],
+        [InlineKeyboardButton("⟵ Dashboard", callback_data="owner:home")],
+    ])
+
+
+def owner_games_kb():
+    return kb([
+        [
+            InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid"),
+            InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek"),
+        ],
+        [InlineKeyboardButton("⟵ Dashboard", callback_data="owner:home")],
+    ])
+
+
+def owner_users_kb(owner_only=False):
+    rows = [
         [
             InlineKeyboardButton("👑 Sudo Users", callback_data="owner:sudo"),
             InlineKeyboardButton("🔐 Auth Groups", callback_data="owner:auth"),
         ],
-        [InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")],
+        [InlineKeyboardButton("⟵ Dashboard", callback_data="owner:home")],
     ]
-
-    if staff_access:
-        rows.append([
-            InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid"),
-            InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek"),
-        ])
-
     if owner_only:
-        rows.append([
-            InlineKeyboardButton("➕ Add Sudo", callback_data="owner:addsudo"),
-            InlineKeyboardButton("➖ Del Sudo", callback_data="owner:delsudo"),
-        ])
-        rows.append([
+        rows.insert(0, [
+            InlineKeyboardButton("🚫 Blacklist", callback_data="owner:blacklist"),
             InlineKeyboardButton("🎨 Premium Emoji", callback_data="owner:addemoji"),
         ])
-
-    rows.append([InlineKeyboardButton("❌ Close Panel", callback_data="owner:close")])
     return kb(rows)
 
 
 async def owner_panel(update, context):
-    """Private dashboard-style Owner/Sudo control panel."""
+    """Private dashboard-style Owner/Sudo control center."""
     if not update.effective_user:
         return
-
     if not await is_owner_or_sudo(update):
         await update.effective_message.reply_text("⛔ Owner/Sudo only.")
         return
 
     owner_only = update.effective_user.id == OWNER_ID
     role = "OWNER" if owner_only else "SUDO"
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+    try:
+        total_users = await users.count_documents({})
+        total_groups = await groups.count_documents({})
+        active_groups = await groups.count_documents({"active": {"$ne": False}})
+        today_ai = await ai_usage.count_documents({"date_key": today})
+    except Exception as exc:
+        print(f"[OwnerDashboardStats] {type(exc).__name__}: {exc}")
+        total_users = total_groups = active_groups = today_ai = 0
 
     panel_text = (
-        "╭━━━〔 👑 <b>VANYA CONTROL CENTER</b> 〕━━━╮\n"
-        f"┃ 🔒 Access: <b>{role}</b>\n"
-        "┃ ⚡ Quick controls & monitoring\n"
+        "╭━━━━━━━━━━━━━━━━━━━━━━━━━━╮\n"
+        "│ 👑 <b>VANYA CONTROL CENTER</b>\n"
+        "│ 🔒 Access: <b>" + role + "</b>\n"
+        "│ 🟢 Status: <b>ONLINE</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        "📡 <b>Monitor</b>\n"
-        "AI usage • bot stats • persistent logger\n\n"
-        "🛠 <b>Manage</b>\n"
-        "Broadcast • sudo • auth • economy\n\n"
-        "🎮 <b>Game Tools</b>\n"
-        "Private answer-reveal controls for active games\n\n"
-        "👇 <b>Select a control below</b>"
+        "┌─ <b>LIVE OVERVIEW</b> ─┐\n"
+        f"│ 👤 Users: <b>{total_users:,}</b>\n"
+        f"│ 💬 Active Groups: <b>{active_groups:,}</b>\n"
+        f"│ 🗂 Known Groups: <b>{total_groups:,}</b>\n"
+        f"│ 🤖 AI API Requests Today: <b>{today_ai:,}</b>\n"
+        "└─────────────────────────┘\n\n"
+        "📡 <b>Monitor</b> · health, stats & logs\n"
+        "🛠 <b>Manage</b> · broadcast & access controls\n"
+        "💰 <b>Economy</b> · coins & balance tools\n"
+        "🎮 <b>Game Tools</b> · private answer controls\n\n"
+        "👇 <b>Select a section</b>"
     )
 
     try:
