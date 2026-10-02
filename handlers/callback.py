@@ -124,6 +124,12 @@ async def callback(update,context):
         if action == "close":
             await q.edit_message_text("🔒 <b>Owner panel closed.</b>", parse_mode="HTML")
             return
+        if action == "aistats":
+            await aistats(update, context)
+            return
+        if action == "log":
+            await log(update, context)
+            return
         if action == "stats":
             try:
                 total_users = await users.count_documents({})
@@ -301,13 +307,23 @@ async def callback(update,context):
             )
             return
         if action == "home":
+            owner_only = q.from_user.id == OWNER_ID
+            role = "OWNER" if owner_only else "SUDO"
             await q.edit_message_text(
-                "╭━━━〔 👑 <b>VANYA OWNER PANEL</b> 〕━━━╮\n"
-                "┃ 🔒 <i>Owner/Sudo access only</i>\n"
-                "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                "Choose an owner control below.",
-                parse_mode="HTML", reply_markup=owner_panel_kb(
-                    owner_only=(q.from_user.id == OWNER_ID),
+                "╭━━━〔 👑 <b>VANYA CONTROL CENTER</b> 〕━━━╮\n"
+                f"┃ 🔒 Access: <b>{role}</b>\n"
+                "┃ ⚡ Quick controls & monitoring\n"
+                "╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                "📡 <b>Monitor</b>\n"
+                "AI usage • bot stats • persistent logger\n\n"
+                "🛠 <b>Manage</b>\n"
+                "Broadcast • sudo • auth • economy\n\n"
+                "🎮 <b>Game Tools</b>\n"
+                "Private answer-reveal controls for active games\n\n"
+                "👇 <b>Select a control below</b>",
+                parse_mode="HTML",
+                reply_markup=owner_panel_kb(
+                    owner_only=owner_only,
                     staff_access=await is_owner_or_sudo(update),
                 )
             )
