@@ -231,27 +231,45 @@ async def broadcast_target_kb():
 
 
 def owner_panel_kb(owner_only=False, staff_access=False):
+    """Compact dashboard-style owner panel keyboard."""
     rows = [
-        [InlineKeyboardButton("📢 Broadcast", callback_data="owner:broadcast")],
-        [InlineKeyboardButton("👑 Sudo Users", callback_data="owner:sudo"),
-         InlineKeyboardButton("🔐 Auth Groups", callback_data="owner:auth")],
-        [InlineKeyboardButton("📊 Stats", callback_data="owner:stats"),
-         InlineKeyboardButton("📊 Panel Commands", callback_data="owner:commands")],
+        [InlineKeyboardButton("📢 Broadcast Center", callback_data="owner:broadcast")],
+        [
+            InlineKeyboardButton("📊 AI API Stats", callback_data="owner:aistats"),
+            InlineKeyboardButton("📈 Bot Stats", callback_data="owner:stats"),
+        ],
+        [
+            InlineKeyboardButton("📋 Logger", callback_data="owner:log"),
+            InlineKeyboardButton("🧾 Commands", callback_data="owner:commands"),
+        ],
+        [
+            InlineKeyboardButton("👑 Sudo Users", callback_data="owner:sudo"),
+            InlineKeyboardButton("🔐 Auth Groups", callback_data="owner:auth"),
+        ],
+        [InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")],
     ]
+
     if staff_access:
-        rows.append([InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid")])
-    if staff_access:
-        rows.append([InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek")])
-        rows.append([InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")])
+        rows.append([
+            InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid"),
+            InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek"),
+        ])
+
     if owner_only:
-        rows.append([InlineKeyboardButton("➕ Add Sudo", callback_data="owner:addsudo"),
-                     InlineKeyboardButton("➖ Del Sudo", callback_data="owner:delsudo")])
-        rows.append([InlineKeyboardButton("🎨 Premium Emoji", callback_data="owner:addemoji")])
-    rows.append([InlineKeyboardButton("❌ Close", callback_data="owner:close")])
+        rows.append([
+            InlineKeyboardButton("➕ Add Sudo", callback_data="owner:addsudo"),
+            InlineKeyboardButton("➖ Del Sudo", callback_data="owner:delsudo"),
+        ])
+        rows.append([
+            InlineKeyboardButton("🎨 Premium Emoji", callback_data="owner:addemoji"),
+        ])
+
+    rows.append([InlineKeyboardButton("❌ Close Panel", callback_data="owner:close")])
     return kb(rows)
 
+
 async def owner_panel(update, context):
-    """Private Owner/Sudo panel showing the complete staff command set."""
+    """Private dashboard-style Owner/Sudo control panel."""
     if not update.effective_user:
         return
 
@@ -260,23 +278,20 @@ async def owner_panel(update, context):
         return
 
     owner_only = update.effective_user.id == OWNER_ID
-
-    visible_commands = []
-    for command, description in STAFF_COMMANDS.items():
-        if command in {"ownerpanel", "panel", "devpanel"}:
-            continue
-        if not owner_only and command in OWNER_ONLY_COMMANDS:
-            continue
-        visible_commands.append(f"• <code>/{command}</code> — {html.escape(description)}")
+    role = "OWNER" if owner_only else "SUDO"
 
     panel_text = (
-        "╭━━━〔 👑 <b>VANYA OWNER PANEL</b> 〕━━━╮\n"
-        "┃ 🔒 <i>Owner/Sudo access only</i>\n"
-        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        "<b>Available Staff Commands</b>\n"
-        + "\n".join(visible_commands)
-        + "\n\n"
-        "🎛 <b>Use the buttons below for the main controls.</b>"
+        "╭━━━〔 👑 <b>VANYA CONTROL CENTER</b> 〕━━━╮\n"
+        f"┃ 🔒 Access: <b>{role}</b>\n"
+        "┃ ⚡ Quick controls & monitoring\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "📡 <b>Monitor</b>\n"
+        "AI usage • bot stats • persistent logger\n\n"
+        "🛠 <b>Manage</b>\n"
+        "Broadcast • sudo • auth • economy\n\n"
+        "🎮 <b>Game Tools</b>\n"
+        "Private answer-reveal controls for active games\n\n"
+        "👇 <b>Select a control below</b>"
     )
 
     try:
@@ -290,7 +305,6 @@ async def owner_panel(update, context):
     except Exception as exc:
         print(f"[OwnerPanelRender] {type(exc).__name__}: {exc}")
         await update.effective_message.reply_html(panel_text)
-
 
 
 async def owner_panel_command(update, context):
