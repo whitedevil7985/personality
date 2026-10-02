@@ -9,6 +9,33 @@ _core = _sys.modules.get("bot") or _sys.modules["__main__"]
 globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")})
 del _core, _sys
 
+# Staff command visibility is owned by this module so the entrypoint
+# only needs to register handlers and build public/private command menus.
+STAFF_COMMANDS = {
+    "owner": "Open owner panel",
+    "ownerpanel": "Open owner panel",
+    "panel": "Open owner panel",
+    "devpanel": "Open owner panel",
+    "broadcast": "Broadcast to users, groups, or both (Owner/Sudo)",
+    "addcoins": "Add coins by user ID (Owner/Sudo)",
+    "removecoins": "Remove coins by user ID (Owner/Sudo)",
+    "addemoji": "Save premium custom emoji (Owner only)",
+    "addsudo": "Add a sudo user",
+    "delsudo": "Remove a sudo user",
+    "sudolist": "List sudo users",
+    "auth": "Authorize this group",
+    "unauth": "Unauthorize this group",
+    "authlist": "List authorized groups",
+    "stats": "View bot group and user statistics (Owner/Sudo only)",
+    "blacklist": "Blacklist a user (Owner only)",
+    "unblacklist": "Remove a user from blacklist (Owner only)",
+}
+OWNER_ONLY_COMMANDS = {
+    "owner", "ownerpanel", "panel", "devpanel",
+    "addemoji", "addsudo", "delsudo", "sudolist",
+    "auth", "unauth", "authlist", "blacklist", "unblacklist",
+}
+
 def staff_command_objects(owner=False):
     items = []
     for command, description in STAFF_COMMANDS.items():
