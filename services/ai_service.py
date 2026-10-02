@@ -20,6 +20,15 @@ _AI_PROVIDER_LOG_COOLDOWN = max(10.0, float(os.getenv("AI_PROVIDER_LOG_COOLDOWN_
 _AI_HTTP_SESSION = None
 _AI_LOGGER_BOT = None
 
+# Warm per-user AI context cache. This keeps MongoDB off the reply hot path
+# while preserving the existing 30-day memory/history behavior.
+_AI_CONTEXT_CACHE = {}
+_AI_CONTEXT_CACHE_TTL = max(
+    5.0,
+    float(os.getenv("AI_CONTEXT_CACHE_TTL_SECONDS", "120")),
+)
+_AI_CONTEXT_WARMING = set()
+
 # Shared Vanya persona/instruction prompt used by both AI providers.
 VANYA_SYSTEM_PROMPT = r"""
 Tum Vanya ho — friendly, natural, masti-bhari girl-like chat companion.
@@ -968,7 +977,19 @@ async def send_vanya_reply(update, text_value):
             await update.effective_chat.send_message(disclosure, parse_mode="HTML")
             await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
 
-    await update.message.reply_text(rendered, parse_mode="HTML")
+    try:
+        await update.message.reply_text(rendered, parse_mode="HTML")
+    except Exception as exc:
+        # The original message can disappear before the AI reply is sent.
+        # Send a normal chat message instead of losing Vanya's response.
+        print(f"[GroupChat][ReplyFallback] {type(exc).__name__}: {exc}")
+        try:
+            await update.effective_chat.send_message(rendered, parse_mode="HTML")
+        except Exception as fallback_exc:
+            print(
+                f"[GroupChat][SendFallback] "
+                f"{type(fallback_exc).__name__}: {fallback_exc}"
+            )
 
 async def cleanup_expired_memory():
     cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
