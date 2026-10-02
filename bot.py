@@ -188,7 +188,22 @@ async def main():
     # Word games accept a plain typed word. This handler runs before Vanya's
     # normal chat handler and only does anything when a word game is active.
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, direct_game_answer), group=0)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mention_chat), group=1)
+    # Route AI chat explicitly: ordinary text in groups/supergroups must reach
+    # Vanya without requiring /chat or an @mention.
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+            mention_chat,
+        ),
+        group=1,
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
+            mention_chat,
+        ),
+        group=1,
+    )
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
