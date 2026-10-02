@@ -65,6 +65,11 @@ CHATGP_API_URL = os.getenv("CHATGP_API_URL", "https://chatgp-nine.vercel.app/api
 # Give the fallback enough time for a slow upstream response; the DM provider
 # race still returns as soon as either provider answers.
 CHATGP_TIMEOUT_SECONDS = float(os.getenv("CHATGP_TIMEOUT_SECONDS", "8.0"))
+# Ollama Cloud is the third AI fallback. It uses the native /api/chat contract.
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip().strip('"').strip("'")
+OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "https://ollama.com/api/chat").strip().rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:31b").strip()
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "6.0"))
 # Keep AI_MODEL for compatibility with older deployments.
 AI_MODEL = os.getenv("AI_MODEL", "").strip() or ELITE_LLM_MODEL
 AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", "gpt-5.4-mini").strip()
