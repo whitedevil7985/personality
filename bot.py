@@ -22,7 +22,7 @@ from config import (
     AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, OLLAMA_API_KEY, OLLAMA_API_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
     MEMORY_DAYS, SUDO_IDS, LOGGER_CHAT_ID
 )
-from db import db, ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, logs, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
+from db import db, ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, logs, ai_usage, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map, record_ai_usage
 
 # ───────────────────── modular games ─────────────────────
 from games.rps import rps, rps_cb, RPS_GAMES
