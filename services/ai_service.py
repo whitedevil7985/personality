@@ -808,40 +808,44 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
         return answer
 
-    # AI providers can occasionally be unavailable/rate-limited. Keep the
-    # user-facing fallback natural and context-aware instead of exposing
-    # network/API/latency details.
-    fallback_text = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
-    if fallback_text:
-        if fallback_text in {"acha", "accha", "achha", "oh", "ohh", "hmm", "hmmm"}:
-            fallback_pool = [
-                "Haanji 😌 bolo na.",
-                "Hehe, sun rahi hu 😄",
-                "Hmmm 👀 kya hua?",
-                "Acha ji 😌 aur batao.",
-            ]
-        elif "?" in fallback_text:
-            fallback_pool = [
-                "Haan, bolo na 😌",
-                "Hmm, sun rahi hu 👀",
-                "Batao yaar, kya hua? 😄",
-            ]
-        elif any(word in fallback_text.split() for word in ("haha", "hehe", "lol")):
-            fallback_pool = [
-                "Hehe 😂",
-                "Hahaha 😭",
-                "Accha ji 😂",
-            ]
-        else:
-            fallback_pool = [
-                "Haan yaar 😌 bolo.",
-                "Hmm, sun rahi hu 👀",
-                "Achhaaa 😄 aur batao.",
-                "Haanji, bolo na 💕",
-            ]
-        answer = random.choice(fallback_pool)
-    else:
+    # If both remote providers fail, keep Vanya conversational instead of
+    # repeating one generic line. This is deliberately local and short, so a
+    # temporary provider outage does not make every group message identical.
+    fallback_text = re.sub(r"\s+", " ", str(text_value or "")).strip()
+    t = fallback_text.casefold()
+    words = t.split()
+    if not t:
         answer = "Haanji 😌 bolo na."
+    elif t in {"hi", "hii", "hiii", "hello", "hey", "heyy"}:
+        answer = random.choice(["Hii 😄 kya haal?", "Heyy 😌 bolo na.", "Helloo 💕 kya scene?"])
+    elif t in {"acha", "accha", "achha", "oh", "ohh"}:
+        answer = random.choice(["Acha ji 😌", "Hehe achaaa 😄", "Haan bolo, kya hua? 👀"])
+    elif t in {"hmm", "hmmm"}:
+        answer = random.choice(["Hmmm 👀", "Haanji, sun rahi hu 😌", "Hmm, bolo na 😄"])
+    elif any(word in words for word in ("haha", "hehe", "lol")):
+        answer = random.choice(["Hehe 😂", "Hahaha 😭", "Accha ji 😂 kya hua?"])
+    elif "?" in t:
+        answer = random.choice([
+            "Haan, bolo na 😌",
+            "Hmm, sun rahi hu 👀",
+            "Batao yaar, kya poochna hai? 😄",
+        ])
+    elif len(words) <= 2:
+        # Short messages such as "are", "ku", "bro", "sun" should get a
+        # natural acknowledgement instead of the same canned fallback.
+        answer = random.choice([
+            f"Haan 😌 {words[-1]}?",
+            "Haanji 👀 bolo.",
+            "Haan yaar, sun rahi hu 😄",
+            "Bolo na, kya hua? 💕",
+        ])
+    else:
+        answer = random.choice([
+            "Haan yaar 😌 batao.",
+            "Hmm, sun rahi hu 👀 bolo.",
+            "Achhaaa 😄 continue karo.",
+            "Haanji 💕 kya hua?",
+        ])
     asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
     return answer
 
