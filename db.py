@@ -1,6 +1,6 @@
 import os
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from config import MONGO_URL, MONGO_DB
