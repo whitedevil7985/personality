@@ -80,7 +80,7 @@ async def chat(update,context):
         _typing_heartbeat(context.bot, update.effective_chat.id, typing_stop)
     )
     try:
-        answer = await ai_reply(update.effective_user, text, "private")
+        answer = await ai_reply(update.effective_user, text, "private", chat_id=chat.id)
         # Telegram may not visibly render a typing action when the answer is
         # returned almost instantly (for quick replies). Keep it visible for
         # a tiny minimum so DM chat still feels natural.
@@ -203,6 +203,7 @@ async def mention_chat(update,context):
                 text,
                 "private",
                 stream_callback=stream_to_telegram,
+                chat_id=chat.id,
             )
 
             min_typing = max(0.0, float(os.getenv("AI_MIN_TYPING_SECONDS", "0.7")))
@@ -320,7 +321,7 @@ async def mention_chat(update,context):
         pass
     group_title = getattr(update.effective_chat, "title", "") or ""
     try:
-        answer = await ai_reply(update.effective_user, text, "group", group_title)
+        answer = await ai_reply(update.effective_user, text, "group", group_title, chat_id=chat.id)
         await send_vanya_reply(update, answer)
     except Exception as exc:
         print(f"[GroupChat] {type(exc).__name__}: {exc}")
