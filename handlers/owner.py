@@ -30,6 +30,7 @@ STAFF_COMMANDS = {
     "blacklist": "Blacklist a user (Owner only)",
     "unblacklist": "Remove a user from blacklist (Owner only)",
     "log": "View recent logger events (Owner only)",
+    "aistats": "View today's AI API usage by provider (Owner only)",
     "revealgrid": "Reveal the Wordgrid answer (Owner/Sudo)",
     "revealwordseek": "Reveal the Wordseek answer (Owner/Sudo)",
 }
@@ -37,7 +38,7 @@ OWNER_ONLY_COMMANDS = {
     "owner", "ownerpanel", "panel", "devpanel",
     "addemoji", "addsudo", "delsudo", "sudolist",
     "auth", "unauth", "authlist", "blacklist", "unblacklist",
-    "revealgrid", "revealwordseek", "log",
+    "revealgrid", "revealwordseek", "log", "aistats",
 }
 
 def staff_command_objects(owner=False):
@@ -48,6 +49,107 @@ def staff_command_objects(owner=False):
         items.append(BotCommand(command, description))
     return items
 
+
+
+async def aistats(update, context):
+    """Owner-only daily AI provider usage report."""
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.effective_message.reply_text("⛔ Owner only.")
+        return
+
+    try:
+        limit = int((context.args or ["15"])[0])
+    except (TypeError, ValueError):
+        limit = 15
+    limit = max(1, min(limit, 30))
+
+    india_tz = timezone(timedelta(hours=5, minutes=30))
+    today = datetime.now(india_tz).strftime("%Y-%m-%d")
+    providers = ("elite", "chatgp", "ollama")
+    labels = {
+        "elite": "Elite LLM",
+        "chatgp": "ChatGP",
+        "ollama": "Ollama Cloud",
+    }
+
+    try:
+        totals = {}
+        pipeline = [
+            {"$match": {"date_key": today}},
+            {"$group": {"_id": "$provider", "count": {"$sum": 1}}},
+        ]
+        async for row in ai_usage.aggregate(pipeline):
+            totals[str(row.get("_id") or "")] = int(row.get("count", 0))
+
+        user_pipeline = [
+            {"$match": {"date_key": today}},
+            {"$group": {
+                "_id": {"provider": "$provider", "user_id": "$user_id"},
+                "count": {"$sum": 1},
+                "name": {"$first": "$user_name"},
+                "username": {"$first": "$username"},
+            }},
+            {"$sort": {"count": -1, "_id.provider": 1, "_id.user_id": 1}},
+        ]
+        users_by_provider = {provider: [] for provider in providers}
+        async for row in ai_usage.aggregate(user_pipeline):
+            provider = str((row.get("_id") or {}).get("provider") or "")
+            if provider not in users_by_provider:
+                users_by_provider[provider] = []
+            users_by_provider[provider].append(row)
+
+        total = sum(totals.values())
+        lines = [
+            "╭━━━〔 📊 <b>AI API STATS</b> 〕━━━╮",
+            f"┃ 📅 <b>Today:</b> {html.escape(today)} (IST)",
+            "╰━━━━━━━━━━━━━━━━━━━━╯",
+            "",
+        ]
+
+        for provider in providers:
+            count = totals.get(provider, 0)
+            lines.append(f"🔹 <b>{html.escape(labels[provider])}</b>: <b>{count}</b> messages")
+            rows = users_by_provider.get(provider, [])[:limit]
+            if rows:
+                lines.append("   👤 <b>Used for:</b>")
+                for row in rows:
+                    uid = (row.get("_id") or {}).get("user_id")
+                    name = str(row.get("name") or f"User {uid}")
+                    username = str(row.get("username") or "").strip()
+                    display = f"@{username}" if username else name
+                    lines.append(
+                        f"   • {html.escape(display)[:60]} "
+                        f"<code>{int(uid or 0)}</code> × <b>{int(row.get('count', 0))}</b>"
+                    )
+                hidden = max(0, len(users_by_provider.get(provider, [])) - len(rows))
+                if hidden:
+                    lines.append(f"   … +{hidden} more users (use /aistats 30)")
+            else:
+                lines.append("   👤 Used for: <i>none</i>")
+            lines.append("")
+
+        lines.append(f"╭━━━〔 🧮 <b>TOTAL</b> 〕━━━╮")
+        lines.append(f"┃ 💬 AI API replies today: <b>{total}</b>")
+        lines.append("╰━━━━━━━━━━━━━━━━━━━━╯")
+        output = "\n".join(lines)
+
+        if len(output) > 3900:
+            # Keep the summary reliable even with many recipient rows.
+            output = (
+                "╭━━━〔 📊 <b>AI API STATS</b> 〕━━━╮\n"
+                f"┃ 📅 <b>Today:</b> {html.escape(today)} (IST)\n"
+                "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                + "\n".join(
+                    f"🔹 <b>{html.escape(labels[p])}</b>: <b>{totals.get(p, 0)}</b> messages"
+                    for p in providers
+                )
+                + f"\n\n🧮 <b>Total:</b> {total} AI API replies today"
+            )
+
+        await update.effective_message.reply_html(output)
+    except Exception as exc:
+        print(f"[OwnerAIStats] {type(exc).__name__}: {exc}")
+        await update.effective_message.reply_text("❌ AI stats database read failed.")
 
 
 async def log(update, context):
