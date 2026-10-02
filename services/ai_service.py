@@ -425,14 +425,15 @@ def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     return _compact_vanya_reply(text, max_words=max_words, max_lines=max_lines)
 
 async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None):
-    """Use Elite + ChatGP first, then Ollama Cloud as the final fallback."""
-    primary = []
+    """Sequential fallback: only call the next provider when the previous fails."""
+    providers = []
     if ELITE_LLM_API_KEY:
-        primary.append(("elite", _call_elite_api))
+        providers.append(("elite", _call_elite_api))
     if CHATGP_API_URL:
-        primary.append(("chatgp", _call_chatgp_api))
-    has_ollama = bool(OLLAMA_API_KEY and OLLAMA_API_URL)
-    if not primary and not has_ollama:
+        providers.append(("chatgp", _call_chatgp_api))
+    if OLLAMA_API_KEY and OLLAMA_API_URL:
+        providers.append(("ollama", _call_ollama_api))
+    if not providers:
         return None
 
     timeouts = {
@@ -441,12 +442,9 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
         "ollama": max(1.5, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "6.0"))),
     }
 
-    async def run_provider(name, fn):
+    for name, fn in providers:
         try:
             if usage_context:
-                # Count the provider request as soon as it is launched. With
-                # the primary-provider race, both APIs may receive the same
-                # user message even though only one reply is selected.
                 asyncio.create_task(record_ai_usage(
                     name,
                     usage_context.get("user_id"),
@@ -456,36 +454,23 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
                     usage_context.get("chat_type"),
                     usage_context.get("chat_title"),
                 ))
+
             answer = await asyncio.wait_for(fn(prompt), timeout=timeouts[name])
             safe = _sanitize_vanya_reply(
                 answer, max_words=max_words, max_lines=max_lines
             ) if answer else ""
+
             if safe:
-                return name, safe, None
-            return name, None, "no usable response"
+                return safe
+
+            print(f"[AI][FAILOVER] {name} returned no usable response; trying next provider.")
         except asyncio.TimeoutError:
-            return name, None, "timeout"
+            print(f"[AI][FAILOVER] {name} timed out; trying next provider.")
         except Exception as exc:
-            return name, None, f"{type(exc).__name__}: {exc}"
-
-    # Keep the two existing providers fast by racing them together.
-    if primary:
-        results = await asyncio.gather(
-            *(run_provider(name, fn) for name, fn in primary),
-            return_exceptions=False,
-        )
-        for name, answer, error in results:
-            if answer:
-                return answer
-            print(f"[AI][FAILOVER] {name} {error}; trying Ollama next." if has_ollama else f"[AI][FAILOVER] {name} {error}.")
-
-    # Ollama is the final fallback, so it is only called when the primary
-    # providers are unavailable or return no usable answer.
-    if has_ollama:
-        name, answer, error = await run_provider("ollama", _call_ollama_api)
-        if answer:
-            return answer
-        print(f"[AI][FAILOVER] {name} {error}; all AI providers failed.")
+            print(
+                f"[AI][FAILOVER] {name} failed: "
+                f"{type(exc).__name__}: {exc}; trying next provider."
+            )
 
     return None
 
