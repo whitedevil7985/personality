@@ -140,10 +140,10 @@ async def aistats(update, context):
                 f"┃ 📅 <b>Today:</b> {html.escape(today)} (IST)\n"
                 "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
                 + "\n".join(
-                    f"🔹 <b>{html.escape(labels[p])}</b>: <b>{totals.get(p, 0)}</b> messages"
+                    f"🔹 <b>{html.escape(labels[p])}</b>: <b>{totals.get(p, 0)}</b> API requests"
                     for p in providers
                 )
-                + f"\n\n🧮 <b>Total:</b> {total} AI API replies today"
+                + f"\n\n🧮 <b>Total:</b> {total} AI API requests today"
             )
 
         await update.effective_message.reply_html(output)
