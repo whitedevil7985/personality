@@ -62,6 +62,7 @@ async def record_ai_usage(provider, user_id, user_name=None, username=None, chat
     if not provider or not user_id:
         return
     now = datetime.now(timezone.utc)
+    india_now = now.astimezone(timezone(timedelta(hours=5, minutes=30)))
     await ai_usage.insert_one({
         "provider": str(provider),
         "user_id": int(user_id),
@@ -71,7 +72,7 @@ async def record_ai_usage(provider, user_id, user_name=None, username=None, chat
         "chat_type": str(chat_type or ""),
         "chat_title": str(chat_title or "")[:160],
         "created_at": now,
-        "date_key": now.strftime("%Y-%m-%d"),
+        "date_key": india_now.strftime("%Y-%m-%d"),
     })
 
 
