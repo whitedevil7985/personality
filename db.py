@@ -20,6 +20,7 @@ groups = db.groups
 games = db.games
 game_stats = db.game_stats
 custom_emojis = db.custom_emojis
+logs = db.logs
 
 async def ensure_user(user):
     if not user:
