@@ -383,10 +383,12 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2):
     """Use the configured AI providers privately with automatic failover."""
     providers = []
 
+    # ChatGP can be public or authenticated; the API key must not
+    # determine whether fallback is attempted.
     if ELITE_LLM_API_KEY:
         providers.append(("elite", _call_elite_api))
 
-    if CHATGP_API_KEY:
+    if CHATGP_API_URL:
         providers.append(("chatgp", _call_chatgp_api))
 
     if not providers:
@@ -606,7 +608,6 @@ async def _call_elite_api_stream(text_value, on_chunk):
             {"role": "user", "content": text_value},
         ],
         "stream": True,
-        "max_tokens": int(os.getenv("AI_MAX_TOKENS", "120")),
     }
 
     if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
@@ -747,7 +748,7 @@ async def probe_ai_providers():
         except Exception as exc:
             print(f"[AI][PROBE] Elite probe failed: {type(exc).__name__}: {exc}")
 
-    if CHATGP_API_KEY:
+    if CHATGP_API_URL:
         try:
             results["chatgp"] = bool(await _call_chatgp_api(probe))
         except Exception as exc:
