@@ -47,7 +47,7 @@ def set_ai_logger_bot(bot):
     global _AI_LOGGER_BOT
     _AI_LOGGER_BOT = bot
 
-def _set_ai_provider_status(provider, active, detail=""):
+async def _set_ai_provider_status(provider, active, detail=""):
     """Track health without treating one slow request as a provider outage."""
     global _AI_PROVIDER_STATUS
     if provider not in _AI_PROVIDER_STATUS:
