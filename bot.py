@@ -60,6 +60,12 @@ if not TOKEN:
 # ║                        VANYA UI                             ║
 # ╚══════════════════════════════════════════════════════════════╝
 
+from handlers.webapp import get_uno_webapp_url, uno, get_chess_webapp_url, chess, get_ludo_webapp_url, get_world_webapp_url, world_cmd, city, room, pet, ludo
+from handlers.ui import kb, developer_button, home, start_menu, back, game_chat_kb, game_room_ui, log_event, _get_group_log_link, log_bot_membership, start, profile, safe_html
+from handlers.economy import toprich, balance, daily, work, _leaderboard_since, _leaderboard_label, leaderboard_kb, _render_leaderboard, leaderboard, give, target_user, _protection_until, _is_dead, rob, protect, shield, propose, _complete_proposal_callback, accept, divorce, couple, topcouples
+from handlers.moderation import is_admin, _moderation_ready, ban, unban, warn, mute, unmute, purge
+from handlers.owner import staff_command_objects, is_owner_or_sudo, broadcast_target_kb, owner_panel_kb, owner_panel, owner_panel_command, _coin_admin_target, addcoins_admin, removecoins_admin, broadcast, addemoji, addsudo, delsudo, sudolist, auth, unauth, authlist, memory, remember_cmd, forgetme
+
 from handlers.callback import callback
 from handlers.chat import capture_owner_custom_emojis, _typing_heartbeat, chat, gchat, direct_game_answer, mention_chat
 from handlers.social import persona, rank, kill, revive, topkill, marriage, reject
