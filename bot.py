@@ -22,7 +22,7 @@ from config import (
     AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
     MEMORY_DAYS, SUDO_IDS, LOGGER_CHAT_ID
 )
-from db import ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
+from db import db, ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, logs, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map
 
 # ───────────────────── modular games ─────────────────────
 from games.rps import rps, rps_cb, RPS_GAMES
@@ -101,7 +101,7 @@ async def main():
         "scribble":scribble,"kingdomwars":kingdomwars,"subway":street_rush_cmd,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
-        "blacklist":blacklist,"unblacklist":unblacklist,
+        "blacklist":blacklist,"unblacklist":unblacklist,"log":log,
     }
     for name,fn in commands.items():
         app.add_handler(CommandHandler(name,fn))
@@ -141,7 +141,7 @@ async def main():
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
         "unmute": "Unmute a user", "purge": "Delete recent messages", "chatstatus": "Check group chat access", "end": "End all active games in this group",
-        "blacklist": "Blacklist a user (Owner only)", "unblacklist": "Remove a user from blacklist (Owner only)",
+        "blacklist": "Blacklist a user (Owner only)", "unblacklist": "Remove a user from blacklist (Owner only)", "log": "View recent logger events (Owner only)",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
