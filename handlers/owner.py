@@ -29,11 +29,14 @@ STAFF_COMMANDS = {
     "stats": "View bot group and user statistics (Owner/Sudo only)",
     "blacklist": "Blacklist a user (Owner only)",
     "unblacklist": "Remove a user from blacklist (Owner only)",
+    "revealgrid": "Reveal the Wordgrid answer (Owner/Sudo)",
+    "revealwordseek": "Reveal the Wordseek answer (Owner/Sudo)",
 }
 OWNER_ONLY_COMMANDS = {
     "owner", "ownerpanel", "panel", "devpanel",
     "addemoji", "addsudo", "delsudo", "sudolist",
     "auth", "unauth", "authlist", "blacklist", "unblacklist",
+    "revealgrid", "revealwordseek",
 }
 
 def staff_command_objects(owner=False):
