@@ -14,7 +14,7 @@ from telegram import (
     BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats,
     BotCommandScopeDefault, BotCommandScopeChat,
 )
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, ContextTypes, filters
+from telegram.ext import Application, ApplicationHandlerStop, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, ContextTypes, filters
 from telegram.request import HTTPXRequest
 
 from config import (
@@ -3607,6 +3607,7 @@ async def blacklist_message_guard(update, context):
         "Aap Vanya se blacklisted ho.\n"
         "Bot ke commands, chat aur games aapke liye disabled hain."
     )
+    raise ApplicationHandlerStop
 
 
 async def blacklist_callback_guard(update, context):
@@ -3631,6 +3632,7 @@ async def blacklist_callback_guard(update, context):
         )
     except Exception:
         pass
+    raise ApplicationHandlerStop
 
 def broadcast_target_kb():
     return kb([
