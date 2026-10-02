@@ -124,6 +124,56 @@ async def callback(update,context):
         if action == "close":
             await q.edit_message_text("🔒 <b>Owner panel closed.</b>", parse_mode="HTML")
             return
+        if action == "monitor":
+            await q.edit_message_text(
+                "╭━━〔 📡 <b>MONITORING</b> 〕━━╮\n"
+                "│ Keep an eye on Vanya's activity\n"
+                "│ AI usage, bot reach and saved logs\n"
+                "╰━━━━━━━━━━━━━━━━━━━━╯",
+                parse_mode="HTML",
+                reply_markup=owner_monitor_kb(),
+            )
+            return
+        if action == "manage":
+            await q.edit_message_text(
+                "╭━━〔 🛠 <b>MANAGEMENT</b> 〕━━╮\n"
+                "│ Broadcast, group access and sudo controls\n"
+                "│ Owner-only controls stay hidden from Sudo\n"
+                "╰━━━━━━━━━━━━━━━━━━━━╯",
+                parse_mode="HTML",
+                reply_markup=owner_manage_kb(update.effective_user.id == OWNER_ID),
+            )
+            return
+        if action == "economy":
+            await q.edit_message_text(
+                "╭━━〔 💰 <b>ECONOMY</b> 〕━━╮\n"
+                "│ Manage virtual coin balances\n"
+                "│ Commands remain Owner/Sudo restricted\n"
+                "╰━━━━━━━━━━━━━━━━━━━━╯",
+                parse_mode="HTML",
+                reply_markup=owner_economy_kb(),
+            )
+            return
+        if action == "games":
+            await q.edit_message_text(
+                "╭━━〔 🎮 <b>GAME TOOLS</b> 〕━━╮\n"
+                "│ Private answer-reveal tools\n"
+                "│ Normal players never see the answers\n"
+                "╰━━━━━━━━━━━━━━━━━━━━╯",
+                parse_mode="HTML",
+                reply_markup=owner_games_kb(),
+            )
+            return
+        if action == "users":
+            await q.edit_message_text(
+                "╭━━〔 👑 <b>USER ACCESS</b> 〕━━╮\n"
+                "│ Sudo, authorized groups and owner tools\n"
+                "│ Sensitive controls are Owner-only\n"
+                "╰━━━━━━━━━━━━━━━━━━━━╯",
+                parse_mode="HTML",
+                reply_markup=owner_users_kb(update.effective_user.id == OWNER_ID),
+            )
+            return
         if action == "aistats":
             await aistats(update, context)
             return
@@ -200,6 +250,17 @@ async def callback(update,context):
                 "👑 <i>Owner/Sudo only.</i>",
                 parse_mode="HTML",
                 reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+            )
+            return
+        if action == "blacklist":
+            await q.edit_message_text(
+                "🚫 <b>Blacklist</b>\n\n"
+                "Use <code>/blacklist</code> by replying to a user's message, "
+                "or use <code>/blacklist USER_ID</code>.\n\n"
+                "Remove with <code>/unblacklist</code>.\n"
+                "🔒 <i>Owner only.</i>",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ User Access", callback_data="owner:users")]]),
             )
             return
         if action == "addsudo":
