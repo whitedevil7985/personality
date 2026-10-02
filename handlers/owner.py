@@ -1,0 +1,571 @@
+"""Modular handler module for ItzVanyaBot Ultimate.
+
+The entrypoint owns shared runtime state; this module only owns the handlers
+listed below. The bridge keeps the current runtime namespace shared during the
+migration so existing behavior is preserved.
+"""
+import sys as _sys
+_core = _sys.modules.get("bot") or _sys.modules["__main__"]
+globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")})
+del _core, _sys
+
+def staff_command_objects(owner=False):
+    items = []
+    for command, description in STAFF_COMMANDS.items():
+        if not owner and command in OWNER_ONLY_COMMANDS:
+            continue
+        items.append(BotCommand(command, description))
+    return items
+
+
+async def is_owner_or_sudo(update):
+    uid = update.effective_user.id if update.effective_user else 0
+    if uid == OWNER_ID or uid in SUDO_IDS:
+        return True
+    u = await get_user(uid)
+    return bool(u and u.get("is_sudo"))
+
+
+async def broadcast_target_kb():
+    return kb([
+        [InlineKeyboardButton("👤 Users Only", callback_data="owner:broadcastmode:users")],
+        [InlineKeyboardButton("💬 Groups Only", callback_data="owner:broadcastmode:groups")],
+        [InlineKeyboardButton("🌐 Users + Groups", callback_data="owner:broadcastmode:both")],
+        [InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")],
+    ])
+
+
+def owner_panel_kb(owner_only=False, staff_access=False):
+    rows = [
+        [InlineKeyboardButton("📢 Broadcast", callback_data="owner:broadcast")],
+        [InlineKeyboardButton("👑 Sudo Users", callback_data="owner:sudo"),
+         InlineKeyboardButton("🔐 Auth Groups", callback_data="owner:auth")],
+        [InlineKeyboardButton("📊 Stats", callback_data="owner:stats"),
+         InlineKeyboardButton("📊 Panel Commands", callback_data="owner:commands")],
+    ]
+    if staff_access:
+        rows.append([InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid")])
+    if staff_access:
+        rows.append([InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek")])
+        rows.append([InlineKeyboardButton("💰 Coin Control", callback_data="owner:coins")])
+    if owner_only:
+        rows.append([InlineKeyboardButton("➕ Add Sudo", callback_data="owner:addsudo"),
+                     InlineKeyboardButton("➖ Del Sudo", callback_data="owner:delsudo")])
+        rows.append([InlineKeyboardButton("🎨 Premium Emoji", callback_data="owner:addemoji")])
+    rows.append([InlineKeyboardButton("❌ Close", callback_data="owner:close")])
+    return kb(rows)
+
+async def owner_panel(update, context):
+    """Private Owner/Sudo panel showing the complete staff command set."""
+    if not update.effective_user:
+        return
+
+    if not await is_owner_or_sudo(update):
+        await update.effective_message.reply_text("⛔ Owner/Sudo only.")
+        return
+
+    owner_only = update.effective_user.id == OWNER_ID
+
+    visible_commands = []
+    for command, description in STAFF_COMMANDS.items():
+        if command in {"ownerpanel", "panel", "devpanel"}:
+            continue
+        if not owner_only and command in OWNER_ONLY_COMMANDS:
+            continue
+        visible_commands.append(f"• <code>/{command}</code> — {html.escape(description)}")
+
+    panel_text = (
+        "╭━━━〔 👑 <b>VANYA OWNER PANEL</b> 〕━━━╮\n"
+        "┃ 🔒 <i>Owner/Sudo access only</i>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>Available Staff Commands</b>\n"
+        + "\n".join(visible_commands)
+        + "\n\n"
+        "🎛 <b>Use the buttons below for the main controls.</b>"
+    )
+
+    try:
+        await update.effective_message.reply_html(
+            panel_text,
+            reply_markup=owner_panel_kb(
+                owner_only=owner_only,
+                staff_access=True,
+            ),
+        )
+    except Exception as exc:
+        print(f"[OwnerPanelRender] {type(exc).__name__}: {exc}")
+        await update.effective_message.reply_html(panel_text)
+
+
+
+async def owner_panel_command(update, context):
+    """Dedicated Owner/Sudo entrypoint for /owner, /panel and aliases."""
+    if not update.effective_message or not update.effective_user:
+        return
+    try:
+        allowed = await is_owner_or_sudo(update)
+    except Exception as exc:
+        print(f"[OwnerPanelCommand] auth error: {type(exc).__name__}: {exc}")
+        allowed = False
+
+    if not allowed:
+        await update.effective_message.reply_text(
+            "⛔ Owner/Sudo only."
+        )
+        return
+
+    try:
+        # Call the renderer after the permission check. Keeping this separate
+        # from the command registration makes /owner robust against any stale
+        # handler references after a deployment.
+        await owner_panel(update, context)
+    except Exception as exc:
+        print(f"[OwnerPanelCommand] render error: {type(exc).__name__}: {exc}")
+        await update.effective_message.reply_html(
+            "👑 <b>Vanya Owner Panel</b>\n\n"
+            "✅ Access confirmed.\n"
+            "Use /broadcast, /addcoins, /removecoins, /revealgrid or /revealwordseek."
+        )
+
+
+async def _coin_admin_target(update, context, remove=False):
+    """Owner/Sudo utility for adjusting any user's virtual coin balance by ID."""
+    if not await is_owner_or_sudo(update):
+        await update.message.reply_text("⛔ Owner/Sudo only.")
+        return
+
+    command = "removecoins" if remove else "addcoins"
+    if len(context.args) < 2:
+        await update.message.reply_html(
+            f"Usage: <code>/{command} &lt;user_id&gt; &lt;amount&gt;</code>\n"
+            f"Example: <code>/{command} 123456789 500</code>"
+        )
+        return
+
+    try:
+        target_id = int(context.args[0])
+        amount = int(context.args[1])
+    except (TypeError, ValueError):
+        await update.message.reply_text("⚠️ User ID aur amount number mein do.")
+        return
+
+    if target_id <= 0 or amount <= 0:
+        await update.message.reply_text("⚠️ User ID aur amount 0 se zyada hona chahiye.")
+        return
+
+    target = await get_user(target_id)
+    if not target:
+        await users.update_one(
+            {"_id": target_id},
+            {"$setOnInsert": {
+                "name": f"User {target_id}",
+                "coins": 0,
+                "xp": 0,
+                "level": 1,
+                "warnings": 0,
+                "partner": None,
+                "pending_proposal": None,
+                "chat_history": [],
+                "memory": [],
+                "memories": [],
+                "is_sudo": False,
+            }},
+            upsert=True,
+        )
+        target = await get_user(target_id)
+
+    current = int((target or {}).get("coins", 0) or 0)
+
+    if remove:
+        actual = min(amount, max(0, current))
+        if actual <= 0:
+            await update.message.reply_text(
+                f"💰 User <code>{target_id}</code> ke paas remove karne ke liye coins nahi hain.",
+                parse_mode="HTML",
+            )
+            return
+        await add_coins(target_id, -actual)
+        new_balance = current - actual
+        action_text = f"removed <b>{actual:,}</b> coins"
+    else:
+        actual = amount
+        await add_coins(target_id, actual)
+        new_balance = current + actual
+        action_text = f"added <b>{actual:,}</b> coins"
+
+    name = html.escape(str((target or {}).get("name") or f"User {target_id}"))
+    await update.message.reply_html(
+        "╭━━━〔 💰 <b>COIN CONTROL</b> 〕━━━╮\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"👤 <b>{name}</b>\n"
+        f"🆔 <code>{target_id}</code>\n"
+        f"✅ {action_text}\n"
+        f"💰 New balance: <b>{new_balance:,}</b> coins"
+    )
+
+
+async def addcoins_admin(update, context):
+    await _coin_admin_target(update, context, remove=False)
+
+
+async def removecoins_admin(update, context):
+    await _coin_admin_target(update, context, remove=True)
+
+
+async def broadcast(update, context):
+    """Broadcast a text/media message to users, groups, or both. Owner/Sudo only."""
+    if not await is_owner_or_sudo(update):
+        await update.message.reply_text("⛔ Owner/Sudo only.")
+        return
+
+    user_id = update.effective_user.id if update.effective_user else 0
+    app_data = context.application.bot_data if context.application else {}
+    broadcast_modes = app_data.setdefault("broadcast_modes", {})
+
+    source = update.message.reply_to_message
+    args = list(context.args or [])
+    mode = None
+
+    # Optional direct mode:
+    # /broadcast users Your message
+    # /broadcast groups Your message
+    # /broadcast both Your message
+    if args and str(args[0]).lower() in {"users", "user", "groups", "group", "chats", "chat", "both"}:
+        raw_mode = str(args.pop(0)).lower()
+        mode = "users" if raw_mode in {"users", "user"} else "groups" if raw_mode in {"groups", "group", "chats", "chat"} else "both"
+        broadcast_modes[user_id] = mode
+    else:
+        mode = broadcast_modes.get(user_id)
+
+    text = " ".join(args).strip()
+
+    if not source and not text:
+        await update.message.reply_html(
+            "📢 <b>Broadcast Center</b>\n\n"
+            "Choose the target first:\n\n"
+            "👤 <b>Users Only</b> — private users who started Vanya\n"
+            "💬 <b>Groups Only</b> — groups known to Vanya\n"
+            "🌐 <b>Users + Groups</b> — both\n\n"
+            "You can also use directly:\n"
+            "<code>/broadcast users Your message</code>\n"
+            "<code>/broadcast groups Your message</code>\n"
+            "<code>/broadcast both Your message</code>\n\n"
+            "For media, choose a target and then reply to the media with <code>/broadcast</code>."
+            ,
+            reply_markup=broadcast_target_kb(),
+        )
+        return
+
+    if mode not in {"users", "groups", "both"}:
+        await update.message.reply_html(
+            "📢 <b>Select a broadcast target first.</b>\n\n"
+            "👤 Users Only\n"
+            "💬 Groups Only\n"
+            "🌐 Users + Groups",
+            reply_markup=broadcast_target_kb(),
+        )
+        return
+
+    targets = []
+    user_count = 0
+    group_count = 0
+
+    if mode in {"users", "both"}:
+        async for u in users.find({"started": True}, {"_id": 1}):
+            targets.append(u["_id"])
+            user_count += 1
+
+    if mode in {"groups", "both"}:
+        # Only target groups that are currently marked active. Old database
+        # entries can remain after the bot is removed from a group.
+        async for g in groups.find(
+            {"$or": [{"active": True}, {"active": {"$exists": False}}]},
+            {"_id": 1},
+        ):
+            targets.append(g["_id"])
+            group_count += 1
+
+    # De-duplicate while preserving order.
+    targets = list(dict.fromkeys(targets))
+    # The selected mode is consumed after a real broadcast starts so the next
+    # broadcast requires an explicit target again unless the command includes one.
+    broadcast_modes.pop(user_id, None)
+
+    if not targets:
+        await update.message.reply_text(
+            f"📢 No targets found for the selected broadcast mode: {mode}."
+        )
+        return
+
+    mode_label = {
+        "users": "👤 Users Only",
+        "groups": "💬 Groups Only",
+        "both": "🌐 Users + Groups",
+    }[mode]
+
+    status = await update.message.reply_text(
+        f"📢 <b>Broadcast started</b>\n\n"
+        f"🎯 Target: <b>{mode_label}</b>\n"
+        f"👤 Users: <b>{user_count:,}</b>\n"
+        f"💬 Groups: <b>{group_count:,}</b>\n"
+        f"📨 Total targets: <b>{len(targets):,}</b>",
+        parse_mode="HTML",
+    )
+
+    sent = failed = 0
+    skipped = 0
+    failure_reasons = {}
+
+    for chat_id in targets:
+        delivered = False
+        last_error = None
+
+        # Telegram can temporarily return 429 during a larger broadcast.
+        # Retry that target instead of counting it as a permanent failure.
+        for attempt in range(3):
+            try:
+                if source:
+                    await context.bot.copy_message(
+                        chat_id=chat_id,
+                        from_chat_id=source.chat_id,
+                        message_id=source.message_id,
+                    )
+                else:
+                    await context.bot.send_message(chat_id=chat_id, text=text)
+                delivered = True
+                break
+            except Exception as exc:
+                last_error = exc
+
+                # python-telegram-bot RetryAfter exposes retry_after.
+                retry_after = getattr(exc, "retry_after", None)
+                if retry_after is not None and attempt < 2:
+                    try:
+                        delay = max(1.0, min(float(retry_after), 30.0))
+                    except (TypeError, ValueError):
+                        delay = 2.0
+                    await asyncio.sleep(delay)
+                    continue
+
+                break
+
+        if delivered:
+            sent += 1
+            await asyncio.sleep(0.08)
+        else:
+            failed += 1
+            reason = str(last_error or "Unknown error")
+            reason_lower = reason.lower()
+
+            # These generally mean the bot can no longer deliver to this
+            # group. Mark it inactive so future broadcasts skip it.
+            permanent_group_error = (
+                chat_id < 0 and (
+                    "forbidden" in reason_lower
+                    or "bot was kicked" in reason_lower
+                    or "bot is not a member" in reason_lower
+                    or "chat not found" in reason_lower
+                    or "kicked" in reason_lower
+                )
+            )
+            if permanent_group_error:
+                try:
+                    await groups.update_one(
+                        {"_id": chat_id},
+                        {"$set": {
+                            "active": False,
+                            "broadcast_failed_at": datetime.now(timezone.utc),
+                            "broadcast_failure": reason[:500],
+                        }},
+                    )
+                except Exception as db_exc:
+                    print(f"[Broadcast] failed to mark inactive {chat_id}: {db_exc}")
+
+            # Keep a compact reason summary for the owner.
+            reason_key = (
+                "Bot removed/blocked"
+                if permanent_group_error else
+                "Rate limit"
+                if getattr(last_error, "retry_after", None) is not None else
+                type(last_error).__name__ if last_error else "Unknown"
+            )
+            failure_reasons[reason_key] = failure_reasons.get(reason_key, 0) + 1
+
+        if (sent + failed) % 25 == 0:
+            try:
+                reason_text = ""
+                if failure_reasons:
+                    reason_text = "\n\n⚠️ " + " • ".join(
+                        f"{html.escape(str(k))}: {v}"
+                        for k, v in failure_reasons.items()
+                    )
+                await status.edit_text(
+                    f"📢 <b>Broadcasting…</b>\n\n"
+                    f"🎯 Target: <b>{mode_label}</b>\n"
+                    f"📨 Sent: <b>{sent:,}</b>\n"
+                    f"⚠️ Failed: <b>{failed:,}</b>\n"
+                    f"📊 Progress: <b>{sent + failed:,}/{len(targets):,}</b>"
+                    f"{reason_text}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    try:
+        reason_text = ""
+        if failure_reasons:
+            reason_text = "\n\n<b>Failure reasons</b>\n" + "\n".join(
+                f"• {html.escape(str(k))}: <b>{v}</b>"
+                for k, v in failure_reasons.items()
+            )
+        await status.edit_text(
+            f"✅ <b>Broadcast Completed</b>\n\n"
+            f"🎯 Target: <b>{mode_label}</b>\n"
+            f"👤 Users targeted: <b>{user_count:,}</b>\n"
+            f"💬 Groups targeted: <b>{group_count:,}</b>\n"
+            f"📨 Sent: <b>{sent:,}</b>\n"
+            f"⚠️ Failed: <b>{failed:,}</b>\n"
+            f"👥 Total targets: <b>{len(targets):,}</b>"
+            f"{reason_text}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+async def addemoji(update, context):
+    """Owner-only helper: save custom emoji IDs from a replied Telegram message."""
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⛔ Owner only.")
+        return
+
+    target = update.message.reply_to_message
+    if not target:
+        await update.message.reply_text(
+            "Reply to a message containing your premium/custom emoji, then send /addemoji."
+        )
+        return
+
+    entities = list(target.entities or []) + list(target.caption_entities or [])
+    custom = [e for e in entities if getattr(e, "type", "") == "custom_emoji" and getattr(e, "custom_emoji_id", None)]
+    if not custom:
+        await update.message.reply_text(
+            "❌ Is message mein custom/premium emoji entity nahi mila. Telegram se premium emoji send karke us message ko reply karo."
+        )
+        return
+
+    saved = 0
+    seen = set()
+    for entity in custom:
+        eid = str(entity.custom_emoji_id)
+        if eid in seen:
+            continue
+        seen.add(eid)
+        alt = "✨"
+        try:
+            stickers = await context.bot.get_custom_emoji_stickers([eid])
+            if stickers and getattr(stickers[0], "emoji", None):
+                alt = stickers[0].emoji
+        except Exception:
+            pass
+        await save_custom_emoji(eid, alt, update.effective_user.id)
+        saved += 1
+
+    global _CUSTOM_EMOJI_CACHE, _CUSTOM_EMOJI_CACHE_AT
+    _CUSTOM_EMOJI_CACHE = {}
+    _CUSTOM_EMOJI_CACHE_AT = 0.0
+    await update.message.reply_text(
+        f"✅ Saved {saved} premium/custom emoji for Vanya chat replies.\n"
+        "Ab Vanya normal emoji ko automatically custom animated emoji mein use kar sakti hai."
+    )
+
+
+async def addsudo(update, context):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("Owner only.")
+        return
+    target = await target_user(update)
+    if not target:
+        await update.message.reply_text("Reply to a user: /addsudo")
+        return
+    await users.update_one({"_id": target.id}, {"$set": {"is_sudo": True}}, upsert=True)
+    try:
+        # A newly added sudo immediately receives the complete Sudo command set.
+        current_public = [c for c in await context.bot.get_my_commands(scope=BotCommandScopeDefault()) if c.command not in STAFF_COMMANDS]
+        await context.bot.set_my_commands(
+            current_public + staff_command_objects(owner=False),
+            scope=BotCommandScopeChat(chat_id=target.id),
+        )
+    except Exception:
+        pass
+    await update.message.reply_text(f"👑 {target.first_name} added as sudo.")
+
+async def delsudo(update, context):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("Owner only.")
+        return
+    target = await target_user(update)
+    if not target:
+        await update.message.reply_text("Reply to a user: /delsudo")
+        return
+    await users.update_one({"_id": target.id}, {"$set": {"is_sudo": False}})
+    try:
+        await context.bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=target.id))
+    except Exception:
+        pass
+    await update.message.reply_text(f"Removed {target.first_name} from sudo.")
+
+async def sudolist(update, context):
+    if not await is_owner_or_sudo(update):
+        await update.message.reply_text("⛔ Owner/Sudo only.")
+        return
+    rows = []
+    async for u in users.find({"is_sudo": True}):
+        rows.append(f"• {html.escape(u.get('name','User'))} (<code>{u['_id']}</code>)")
+    await update.message.reply_html("👑 <b>Sudo users</b>\n\n" + ("\n".join(rows) or "None"))
+
+async def auth(update, context):
+    if not (await is_owner_or_sudo(update) or await is_admin(update)):
+        await update.message.reply_text("⛔ Owner/Sudo or group admins only.")
+        return
+    chat = update.effective_chat
+    await groups.update_one({"_id": chat.id}, {"$set": {"authorized": True, "title": chat.title}}, upsert=True)
+    await update.message.reply_text("✅ This group is authorized for Vanya features.")
+
+async def unauth(update, context):
+    if not (await is_owner_or_sudo(update) or await is_admin(update)):
+        await update.message.reply_text("⛔ Owner/Sudo or group admins only.")
+        return
+    await groups.update_one({"_id": update.effective_chat.id}, {"$set": {"authorized": False}})
+    await update.message.reply_text("🔒 Vanya features are now unauthorized here.")
+
+async def authlist(update, context):
+    if not await is_owner_or_sudo(update):
+        await update.message.reply_text("⛔ Owner/Sudo only.")
+        return
+    rows = []
+    async for g in groups.find({"authorized": True}):
+        rows.append(f"• {html.escape(g.get('title','Group'))} — <code>{g['_id']}</code>")
+    await update.message.reply_html("🔐 <b>Authorized groups</b>\n\n" + ("\n".join(rows) or "None"))
+
+async def memory(update, context):
+    await ensure_user(update.effective_user)
+    facts = await _prune_and_get_memories(update.effective_user.id)
+    if not facts:
+        await update.message.reply_text("🧠 I don't have any saved facts about you yet.")
+        return
+    lines = "\n".join(f"• {html.escape(str(x.get('text', '')))}" for x in facts[-MAX_MEMORY:])
+    await update.message.reply_html("🧠 <b>What Vanya remembers</b>\n\n" + lines + f"\n\n<i>Memory is kept for {MEMORY_DAYS} days.</i>")
+
+async def remember_cmd(update, context):
+    text = " ".join(context.args).strip()
+    if not text:
+        await update.message.reply_text("Usage: /remember I like cricket")
+        return
+    await ensure_user(update.effective_user)
+    await remember_facts(update.effective_user.id, text)
+    await update.message.reply_text("🧠 Got it — I'll remember that for our future chats.")
+
+async def forgetme(update, context):
+    await users.update_one({"_id": update.effective_user.id}, {"$set": {"memory": [], "chat_history": []}})
+    await update.message.reply_text("🧹 Done. I cleared your saved memory and conversation history.")
