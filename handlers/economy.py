@@ -184,13 +184,50 @@ async def give(update, context):
     if not update.message.reply_to_message:
         await update.message.reply_text("Reply to a user: /give 100")
         return
-    try: amount=int(context.args[0])
-    except: await update.message.reply_text("Usage: /give &lt;amount&gt;");return
-    if amount<=0: return
-    sender=await get_user(update.effective_user.id); receiver=update.message.reply_to_message.from_user
-    if sender.get("coins",0)<amount: await update.message.reply_text("❌ Not enough coins.");return
-    await add_coins(update.effective_user.id,-amount);await add_coins(receiver.id,amount)
-    await update.message.reply_text(f"💸 Sent {amount:,} coins to {receiver.first_name}.")
+
+    try:
+        amount = int(context.args[0])
+    except (TypeError, ValueError, IndexError):
+        await update.message.reply_text("Usage: /give <amount>")
+        return
+
+    if amount <= 0:
+        return
+
+    receiver = update.message.reply_to_message.from_user
+    sender = await get_user(update.effective_user.id)
+    if not sender:
+        await ensure_user(update.effective_user)
+        sender = await get_user(update.effective_user.id)
+
+    # /give charges a 10% transfer tax. The displayed "Sent" amount is the
+    # net amount the receiver actually gets, matching the transaction-style UI.
+    tax = amount // 10
+    net_amount = amount - tax
+
+    if net_amount <= 0:
+        await update.message.reply_text("❌ Amount is too small after tax.")
+        return
+
+    if int(sender.get("coins", 0)) < amount:
+        await update.message.reply_text("❌ Not enough coins.")
+        return
+
+    await add_coins(update.effective_user.id, -amount)
+    await add_coins(receiver.id, net_amount)
+
+    sender_name = html.escape(
+        update.effective_user.first_name or "User"
+    )
+    receiver_name = html.escape(receiver.first_name or "User")
+
+    await update.message.reply_html(
+        f"╭━━━〔 💸 <b>TRANSACTION SUCCESSFUL!</b> 〕━━━╮\n"
+        f"┃ 💵 <b>Sent:</b> <code>{net_amount:,}</code> coins\n"
+        f"┃ 💰 <b>Tax deducted:</b> <code>{tax:,}</code> coins\n"
+        f"┃ 👤 <b>{sender_name}</b> ➜ <b>{receiver_name}</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
+    )
 
 # ───────────────────── action/romance ─────────────────────
 
