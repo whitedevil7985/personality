@@ -65,10 +65,11 @@ async def aistats(update, context):
 
     india_tz = timezone(timedelta(hours=5, minutes=30))
     today = datetime.now(india_tz).strftime("%Y-%m-%d")
-    providers = ("elite", "chatgp", "ollama")
+    providers = ("elite", "chatgp", "cloudflare", "ollama")
     labels = {
         "elite": "Elite LLM",
         "chatgp": "ChatGP",
+        "cloudflare": "Cloudflare Workers AI",
         "ollama": "Ollama Cloud",
     }
 
