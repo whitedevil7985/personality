@@ -161,17 +161,38 @@ async def chatstatus(update, context):
     )
 
 async def ping(update, context):
-    """Show bot response latency and a simple service status."""
+    """Show bot response latency, uptime, and start time."""
     started = time.perf_counter()
     msg = await update.message.reply_text("🏓 Checking ping…")
     elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+
     try:
+        uptime_seconds = max(0, int(time.monotonic() - BOT_START_TIME))
+        days, rem = divmod(uptime_seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, seconds = divmod(rem, 60)
+
+        uptime_parts = []
+        if days:
+            uptime_parts.append(f"{days}d")
+        if hours or days:
+            uptime_parts.append(f"{hours}h")
+        if minutes or hours or days:
+            uptime_parts.append(f"{minutes}m")
+        uptime_parts.append(f"{seconds}s")
+
+        started_at = BOT_STARTED_AT.strftime("%d %b %Y, %I:%M:%S %p UTC")
+
         await msg.edit_text(
-            f"🏓 <b>Pong!</b>\n\n⚡ Response: <code>{elapsed_ms} ms</code>\n🟢 Status: <b>Online</b>",
+            "🏓 <b>Pong!</b>\n\n"
+            f"⚡ Response: <code>{elapsed_ms} ms</code>\n"
+            "🟢 Status: <b>Online</b>\n"
+            f"⏱️ Uptime: <code>{' '.join(uptime_parts)}</code>\n"
+            f"🚀 Started: <code>{started_at}</code>",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[Ping] {type(exc).__name__}: {exc}")
 
 
 # Modular handler imports. These are loaded after bot globals are defined,
