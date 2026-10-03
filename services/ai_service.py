@@ -967,6 +967,81 @@ async def probe_ai_providers():
     return results
 
 
+async def _ai_health_monitor(bot, interval_seconds=None):
+    """Run a full AI provider health check every 30 minutes and send it to the logger."""
+    interval = max(
+        60.0,
+        float(
+            interval_seconds
+            if interval_seconds is not None
+            else os.getenv("AI_HEALTH_CHECK_INTERVAL_SECONDS", "1800")
+        ),
+    )
+
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            checked_at = datetime.now(
+                timezone(timedelta(hours=5, minutes=30))
+            ).strftime("%d %b %Y, %I:%M:%S %p IST")
+
+            try:
+                results = await probe_ai_providers()
+            except Exception as exc:
+                print(f"[AI][HEALTH] Probe cycle failed: {type(exc).__name__}: {exc}")
+                results = {
+                    "elite": False,
+                    "chatgp": False,
+                    "cloudflare": False,
+                    "ollama": False,
+                }
+
+            configured = {
+                "elite": bool(ELITE_LLM_API_KEY),
+                "chatgp": bool(CHATGP_API_URL),
+                "cloudflare": bool(CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID),
+                "ollama": bool(OLLAMA_API_KEY and OLLAMA_API_URL),
+            }
+            labels = {
+                "elite": "Elite LLM",
+                "chatgp": "ChatGP",
+                "cloudflare": "Cloudflare Workers AI",
+                "ollama": "Ollama Cloud",
+            }
+
+            status_lines = []
+            for name in ("elite", "chatgp", "cloudflare", "ollama"):
+                if not configured[name]:
+                    status = "⚪ NOT CONFIGURED"
+                elif results.get(name):
+                    status = "🟢 WORKING"
+                else:
+                    status = "🔴 DOWN / FAILED"
+                status_lines.append(f"┃ {labels[name]}: <b>{status}</b>")
+
+            working = sum(
+                1 for name in ("elite", "chatgp", "cloudflare", "ollama")
+                if configured[name] and results.get(name)
+            )
+            available = sum(1 for name in ("elite", "chatgp", "cloudflare", "ollama") if configured[name])
+
+            message = (
+                "╭━━━〔 🩺 <b>AI API HEALTH CHECK</b> 〕━━━╮\n"
+                f"┃ 🕒 <b>Checked:</b> {html.escape(checked_at)}\n"
+                "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                + "\n".join(status_lines)
+                + "\n\n"
+                f"🧮 <b>Working:</b> {working}/{available} configured APIs\n"
+                "🔁 <b>Fallback:</b> Elite → ChatGP → Cloudflare → Ollama → Local Vanya"
+            )
+            await log_event(type("AIHealthContext", (), {"bot": bot})(), message)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[AI][HEALTH] Monitor error: {type(exc).__name__}: {exc}")
+
+
 async def _save_chat_state_background(user_id, user_text, answer):
     """Persist memory/history after the user already received the fast reply."""
     try:
