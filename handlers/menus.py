@@ -109,7 +109,7 @@ GAME_ITEMS = [
     ("🔤 Wordgrid","WORDGRID"), ("⚡ Tap","TAP"), ("💥 Crash","CRASH"), ("🐙 Jumble","JUMBLE"),
     ("🎭 Charades","CHARADES"), ("🔗 Wordchain","WORDCHAIN"), ("🔤 Wordscramble","WORDS"),
     ("💣 Hack","HACK"), ("🃏 Card","CARD"), ("♟ Chess","CHESS"), ("🖌 Scribble","SCRIBBLE"),
-    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"), ("🏰 Kingdom Wars","KINGDOMWARS"), ("🚇 Subway","SUBWAY"),
+    ("🎰 Bet","BET"), ("🎲 Ludo","LUDO"), ("🎯 Dice","DICE"), ("🪙 Coinflip","COIN"), ("🎰 Slots","SLOTS"), ("🏰 Kingdom Wars","KINGDOMWARS"),
 ]
 
 GAME_INFO = {
@@ -134,7 +134,6 @@ GAME_INFO = {
     "COIN": "/coinflip — Flip a coin.",
     "SLOTS": "/slots — Spin the slot machine.",
     "KINGDOMWARS": "/kingdomwars — Open a live 2–6 player strategy room. Build, recruit, fortify and conquer.",
-    "STREETRUSH": "/subway — Open the live Subway endless runner. Switch lanes, jump, slide and collect coins.",
 }
 
 def game_menu_kb():
@@ -143,25 +142,6 @@ def game_menu_kb():
         rows.append([InlineKeyboardButton(label, callback_data=f"game:{key}") for label,key in GAME_ITEMS[i:i+2]])
     rows.append([InlineKeyboardButton("⟵  Back to categories", callback_data="help")])
     return kb(rows)
-
-async def street_rush_cmd(update, context):
-    domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "personality-production-6405.up.railway.app").strip().strip("/")
-    webapp_url = (os.getenv("STREET_RUSH_WEBAPP_URL") or "").strip().strip('"').strip("'")
-    if not webapp_url and domain:
-        webapp_url = "https://" + domain + "/street-rush"
-    if not webapp_url:
-        await update.message.reply_text("🏃 Street Rush web app is not configured.")
-        return
-    if not webapp_url.startswith(("https://","http://")):
-        webapp_url = "https://" + webapp_url
-    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏃 Play Street Rush", url=webapp_url)]])
-    else:
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏃 Play Street Rush", web_app=WebAppInfo(url=webapp_url))]])
-    await update.message.reply_html(
-        "🏃 <b>Vanya Street Rush</b>\n\nRun, dodge, jump, slide and collect coins.",
-        reply_markup=markup
-    )
 
 async def games_cmd(update, context):
     await update.message.reply_html(
