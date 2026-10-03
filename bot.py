@@ -76,6 +76,10 @@ from handlers.social import persona, rank, kill, revive, topkill, marriage, reje
 from handlers.system import stats, answer, end_game, chatstatus, ping
 from handlers.middleware import track_incoming_chat
 
+# Process uptime starts when the bot module is loaded.
+BOT_START_TIME = time.monotonic()
+BOT_STARTED_AT = datetime.now(timezone.utc)
+
 
 async def main():
     await cleanup_expired_memory()
