@@ -65,7 +65,7 @@ from handlers.ui import kb, developer_button, home, start_menu, back, game_chat_
 from handlers.economy import toprich, balance, daily, work, _leaderboard_since, _leaderboard_label, leaderboard_kb, _render_leaderboard, leaderboard, give, target_user, _protection_until, _is_dead, rob, protect, shield, propose, _complete_proposal_callback, accept, divorce, couple, topcouples
 from handlers.moderation import is_admin, _moderation_ready, ban, unban, warn, mute, unmute, purge
 from handlers.owner import STAFF_COMMANDS, OWNER_ONLY_COMMANDS, staff_command_objects, is_owner_or_sudo, broadcast_target_kb, owner_panel_kb, owner_panel, owner_panel_command, _coin_admin_target, addcoins_admin, removecoins_admin, broadcast, addemoji, addsudo, delsudo, sudolist, auth, unauth, authlist, memory, remember_cmd, forgetme, log, aistats, owner_monitor_kb, owner_manage_kb, owner_economy_kb, owner_games_kb, owner_users_kb
-from handlers.menus import category, category_kb, help_cmd, help_menu_kb, game_menu_kb, street_rush_cmd, games_cmd, game_info, GAME_ITEMS, GAME_INFO, CATEGORIES
+from handlers.menus import category, category_kb, help_cmd, help_menu_kb, game_menu_kb, games_cmd, game_info, GAME_ITEMS, GAME_INFO, CATEGORIES
 
 # AI service must load before chat handlers so their module globals can see ai_reply/send_vanya_reply.
 from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait_for_ai_slot, _try_get_ai_slot, _get_ai_http_session, close_ai_http_session, _parse_ts, _memory_entry_text, _memory_entry_ts, _active_memories, _history_text, _memory_text, _prune_and_get_memories, remember_facts, _append_history, _warm_ai_context_cache, _get_cached_ai_context, _save_ai_context_after_reply, _privacy_quick_reply, _compact_vanya_reply, _sanitize_vanya_reply, _fast_ai_answer, _instant_chat_reply, _identity_quick_reply, _ai_headers, _call_elite_api, _call_elite_api_stream, _call_chatgp_api, _call_ollama_api, probe_ai_providers, _save_chat_state_background, ai_reply, _load_custom_emoji_map, _is_emoji_codepoint, _strip_non_custom_emoji, _premiumize_text, send_vanya_reply, cleanup_expired_memory, set_ai_logger_bot
@@ -98,7 +98,7 @@ async def main():
         "chess":chess,"chessjoin":chessjoin,"chat":chat,"gchat":gchat,"persona":persona,"memory":memory,"remember":remember_cmd,"forgetme":forgetme,"games":games_cmd,"spin":spin,"achievements":achievements,"quest":quest,
         "mines":mines,"wordseek":wordseek,"wordgrid":wordgrid,"crash":crash,"charades":charades,
         "wordchain":wordchain,"wordchainjoin":wordchain_join,"wordscramble":wordscramble,"hack":hack,
-        "scribble":scribble,"kingdomwars":kingdomwars,"subway":street_rush_cmd,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
+        "scribble":scribble,"kingdomwars":kingdomwars,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
         "blacklist":blacklist,"unblacklist":unblacklist,"log":log,"aistats":aistats,
@@ -134,7 +134,7 @@ async def main():
         "mines": "Play Mines", "wordseek": "Play Wordseek", "wordgrid": "Play Wordgrid",
         "crash": "Play Crash", "charades": "Play Charades", "wordchain": "Start multiplayer Wordchain", "wordchainjoin": "Join active Wordchain lobby",
         "wordscramble": "Play Wordscramble", "hack": "Play Hack puzzle",
-        "scribble": "Open Scribble", "kingdomwars": "Open Kingdom Wars strategy arena", "subway": "Play Subway endless runner", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
+        "scribble": "Open Scribble", "kingdomwars": "Open Kingdom Wars strategy arena", "city": "Open Vanya City", "room": "Open your 3D room", "pet": "Open your 3D pet", "vanyacity": "Open Vanya City", "myroom": "Open your room", "mypet": "Open your pet", "owner": "Open owner panel",
         "stats": "View bot group and user statistics (Owner/Sudo only)",
         "panel": "Open owner panel", "ownerpanel": "Open owner panel", "devpanel": "Open owner panel", "broadcast": "Broadcast to users, groups, or both (Owner/Sudo)", "addcoins": "Add coins by user ID (Owner/Sudo)", "removecoins": "Remove coins by user ID (Owner/Sudo)", "addemoji": "Save premium custom emoji (Owner only)", "addsudo": "Add a sudo user",
         "delsudo": "Remove a sudo user", "sudolist": "List sudo users", "auth": "Authorize this group",
