@@ -423,6 +423,24 @@ def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     text = str(answer or "").strip()
     if not text:
         return ""
+
+    # Some upstream gateways return a literal placeholder such as
+    # "[No reply]" instead of an actual model answer. Treat these as a
+    # failed provider response so the next fallback can be tried.
+    normalized = re.sub(r"\s+", " ", text).strip().casefold()
+    unusable_placeholders = {
+        "[no reply]",
+        "no reply",
+        "[no response]",
+        "no response",
+        "[empty response]",
+        "empty response",
+        "null",
+        "none",
+    }
+    if normalized in unusable_placeholders:
+        return ""
+
     private_patterns = (
         r"https?://[^\s<>]+",
         r"(?i)\b(?:elite\s*llm|chatgp|gpt[- ]?[0-9.]+|openai|gemini|anthropic|claude|cerebras)\b",
