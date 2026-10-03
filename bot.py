@@ -232,7 +232,10 @@ async def main():
         f"   Key configured: <b>{'YES' if CHATGP_API_KEY else 'NO'}</b>\n"
         f"☁️ <b>Cloudflare Fallback:</b> {'🟢 ACTIVE' if provider_status.get('cloudflare') else '🔴 DOWN'}\n"
         f"   Key configured: <b>{'YES' if CLOUDFLARE_API_TOKEN else 'NO'}</b>\n"
-        f"   Model: <code>{html.escape(CLOUDFLARE_AI_MODEL or 'unset')}</code>"
+        f"   Model: <code>{html.escape(CLOUDFLARE_AI_MODEL or 'unset')}</code>\n"
+        f"🦙 <b>Ollama Cloud:</b> {'🟢 ACTIVE' if provider_status.get('ollama') else '🔴 DOWN'}\n"
+        f"   Key configured: <b>{'YES' if OLLAMA_API_KEY else 'NO'}</b>\n"
+        f"   Model: <code>{html.escape(OLLAMA_MODEL or 'unset')}</code>"
     )
     await asyncio.Event().wait()
 
