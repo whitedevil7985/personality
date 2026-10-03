@@ -550,39 +550,6 @@ async def callback(update,context):
                     reply_markup=back()
                 )
             return
-        if key.upper() == "SUBWAY":
-            domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "personality-production-6405.up.railway.app").strip().strip("/")
-            webapp_url = (os.getenv("STREET_RUSH_WEBAPP_URL") or "").strip().strip('"').strip("'")
-            if not webapp_url and domain:
-                webapp_url = "https://" + domain + "/street-rush"
-            if webapp_url and not webapp_url.startswith(("https://", "http://")):
-                webapp_url = "https://" + webapp_url
-            if webapp_url:
-                msg = (
-                    "╭━━━〔 🏃 <b>VANYA STREET RUSH</b> 〕━━━╮\n"
-                    "┃ <i>Neon Endless Runner</i> ✦\n"
-                    "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                    "🏙️ Run through the city, change lanes and dodge traffic.\n"
-                    "🪙 Collect coins • 🦘 Jump barriers • 🧎 Slide under gates\n"
-                    "⚡ Speed keeps increasing. How far can you run?"
-                )
-                if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
-                    markup = kb([
-                        [InlineKeyboardButton("🏃 Play Street Rush", url=webapp_url)],
-                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
-                    ])
-                else:
-                    markup = kb([
-                        [InlineKeyboardButton("🏃 Play Street Rush", web_app=WebAppInfo(url=webapp_url))],
-                        [InlineKeyboardButton("⟵ Back to Games", callback_data="cat:games")]
-                    ])
-                await q.edit_message_text(msg, parse_mode="HTML", reply_markup=markup)
-            else:
-                await q.edit_message_text(
-                    "🏃 <b>Street Rush</b> is not configured.\n\nSet <code>STREET_RUSH_WEBAPP_URL</code> or your Railway public domain.",
-                    parse_mode="HTML", reply_markup=back()
-                )
-            return
         if key.upper() == "KINGDOMWARS":
             webapp_url = (os.getenv("KINGDOM_WARS_WEBAPP_URL") or "").strip().strip('"').strip("'")
             if not webapp_url:
