@@ -65,7 +65,24 @@ CHATGP_API_URL = os.getenv("CHATGP_API_URL", "https://chatgp-nine.vercel.app/api
 # Give the fallback enough time for a slow upstream response; the DM provider
 # race still returns as soon as either provider answers.
 CHATGP_TIMEOUT_SECONDS = float(os.getenv("CHATGP_TIMEOUT_SECONDS", "8.0"))
-# Ollama Cloud is the third AI fallback. It uses the native /api/chat contract.
+
+# Cloudflare Workers AI is the second fallback after ChatGP.
+# OpenAI-compatible endpoint:
+# /accounts/{account_id}/ai/v1/chat/completions
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "").strip().strip('"').strip("'")
+CLOUDFLARE_ACCOUNT_ID = os.getenv(
+    "CLOUDFLARE_ACCOUNT_ID",
+    "095575fc0b0bf2e6b807c41cfa87431c",
+).strip()
+CLOUDFLARE_AI_MODEL = os.getenv(
+    "CLOUDFLARE_AI_MODEL",
+    "@cf/openai/gpt-oss-20b",
+).strip()
+CLOUDFLARE_TIMEOUT_SECONDS = float(
+    os.getenv("CLOUDFLARE_TIMEOUT_SECONDS", "6.0")
+)
+
+# Ollama Cloud is the next fallback after Cloudflare.
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip().strip('"').strip("'")
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "https://ollama.com/api/chat").strip().rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:31b").strip()
