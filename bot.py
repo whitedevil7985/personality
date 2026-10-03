@@ -68,7 +68,7 @@ from handlers.owner import STAFF_COMMANDS, OWNER_ONLY_COMMANDS, staff_command_ob
 from handlers.menus import category, category_kb, help_cmd, help_menu_kb, game_menu_kb, games_cmd, game_info, GAME_ITEMS, GAME_INFO, CATEGORIES
 
 # AI service must load before chat handlers so their module globals can see ai_reply/send_vanya_reply.
-from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait_for_ai_slot, _try_get_ai_slot, _get_ai_http_session, close_ai_http_session, _parse_ts, _memory_entry_text, _memory_entry_ts, _active_memories, _history_text, _memory_text, _prune_and_get_memories, remember_facts, _append_history, _warm_ai_context_cache, _get_cached_ai_context, _save_ai_context_after_reply, _privacy_quick_reply, _compact_vanya_reply, _sanitize_vanya_reply, _fast_ai_answer, _instant_chat_reply, _identity_quick_reply, _ai_headers, _call_elite_api, _call_elite_api_stream, _call_chatgp_api, _call_cloudflare_api, _call_ollama_api, probe_ai_providers, _save_chat_state_background, ai_reply, _load_custom_emoji_map, _is_emoji_codepoint, _strip_non_custom_emoji, _premiumize_text, send_vanya_reply, cleanup_expired_memory, set_ai_logger_bot
+from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait_for_ai_slot, _try_get_ai_slot, _get_ai_http_session, close_ai_http_session, _parse_ts, _memory_entry_text, _memory_entry_ts, _active_memories, _history_text, _memory_text, _prune_and_get_memories, remember_facts, _append_history, _warm_ai_context_cache, _get_cached_ai_context, _save_ai_context_after_reply, _privacy_quick_reply, _compact_vanya_reply, _sanitize_vanya_reply, _fast_ai_answer, _instant_chat_reply, _identity_quick_reply, _ai_headers, _call_elite_api, _call_elite_api_stream, _call_chatgp_api, _call_cloudflare_api, _call_ollama_api, probe_ai_providers, _ai_health_monitor, _save_chat_state_background, ai_reply, _load_custom_emoji_map, _is_emoji_codepoint, _strip_non_custom_emoji, _premiumize_text, send_vanya_reply, cleanup_expired_memory, set_ai_logger_bot
 
 from handlers.callback import callback
 from handlers.chat import capture_owner_custom_emojis, _typing_heartbeat, chat, gchat, direct_game_answer, mention_chat
@@ -215,6 +215,9 @@ async def main():
     print("✦ ItzVanyaBot Ultimate started ✦")
     set_ai_logger_bot(app.bot)
     provider_status = await probe_ai_providers()
+    # Continue checking all configured AI providers in the background every
+    # 30 minutes; each cycle is written to the same logger chat and /log store.
+    ai_health_task = asyncio.create_task(_ai_health_monitor(app.bot))
     # Startup log is sent only after Telegram initialization/polling succeeds.
     await log_event(
         type("StartupContext", (), {"bot": app.bot})(),
