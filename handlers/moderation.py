@@ -13,6 +13,8 @@ async def is_admin(update):
     if update.effective_chat.type == "private":
         return update.effective_user.id == OWNER_ID
 
+    # owner.py is imported after this module, so resolve the helper at runtime.
+    from handlers.owner import is_owner_or_sudo
     if await is_owner_or_sudo(update):
         return True
 
