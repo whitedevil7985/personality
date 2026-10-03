@@ -72,13 +72,14 @@ from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait
 
 from handlers.callback import callback
 from handlers.chat import capture_owner_custom_emojis, _typing_heartbeat, chat, gchat, direct_game_answer, mention_chat
+# Process uptime starts when the bot module is loaded. These values must
+# exist before the modular system handler imports the shared runtime namespace.
+BOT_START_TIME = time.monotonic()
+BOT_STARTED_AT = datetime.now(timezone.utc)
+
 from handlers.social import persona, rank, kill, revive, topkill, marriage, reject
 from handlers.system import stats, answer, end_game, chatstatus, ping
 from handlers.middleware import track_incoming_chat
-
-# Process uptime starts when the bot module is loaded.
-BOT_START_TIME = time.monotonic()
-BOT_STARTED_AT = datetime.now(timezone.utc)
 
 
 async def main():
