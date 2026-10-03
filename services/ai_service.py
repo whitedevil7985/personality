@@ -11,10 +11,10 @@ del _core, _sys
 
 # AI runtime state lives here so assignments made by AI functions stay in the
 # same module that owns the provider/session lifecycle.
-_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None, "ollama": None}
-_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0, "ollama": 0}
-_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0, "ollama": 0.0}
-_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0, "ollama": 0.0}
+_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None, "cloudflare": None, "ollama": None}
+_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0, "cloudflare": 0, "ollama": 0}
+_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0, "cloudflare": 0.0, "ollama": 0.0}
+_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0, "cloudflare": 0.0, "ollama": 0.0}
 _AI_PROVIDER_FAILURE_THRESHOLD = max(1, int(os.getenv("AI_PROVIDER_FAILURE_THRESHOLD", "3")))
 _AI_PROVIDER_LOG_COOLDOWN = max(10.0, float(os.getenv("AI_PROVIDER_LOG_COOLDOWN_SECONDS", "300")))
 _AI_HTTP_SESSION = None
@@ -85,13 +85,22 @@ async def _set_ai_provider_status(provider, active, detail=""):
         return
     _AI_PROVIDER_LAST_LOG[provider] = now
 
-    label = {"elite": "Elite LLM", "chatgp": "ChatGP", "ollama": "Ollama Cloud"}.get(provider, provider)
+    label = {
+        "elite": "Elite LLM",
+        "chatgp": "ChatGP",
+        "cloudflare": "Cloudflare Workers AI",
+        "ollama": "Ollama Cloud",
+    }.get(provider, provider)
     endpoint = (
         (ELITE_LLM_BASE_URL + "/chat/completions")
         if provider == "elite"
         else CHATGP_API_URL
         if provider == "chatgp"
-        else OLLAMA_API_URL
+        else (
+            f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions"
+            if provider == "cloudflare"
+            else OLLAMA_API_URL
+        )
     )
     if active:
         message = (
@@ -110,6 +119,8 @@ async def _set_ai_provider_status(provider, active, detail=""):
 _AI_PROVIDER_MESSAGES = {
     "elite": "Elite LLM",
     "chatgp": "ChatGP",
+    "cloudflare": "Cloudflare Workers AI",
+    "ollama": "Ollama Cloud",
 }
 
 _AI_HTTP_SESSION_LOCK = asyncio.Lock()
@@ -431,6 +442,8 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
         providers.append(("elite", _call_elite_api))
     if CHATGP_API_URL:
         providers.append(("chatgp", _call_chatgp_api))
+    if CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID:
+        providers.append(("cloudflare", _call_cloudflare_api))
     if OLLAMA_API_KEY and OLLAMA_API_URL:
         providers.append(("ollama", _call_ollama_api))
     if not providers:
@@ -439,6 +452,7 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
     timeouts = {
         "elite": max(1.0, float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "4.0"))),
         "chatgp": max(1.5, float(os.getenv("CHATGP_TIMEOUT_SECONDS", "6.0"))),
+        "cloudflare": max(1.5, float(os.getenv("CLOUDFLARE_TIMEOUT_SECONDS", "6.0"))),
         "ollama": max(1.5, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "6.0"))),
     }
 
@@ -732,6 +746,70 @@ async def _call_elite_api_stream(text_value, on_chunk):
     return None
 
 
+async def _call_cloudflare_api(text_value):
+    """Call Cloudflare Workers AI through its OpenAI-compatible REST endpoint."""
+    import aiohttp
+    if not CLOUDFLARE_API_TOKEN or not CLOUDFLARE_ACCOUNT_ID:
+        return None
+
+    session = await _get_ai_http_session()
+    timeout = aiohttp.ClientTimeout(total=max(1.5, float(CLOUDFLARE_TIMEOUT_SECONDS)))
+    url = (
+        f"https://api.cloudflare.com/client/v4/accounts/"
+        f"{CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions"
+    )
+    headers = {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": CLOUDFLARE_AI_MODEL or "@cf/openai/gpt-oss-20b",
+        "messages": [
+            {"role": "system", "content": VANYA_SYSTEM_PROMPT},
+            {"role": "user", "content": text_value},
+        ],
+        "stream": False,
+    }
+
+    try:
+        async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
+            raw = await resp.text()
+            if resp.status >= 400:
+                await _set_ai_provider_status(
+                    "cloudflare", False, f"HTTP {resp.status}: {raw[:300]}"
+                )
+                return None
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = {}
+            answer = ""
+            if isinstance(data, dict):
+                choices = data.get("choices") or []
+                if choices and isinstance(choices[0], dict):
+                    message = choices[0].get("message") or {}
+                    if isinstance(message, dict):
+                        answer = str(message.get("content") or "").strip()
+                    if not answer:
+                        answer = str(choices[0].get("text") or "").strip()
+                if not answer:
+                    result = data.get("result")
+                    if isinstance(result, dict):
+                        answer = str(
+                            result.get("response") or result.get("content") or ""
+                        ).strip()
+            if not answer:
+                await _set_ai_provider_status("cloudflare", False, "Empty response")
+                return None
+            await _set_ai_provider_status("cloudflare", True)
+            return answer
+    except Exception as exc:
+        await _set_ai_provider_status(
+            "cloudflare", False, f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
 async def _call_ollama_api(text_value):
     """Call Ollama Cloud /api/chat and read message.content."""
     import aiohttp
@@ -842,7 +920,7 @@ async def _call_chatgp_api(text_value):
 async def probe_ai_providers():
     """Probe providers at startup without allowing a bad model/config to crash the bot."""
     probe = "Reply with only: OK"
-    results = {"elite": False, "chatgp": False, "ollama": False}
+    results = {"elite": False, "chatgp": False, "cloudflare": False, "ollama": False}
 
     if ELITE_LLM_API_KEY:
         try:
@@ -855,6 +933,12 @@ async def probe_ai_providers():
             results["chatgp"] = bool(await _call_chatgp_api(probe))
         except Exception as exc:
             print(f"[AI][PROBE] ChatGP probe failed: {type(exc).__name__}: {exc}")
+
+    if CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID:
+        try:
+            results["cloudflare"] = bool(await _call_cloudflare_api(probe))
+        except Exception as exc:
+            print(f"[AI][PROBE] Cloudflare probe failed: {type(exc).__name__}: {exc}")
 
     if OLLAMA_API_KEY and OLLAMA_API_URL:
         try:
