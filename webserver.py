@@ -707,9 +707,6 @@ async def create_kingdom_room(request):
 async def kingdom_page(request):
     return web.FileResponse(WEB/'kingdom_wars.html')
 
-async def street_rush_page(request):
-    return web.FileResponse(WEB/'street_rush.html')
-
 async def kingdom_ws(request):
     code=request.match_info['code'].upper()
     room=KINGDOM_ROOMS.get(code)
@@ -1529,7 +1526,7 @@ async def start_web_server():
     app.router.add_get('/',health); app.router.add_get('/health',health); app.router.add_get('/api/config',config)
     app.router.add_post('/api/rooms',create_ludo_room); app.router.add_post('/api/uno/rooms',create_uno_room); app.router.add_post('/api/chess/rooms',create_chess_room); app.router.add_post('/api/scribble/rooms',create_scribble_room); app.router.add_post('/api/kingdom/rooms',create_kingdom_room)
     app.router.add_get('/ludo',ludo_page); app.router.add_get('/ws/ludo/{code}',ludo_ws); app.router.add_get('/scribble',scribble_page); app.router.add_get('/ws/scribble/{code}',scribble_ws)
-    app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/ws/chess/{code}',chess_ws); app.router.add_get('/kingdom-wars',kingdom_page); app.router.add_get('/ws/kingdom/{code}',kingdom_ws); app.router.add_get('/street-rush',street_rush_page)
+    app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/ws/chess/{code}',chess_ws); app.router.add_get('/kingdom-wars',kingdom_page); app.router.add_get('/ws/kingdom/{code}',kingdom_ws )
     # Vanya World aliases all point to the same 3D page; query ?tab= selects City/Room/Pet.
     world_page = lambda request: web.FileResponse(WEB/'vanya_world.html')
     app.router.add_get('/vanya-city', world_page); app.router.add_get('/world', world_page); app.router.add_get('/vanya-world', world_page)
