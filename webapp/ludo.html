@@ -147,9 +147,14 @@ function drawHome(svg,color,x,y){
 function drawBoard(){const svg=document.getElementById('board');svg.innerHTML='';drawHome(svg,'red',0,0);drawHome(svg,'green',360,0);drawHome(svg,'yellow',360,360);drawHome(svg,'blue',0,360);
   PATH.forEach(([r,c],i)=>{const [cx,cy]=xy(r,c);const fill=(i===START.green?COLOR_FILL.green:i===START.yellow?COLOR_FILL.yellow:i===START.blue?COLOR_FILL.blue:i===START.red?COLOR_FILL.red:'#fffdf9');rect(svg,c*40,r*40,40,40,fill,0,'track-cell')});
   for(const [color,arr] of Object.entries(LANES))arr.forEach(([r,c])=>rect(svg,c*40,r*40,40,40,COLOR_LIGHT[color],0,'track-cell'));
-  // centre finish triangle
-  rect(svg,240,240,120,120,'#fffaf1');
-  svg.appendChild(svgEl('polygon',{points:'240,240 360,240 300,300',fill:COLOR_FILL.yellow}));svg.appendChild(svgEl('polygon',{points:'360,240 360,360 300,300',fill:COLOR_FILL.blue}));svg.appendChild(svgEl('polygon',{points:'360,360 240,360 300,300',fill:COLOR_FILL.red}));svg.appendChild(svgEl('polygon',{points:'240,360 240,240 300,300',fill:COLOR_FILL.green}));
+  // Source layout uses the single center cell (row 7, col 7) for the
+  // four-color finish marker. Keep the six colored home-lane cells visible
+  // around it; they must not be covered by a giant 3x3 triangle.
+  rect(svg,280,280,40,40,'#fffaf1');
+  svg.appendChild(svgEl('polygon',{points:'280,280 320,280 300,300',fill:COLOR_FILL.yellow}));
+  svg.appendChild(svgEl('polygon',{points:'320,280 320,320 300,300',fill:COLOR_FILL.blue}));
+  svg.appendChild(svgEl('polygon',{points:'320,320 280,320 300,300',fill:COLOR_FILL.red}));
+  svg.appendChild(svgEl('polygon',{points:'280,320 280,280 300,300',fill:COLOR_FILL.green}));
   SAFE_INDEX.forEach(i=>{const [r,c]=PATH[i];const [cx,cy]=xy(r,c);const t=svgEl('text',{x:cx,y:cy+5,class:'safe-star','text-anchor':'middle'});t.textContent='★';svg.appendChild(t)});
 }
 function posXY(color,pos){if(pos<0)return null;if(pos===58)return [300,300];if(pos<=51){const idx=(START[color]+pos)%52;return xy(PATH[idx][0],PATH[idx][1])}const lane=LANES[color];const p=lane[pos-52];return p?xy(p[0],p[1]):null}
