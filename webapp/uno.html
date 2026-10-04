@@ -37,13 +37,13 @@ border:7px solid #5a3a20!important;box-shadow:inset 0 0 0 2px #b57b38,inset 0 0 
 .hand-wrap{width:min(960px,100%);margin:8px auto 0}
 .hand-title{color:#8ea2b4!important;font-weight:900!important}
 .hand{height:160px!important;padding-bottom:9px!important}
-.handcard{width:72px!important;height:112px!important;border-radius:14px!important;border-width:4px!important;box-shadow:0 11px 20px #0009!important;transition:transform .18s,filter .18s,margin .18s!important}
+.handcard{width:72px!important;height:112px!important;border-radius:14px!important;border-width:4px!important;box-shadow:0 11px 20px #0009!important;transition:transform .18s,filter .18s,margin .18s!important;margin-left:6px!important;touch-action:manipulation;position:relative}
 .handcard:hover,.handcard:focus{transform:translateY(-20px) scale(1.04)!important;filter:brightness(1.08)!important}
 .controls{position:relative;z-index:5}.control{background:#0e2232e8!important;border-color:#3a5870!important;box-shadow:0 7px 20px #0005!important}.draw{background:#f2f3ee!important;color:#14202a!important}.uno-btn{background:linear-gradient(135deg,#ff6670,#c21d37)!important;box-shadow:0 9px 24px #ef4d5840!important}
 .chatbox{background:#08131ff7!important;border-color:#34516a!important;box-shadow:0 25px 70px #000c!important}
 @keyframes tablePulse{50%{box-shadow:inset 0 0 0 2px #b57b38,inset 0 0 100px #0009,0 25px 65px #000b,0 0 35px #24d89712}}
 .table{animation:tablePulse 4s ease-in-out infinite}
-@media(max-width:650px){.table{min-height:500px!important;border-width:5px!important}.uno-card,.played{width:74px!important;height:108px!important}.played span{font-size:46px!important}.center{gap:12px!important}.hand{height:148px!important}.handcard{width:61px!important;height:98px!important;margin-left:-15px!important}.face{width:50px!important;height:50px!important}.pname2{font-size:10px!important}}
+@media(max-width:650px){.table{min-height:500px!important;border-width:5px!important}.uno-card,.played{width:74px!important;height:108px!important}.played span{font-size:46px!important}.center{gap:12px!important}.hand{height:148px!important}.handcard{width:61px!important;height:98px!important;margin-left:5px!important}.face{width:50px!important;height:50px!important}.pname2{font-size:10px!important}}
 
 .handcard.unplayable{opacity:.42;filter:saturate(.55);cursor:not-allowed}.handcard.playable{box-shadow:0 0 0 3px #f7df4a,0 10px 22px #0008;cursor:pointer}.handcard.just-drawn{transform:translateY(-10px);box-shadow:0 0 0 4px #fff,0 0 24px #f7df4a}.handcard.unplayable:hover{transform:none}
 </style></style></head>
@@ -64,17 +64,7 @@ function connect(){if(!roomCode||ended)return; const init=tg?.initData||''; ws=n
 function send(o){if(ws?.readyState===1)ws.send(JSON.stringify(o))}
 function cardClass(c){return c.color==='wild'?'wild':c.color}
 function isPlayable(c){
-  if(!state||!state.top)return false;
-  if(c.color==='wild'){
-    if(c.value==='+4'){
-      const hasColoredMatch=(state.hand||[]).some(x=>x.id!==c.id&&x.color!=='wild'&&
-        (x.color===(state.pending_color||state.top.color)||x.value===state.top.value));
-      if(hasColoredMatch)return false;
-    }
-    return true;
-  }
-  const target=state.pending_color||state.top.color;
-  return c.color===target||c.value===state.top.value;
+  return !!state && Array.isArray(state.playable_ids) && state.playable_ids.includes(c.id);
 }
 
 function cardText(c){if(c.value==='+2')return '+2';if(c.value==='skip')return '⊘';if(c.value==='reverse')return '↻';if(c.value==='wild')return '★';if(c.value==='+4')return '+4';return c.value}
@@ -85,27 +75,31 @@ function renderGame(){
   (state.players||[]).forEach((p,i)=>{const d=document.createElement('div');d.className=`playerpos p${Math.min(i,3)}`;d.innerHTML=`<div class="face">${p.bot?'🤖':'🙂'}</div><div class="pname2">${esc(p.name)} ${p.id===state.you?'★':''}</div><div class="count">▱ ${p.count}</div>`;wrap.appendChild(d)});
   const t=state.players.find(p=>p.id===state.turn);const myTurn=t?.id===state.you;
   $('turn').textContent=t?(myTurn?'YOUR TURN':esc(t.name).toUpperCase()+"'S TURN"):'WAITING...';$('turn').className='turn '+(myTurn?'yourturn':'');
+  const active=state.active_color||state.top?.color;
+  $('turn').title=active?('Active color: '+String(active).toUpperCase()):'';
   const pc=state.top;$('played').className=`played ${cardClass(pc)}`;$('played').innerHTML=`<span>${esc(cardText(pc))}</span>`;
   renderHand();
   const playable=(state.hand||[]).some(isPlayable);
-  $('draw').disabled=!state.started||!myTurn||!!state.winner||!!state.drawn_card||playable;
-  $('draw').title=playable?'Play a matching card first':'Draw a card';
+  $('draw').disabled=!state.started||!myTurn||!!state.winner||!!state.drawn_card;
+  $('draw').title=playable?'Draw a card (you may choose to play it)':'Draw a card';
   $('unoBtn').disabled=!state.started||!state.you;
 }
 function renderHand(){
   const h=$('hand');h.innerHTML='';
   (state.hand||[]).forEach(c=>{
     const b=document.createElement('button');const playable=isPlayable(c)&&state.turn===state.you;const drawn=state.drawn_card===c.id;
-    b.className=`handcard ${cardClass(c)} ${playable?'playable':'unplayable'} ${drawn?'just-drawn':''}`;
+    b.className=`handcard ${cardClass(c)} ${playable?'playable':'unplayable'} ${drawn?'just-drawn':''}`;b.style.zIndex=String(10+state.hand.indexOf(c));
     b.innerHTML=`<span>${esc(cardText(c))}</span>`;b.title=drawn?'Drawn card — you may play this card':(playable?'Playable card':'Not playable right now');
     b.addEventListener('click',()=>play(c));h.appendChild(b);
   });
 }
 function play(c){
   if(state.turn!==state.you){showErr('Wait for your turn');return}
-  if(!isPlayable(c)){showErr('That card cannot be played here');return}
   if(state.drawn_card&&state.drawn_card!==c.id){showErr('After drawing, you can only play the drawn card');return}
-  if(c.color==='wild'){chosenWild=c;$('colorModal').classList.add('show');return}
+  if(c.color==='wild'){
+    if(!isPlayable(c)){showErr('This Wild card is not legal right now');return}
+    chosenWild=c;$('colorModal').classList.add('show');return
+  }
   send({type:'play',card_id:c.id});
 }
 function handle(x){if(x.type==='error'){showErr(x.message);return}if(x.type==='chat'){const d=document.createElement('div');d.innerHTML=`<b>${esc(x.name)}:</b> ${esc(x.text)}`;$('messages').appendChild(d);$('messages').scrollTop=$('messages').scrollHeight;return}if(x.type==='state'){state=x; if(!state.started)renderLobby(); else renderGame();if(state.winner){const w=state.players.find(p=>p.id===state.winner);$('msg').textContent=`🏆 ${w?.name||'Player'} won UNO!`}}}
