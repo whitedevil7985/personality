@@ -58,7 +58,7 @@ async def get_user(uid):
     return await users.find_one({"_id": uid})
 
 async def record_ai_usage(provider, user_id, user_name=None, username=None, chat_id=None, chat_type=None, chat_title=None):
-    """Persist one successful AI response for daily provider usage statistics."""
+    """Persist one actual outgoing AI-provider request for daily usage statistics."""
     if not provider or not user_id:
         return
     now = datetime.now(timezone.utc)
