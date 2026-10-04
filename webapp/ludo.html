@@ -128,7 +128,22 @@ function renderPlayers(d){
 function xy(r,c){return [c*40+20,r*40+20]}
 function svgEl(tag,attrs={}){const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,String(v));return e}
 function rect(svg,x,y,w,h,fill,rx=0,cls=''){const e=svgEl('rect',{x,y,width:w,height:h,fill,rx,class:cls});svg.appendChild(e);return e}
-function drawHome(svg,color,x,y){const h=rect(svg,x,y,240,240,COLOR_LIGHT[color],28,'home-base');h.setAttribute('stroke',COLOR_FILL[color]);const ix=x+50,iy=y+50;rect(svg,ix,iy,140,140,'#fffaf1',24);const slots=HOME_SLOTS[color];slots.forEach(([cx,cy],i)=>{const s=svgEl('circle',{cx,cy,r:25,fill:'#fffaf1',stroke:COLOR_FILL[color],'stroke-width':3,class:'slot',id:`slot-${color}-${i}`});svg.appendChild(s);})}
+function drawHome(svg,color,x,y){
+  const h=rect(svg,x,y,240,240,COLOR_LIGHT[color],28,'home-base');
+  h.setAttribute('stroke',COLOR_FILL[color]);
+  const ix=x+50,iy=y+50;
+  rect(svg,ix,iy,140,140,'#fffaf1',24);
+  const slots=HOME_SLOTS[color];
+  slots.forEach(([cx,cy],i)=>{
+    // White pocket when empty; renderBoard fills it with the player's
+    // house color while the token remains at home.
+    const s=svgEl('circle',{
+      cx,cy,r:25,fill:'#fffaf1',stroke:COLOR_FILL[color],
+      'stroke-width':3,class:'slot',id:`slot-${color}-${i}`
+    });
+    svg.appendChild(s);
+  });
+}
 function drawBoard(){const svg=document.getElementById('board');svg.innerHTML='';drawHome(svg,'red',0,0);drawHome(svg,'green',360,0);drawHome(svg,'yellow',360,360);drawHome(svg,'blue',0,360);
   PATH.forEach(([r,c],i)=>{const [cx,cy]=xy(r,c);const fill=(i===START.green?COLOR_FILL.green:i===START.yellow?COLOR_FILL.yellow:i===START.blue?COLOR_FILL.blue:i===START.red?COLOR_FILL.red:'#fffdf9');rect(svg,c*40,r*40,40,40,fill,0,'track-cell')});
   for(const [color,arr] of Object.entries(LANES))arr.forEach(([r,c])=>rect(svg,c*40,r*40,40,40,COLOR_LIGHT[color],0,'track-cell'));
@@ -141,12 +156,89 @@ function posXY(color,pos){if(pos<0)return null;if(pos===58)return [300,300];if(p
 function homeXY(color,token){return HOME_SLOTS[color][token]}
 function stackOffsets(n){if(n===1)return [[0,0]];if(n===2)return [[-9,0],[9,0]];if(n===3)return [[-9,-8],[9,-8],[0,9]];return [[-9,-9],[9,-9],[-9,9],[9,9]]}
 function tokenKey(pid,i){return 'token-'+String(pid).replace(/[^a-zA-Z0-9_-]/g,'_')+'-'+i}
-function renderBoard(d){drawBoard();const svg=document.getElementById('board');
-  // Make empty home slots look like physical token pockets; actual goti stay hidden until a 6 moves them out.
-  for(const p of d.players){const arr=d.positions[String(p.id)]||[-1,-1,-1,-1];arr.forEach((pos,i)=>{const slot=document.getElementById(`slot-${p.color}-${i}`);if(slot && String(p.id)===String(myId) && Array.isArray(d.movable) && d.movable.includes(i)){slot.classList.add('clickable');slot.addEventListener('click',()=>moveToken(i),{once:true})}
-    if(pos<0||pos===58)return;const target=posXY(p.color,pos);if(!target)return;const same=[];for(const op of d.players){const oa=d.positions[String(op.id)]||[];oa.forEach((ov,oi)=>{if(oi===i&&String(op.id)===String(p.id))return;if(ov>=0&&ov<=51&&pos>=0&&pos<=51&&posXY(op.color,ov)?.join(',')===target.join(','))same.push(1)})}
-    const offsets=stackOffsets(same.length+1);const [dx,dy]=offsets[Math.min(same.length,offsets.length-1)];const c=svgEl('circle',{cx:target[0]+dx,cy:target[1]+dy,r:14,fill:COLOR_FILL[p.color],class:'token',id:tokenKey(p.id,i)});if(String(p.id)===String(myId)&&Array.isArray(d.movable)&&d.movable.includes(i)){c.classList.add('movable');c.addEventListener('click',()=>moveToken(i),{once:true})}svg.appendChild(c);const num=svgEl('text',{x:target[0]+dx,y:target[1]+dy+1,class:'token-id'});num.textContent=String(i+1);svg.appendChild(num);
-  })}}
+function renderBoard(d){
+  drawBoard();
+  const svg=document.getElementById('board');
+
+  for(const p of d.players){
+    const arr=d.positions[String(p.id)]||[-1,-1,-1,-1];
+
+    arr.forEach((pos,i)=>{
+      const slot=document.getElementById(`slot-${p.color}-${i}`);
+
+      // Tokens that are still in the home are always visible in the
+      // matching house colour, so players can immediately count them.
+      if(pos<0){
+        if(!slot) return;
+        slot.setAttribute('fill',COLOR_FILL[p.color]);
+        slot.setAttribute('stroke','#fff');
+        slot.setAttribute('stroke-width','4');
+        slot.classList.remove('clickable');
+
+        // Only legal tokens for this roll glow. A normal 1–5 never makes
+        // all four home tokens blink; a 6 only highlights the home tokens
+        // that can actually leave the base.
+        if(
+          String(p.id)===String(myId) &&
+          Array.isArray(d.movable) &&
+          d.movable.includes(i)
+        ){
+          slot.classList.add('clickable');
+          slot.addEventListener('click',()=>moveToken(i),{once:true});
+        }
+        return;
+      }
+
+      // Once a token leaves home, restore that pocket to its empty state.
+      if(slot){
+        slot.setAttribute('fill','#fffaf1');
+        slot.setAttribute('stroke',COLOR_FILL[p.color]);
+        slot.setAttribute('stroke-width','3');
+        slot.classList.remove('clickable');
+      }
+
+      if(pos===58)return;
+      const target=posXY(p.color,pos);
+      if(!target)return;
+
+      const same=[];
+      for(const op of d.players){
+        const oa=d.positions[String(op.id)]||[];
+        oa.forEach((ov,oi)=>{
+          if(oi===i&&String(op.id)===String(p.id))return;
+          if(
+            ov>=0&&ov<=51&&pos>=0&&pos<=51&&
+            posXY(op.color,ov)?.join(',')===target.join(',')
+          )same.push(1);
+        });
+      }
+
+      const offsets=stackOffsets(same.length+1);
+      const [dx,dy]=offsets[Math.min(same.length,offsets.length-1)];
+      const token=svgEl('circle',{
+        cx:target[0]+dx,cy:target[1]+dy,r:14,
+        fill:COLOR_FILL[p.color],class:'token',
+        id:tokenKey(p.id,i)
+      });
+
+      if(
+        String(p.id)===String(myId) &&
+        Array.isArray(d.movable) &&
+        d.movable.includes(i)
+      ){
+        token.classList.add('movable');
+        token.addEventListener('click',()=>moveToken(i),{once:true});
+      }
+      svg.appendChild(token);
+
+      const num=svgEl('text',{
+        x:target[0]+dx,y:target[1]+dy+1,class:'token-id'
+      });
+      num.textContent=String(i+1);
+      svg.appendChild(num);
+    });
+  }
+}
 function renderScore(d){const s=document.getElementById('score');s.innerHTML='';for(const p of d.players){const arr=d.positions[String(p.id)]||[];const done=arr.filter(v=>v===58).length;const div=document.createElement('div');div.className='pill';div.innerHTML=`<span style="color:${COLOR_FILL[p.color]}">●</span> ${escapeHtml(p.name)} · ${done}/4`;s.appendChild(div)}}
 function showRoll(n){if(!n)return;const b=document.getElementById('rollBtn');document.getElementById('diceFace').textContent=DICE[n]||'🎲';b.classList.remove('rolling');b.classList.add('show');clearTimeout(diceTimer);diceTimer=setTimeout(()=>{b.classList.remove('show')},900)}
 function resetDice(){const b=document.getElementById('rollBtn');b.classList.remove('rolling','show');document.getElementById('diceFace').textContent='🎲'}
