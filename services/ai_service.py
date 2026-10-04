@@ -610,7 +610,7 @@ async def _call_elite_api(text_value, usage_context=None):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
                     return None
                 try:
-                                async with session.post(
+                    async with session.post(
                         f"{ELITE_LLM_BASE_URL}/chat/completions",
                         headers=_ai_headers(ELITE_LLM_API_KEY),
                         json=payload,
