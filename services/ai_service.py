@@ -476,18 +476,10 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
 
     for name, fn in providers:
         try:
-            if usage_context:
-                asyncio.create_task(record_ai_usage(
-                    name,
-                    usage_context.get("user_id"),
-                    usage_context.get("user_name"),
-                    usage_context.get("username"),
-                    usage_context.get("chat_id"),
-                    usage_context.get("chat_type"),
-                    usage_context.get("chat_title"),
-                ))
-
-            answer = await asyncio.wait_for(fn(prompt), timeout=timeouts[name])
+            answer = await asyncio.wait_for(
+                fn(prompt, usage_context=usage_context),
+                timeout=timeouts[name],
+            )
             safe = _sanitize_vanya_reply(
                 answer, max_words=max_words, max_lines=max_lines
             ) if answer else ""
@@ -572,7 +564,26 @@ def _ai_headers(api_key):
     }
 
 
-async def _call_elite_api(text_value):
+async def _record_ai_request(provider, usage_context):
+    """Record exactly one outgoing HTTP request to a configured AI provider."""
+    if not usage_context:
+        return
+    try:
+        asyncio.create_task(record_ai_usage(
+            provider,
+            usage_context.get("user_id"),
+            usage_context.get("user_name"),
+            usage_context.get("username"),
+            usage_context.get("chat_id"),
+            usage_context.get("chat_type"),
+            usage_context.get("chat_title"),
+        ))
+    except RuntimeError:
+        # Event loop is already shutting down; never affect the AI request.
+        pass
+
+
+async def _call_elite_api(text_value, usage_context=None):
     """Call the documented OpenAI-compatible Elite endpoint."""
     import aiohttp
     if not ELITE_LLM_API_KEY:
@@ -618,6 +629,7 @@ async def _call_elite_api(text_value):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
                     return None
                 try:
+                    await _record_ai_request("elite", usage_context)
                     async with session.post(
                         f"{ELITE_LLM_BASE_URL}/chat/completions",
                         headers=_ai_headers(ELITE_LLM_API_KEY),
@@ -670,7 +682,7 @@ async def _call_elite_api(text_value):
     return None
 
 
-async def _call_elite_api_stream(text_value, on_chunk):
+async def _call_elite_api_stream(text_value, on_chunk, usage_context=None):
     """Stream Elite output so the user sees the reply as soon as tokens arrive."""
     import aiohttp
     if not ELITE_LLM_API_KEY:
@@ -704,6 +716,7 @@ async def _call_elite_api_stream(text_value, on_chunk):
     collected = []
     last_callback = 0.0
     try:
+        await _record_ai_request("elite", usage_context)
         async with session.post(
             f"{ELITE_LLM_BASE_URL}/chat/completions",
             headers=_ai_headers(ELITE_LLM_API_KEY),
@@ -764,7 +777,7 @@ async def _call_elite_api_stream(text_value, on_chunk):
     return None
 
 
-async def _call_cloudflare_api(text_value):
+async def _call_cloudflare_api(text_value, usage_context=None):
     """Call Cloudflare Workers AI through its OpenAI-compatible REST endpoint."""
     import aiohttp
     if not CLOUDFLARE_API_TOKEN or not CLOUDFLARE_ACCOUNT_ID:
@@ -790,6 +803,7 @@ async def _call_cloudflare_api(text_value):
     }
 
     try:
+        await _record_ai_request("cloudflare", usage_context)
         async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
             raw = await resp.text()
             if resp.status >= 400:
@@ -828,7 +842,7 @@ async def _call_cloudflare_api(text_value):
         return None
 
 
-async def _call_ollama_api(text_value):
+async def _call_ollama_api(text_value, usage_context=None):
     """Call Ollama Cloud /api/chat and read message.content."""
     import aiohttp
     if not OLLAMA_API_KEY or not OLLAMA_API_URL:
@@ -852,6 +866,7 @@ async def _call_ollama_api(text_value):
     }
 
     try:
+        await _record_ai_request("ollama", usage_context)
         async with session.post(
             OLLAMA_API_URL,
             headers=headers,
@@ -890,7 +905,7 @@ async def _call_ollama_api(text_value):
         return None
 
 
-async def _call_chatgp_api(text_value):
+async def _call_chatgp_api(text_value, usage_context=None):
     """Fallback ChatGP API: POST /api/chat with {prompt} and read {response}."""
     import aiohttp
     # The ChatGP endpoint may be configured with or without an auth token.
@@ -906,6 +921,7 @@ async def _call_chatgp_api(text_value):
             "prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}",
             "message": text_value,
         }
+        await _record_ai_request("chatgp", usage_context)
         async with session.post(
             request_url,
             headers=headers,
@@ -1198,92 +1214,3 @@ def _strip_non_custom_emoji(text_value):
         if _is_emoji_codepoint(ch):
             i += 1
             while i < len(value):
-                cp = ord(value[i])
-                if cp in (0xFE0E, 0xFE0F, 0x200D) or 0x1F3FB <= cp <= 0x1F3FF or 0x20E3 <= cp <= 0x20FF:
-                    i += 1
-                    continue
-                if _is_emoji_codepoint(value[i]):
-                    i += 1
-                    continue
-                break
-            continue
-        if ord(ch) in (0xFE0E, 0xFE0F):
-            i += 1
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
-
-
-async def _premiumize_text(text_value):
-    """Sanitize AI text before sending it to Telegram.
-
-    AI/provider output must never expose Telegram custom-emoji markup or
-    emoji-id values. Keep the visible text only; custom emoji rendering is
-    intentionally disabled here so raw IDs can never leak to users.
-    """
-    text_value = str(text_value or "")
-
-    # Remove complete custom-emoji tags and their attributes.
-    text_value = re.sub(
-        r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
-        r"\\1",
-        text_value,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    # Also handle malformed/incomplete tags produced by an AI provider.
-    text_value = re.sub(r"<tg-emoji\\b[^>]*>", "", text_value, flags=re.IGNORECASE)
-    text_value = re.sub(r"</tg-emoji>", "", text_value, flags=re.IGNORECASE)
-    # Never let an emoji-id attribute/value appear as visible chat text.
-    text_value = re.sub(r"\\bemoji-id\\s*=\\s*[\\\"']?[^\\s>\\\"']+[\\\"']?", "", text_value, flags=re.IGNORECASE)
-    text_value = re.sub(r"\\bemoji[_ -]?id\\s*[:=]\\s*\\d+", "", text_value, flags=re.IGNORECASE)
-
-    # Remove any other raw HTML tags that a provider may emit.
-    text_value = re.sub(r"<[^>]+>", "", text_value)
-
-    # Telegram parse_mode=HTML requires HTML escaping.
-    return html.escape(text_value), False
-
-
-async def send_vanya_reply(update, text_value):
-    try:
-        rendered, _ = await _premiumize_text(text_value)
-    except Exception as exc:
-        print(f"[CustomEmoji] sanitizing failed: {type(exc).__name__}: {exc}")
-        rendered = html.escape(str(text_value or ""))
-
-    if AI_DISCLOSURE and update.effective_chat.type=="private":
-        u=await get_user(update.effective_user.id)
-        if not u.get("ai_disclosure_sent"):
-            disclosure, _ = await _premiumize_text(
-                "Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
-            )
-            await update.effective_chat.send_message(disclosure, parse_mode="HTML")
-            await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
-
-    try:
-        await update.message.reply_text(rendered, parse_mode="HTML")
-    except Exception as exc:
-        # The original message can disappear before the AI reply is sent.
-        # Send a normal chat message instead of losing Vanya's response.
-        print(f"[GroupChat][ReplyFallback] {type(exc).__name__}: {exc}")
-        try:
-            await update.effective_chat.send_message(rendered, parse_mode="HTML")
-        except Exception as fallback_exc:
-            print(
-                f"[GroupChat][SendFallback] "
-                f"{type(fallback_exc).__name__}: {fallback_exc}"
-            )
-
-async def cleanup_expired_memory():
-    cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
-    try:
-        await users.update_many({}, {"$pull":{
-            "chat_history":{"ts":{"$lt":cutoff}},
-            "memory":{"ts":{"$lt":cutoff}},
-            "memories":{"ts":{"$lt":cutoff}}
-        }})
-    except Exception as exc:
-        print(f"[MemoryCleanup] {type(exc).__name__}: {exc}")
-
-# ───────────────────── callbacks + chat ─────────────────────
