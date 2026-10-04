@@ -1384,6 +1384,7 @@ async def uno_ws(request):
                     room['pending_color']=chosen
                 uno_apply_card(room,p,card)
                 if not p['hand']: room['winner']=p['id']
+                if room.get('winner'): await _uno_award(room)
                 room['updated']=time.time(); await send_uno_state(room)
                 if room['started'] and not room['winner'] and uno_current(room).get('bot'): asyncio.create_task(maybe_uno_bot_turn(room))
             elif typ=='chat':
