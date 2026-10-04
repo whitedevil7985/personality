@@ -547,7 +547,7 @@ def _ai_headers(api_key):
 
 
 async def _record_ai_request(provider, usage_context):
-    """Record exactly one outgoing AI-provider HTTP request."""
+    """Record one successful AI-provider response for usage statistics."""
     if not usage_context:
         return
     try:
@@ -610,8 +610,7 @@ async def _call_elite_api(text_value, usage_context=None):
                 if not await _try_get_ai_slot(float(os.getenv("AI_RATE_WAIT_SECONDS", "0.10"))):
                     return None
                 try:
-                    await _record_ai_request("elite", usage_context)
-                    async with session.post(
+                                async with session.post(
                         f"{ELITE_LLM_BASE_URL}/chat/completions",
                         headers=_ai_headers(ELITE_LLM_API_KEY),
                         json=payload,
@@ -650,6 +649,7 @@ async def _call_elite_api(text_value, usage_context=None):
                         if not answer:
                             raise RuntimeError("Empty response")
                         await _set_ai_provider_status("elite", True)
+                        await _record_ai_request("elite", usage_context)
                         return answer
                 except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
                     last_error = exc
@@ -697,7 +697,6 @@ async def _call_elite_api_stream(text_value, on_chunk, usage_context=None):
     collected = []
     last_callback = 0.0
     try:
-        await _record_ai_request("elite", usage_context)
         async with session.post(
             f"{ELITE_LLM_BASE_URL}/chat/completions",
             headers=_ai_headers(ELITE_LLM_API_KEY),
@@ -748,6 +747,7 @@ async def _call_elite_api_stream(text_value, on_chunk, usage_context=None):
             answer = "".join(collected).strip()
             if answer:
                 await _set_ai_provider_status("elite", True)
+                await _record_ai_request("elite", usage_context)
                 await on_chunk(answer)
                 return answer
 
@@ -784,7 +784,6 @@ async def _call_cloudflare_api(text_value, usage_context=None):
     }
 
     try:
-        await _record_ai_request("cloudflare", usage_context)
         async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
             raw = await resp.text()
             if resp.status >= 400:
@@ -815,6 +814,7 @@ async def _call_cloudflare_api(text_value, usage_context=None):
                 await _set_ai_provider_status("cloudflare", False, "Empty response")
                 return None
             await _set_ai_provider_status("cloudflare", True)
+            await _record_ai_request("cloudflare", usage_context)
             return answer
     except Exception as exc:
         await _set_ai_provider_status(
@@ -847,7 +847,6 @@ async def _call_ollama_api(text_value, usage_context=None):
     }
 
     try:
-        await _record_ai_request("ollama", usage_context)
         async with session.post(
             OLLAMA_API_URL,
             headers=headers,
@@ -878,6 +877,7 @@ async def _call_ollama_api(text_value, usage_context=None):
                 return None
 
             await _set_ai_provider_status("ollama", True)
+            await _record_ai_request("ollama", usage_context)
             return answer
     except Exception as exc:
         await _set_ai_provider_status(
@@ -902,7 +902,6 @@ async def _call_chatgp_api(text_value, usage_context=None):
             "prompt": f"{VANYA_SYSTEM_PROMPT}\n\n{text_value}",
             "message": text_value,
         }
-        await _record_ai_request("chatgp", usage_context)
         async with session.post(
             request_url,
             headers=headers,
@@ -926,6 +925,7 @@ async def _call_chatgp_api(text_value, usage_context=None):
                 await _set_ai_provider_status("chatgp", False, f"Empty response ({shape})")
                 return None
             await _set_ai_provider_status("chatgp", True)
+            await _record_ai_request("chatgp", usage_context)
             return answer
     except Exception as exc:
         await _set_ai_provider_status("chatgp", False, f"{type(exc).__name__}: {exc}")
