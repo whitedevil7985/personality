@@ -423,24 +423,6 @@ def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     text = str(answer or "").strip()
     if not text:
         return ""
-
-    # Some upstream gateways return a literal placeholder such as
-    # "[No reply]" instead of an actual model answer. Treat these as a
-    # failed provider response so the next fallback can be tried.
-    normalized = re.sub(r"\s+", " ", text).strip().casefold()
-    unusable_placeholders = {
-        "[no reply]",
-        "no reply",
-        "[no response]",
-        "no response",
-        "[empty response]",
-        "empty response",
-        "null",
-        "none",
-    }
-    if normalized in unusable_placeholders:
-        return ""
-
     private_patterns = (
         r"https?://[^\s<>]+",
         r"(?i)\b(?:elite\s*llm|chatgp|gpt[- ]?[0-9.]+|openai|gemini|anthropic|claude|cerebras)\b",
@@ -476,6 +458,17 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
 
     for name, fn in providers:
         try:
+            if usage_context:
+                asyncio.create_task(record_ai_usage(
+                    name,
+                    usage_context.get("user_id"),
+                    usage_context.get("user_name"),
+                    usage_context.get("username"),
+                    usage_context.get("chat_id"),
+                    usage_context.get("chat_type"),
+                    usage_context.get("chat_title"),
+                ))
+
             answer = await asyncio.wait_for(
                 fn(prompt, usage_context=usage_context),
                 timeout=timeouts[name],
@@ -565,7 +558,7 @@ def _ai_headers(api_key):
 
 
 async def _record_ai_request(provider, usage_context):
-    """Record exactly one outgoing HTTP request to a configured AI provider."""
+    """Record exactly one outgoing AI-provider HTTP request."""
     if not usage_context:
         return
     try:
@@ -579,7 +572,6 @@ async def _record_ai_request(provider, usage_context):
             usage_context.get("chat_title"),
         ))
     except RuntimeError:
-        # Event loop is already shutting down; never affect the AI request.
         pass
 
 
@@ -983,81 +975,6 @@ async def probe_ai_providers():
     return results
 
 
-async def _ai_health_monitor(bot, interval_seconds=None):
-    """Run a full AI provider health check every 30 minutes and send it to the logger."""
-    interval = max(
-        60.0,
-        float(
-            interval_seconds
-            if interval_seconds is not None
-            else os.getenv("AI_HEALTH_CHECK_INTERVAL_SECONDS", "1800")
-        ),
-    )
-
-    while True:
-        try:
-            await asyncio.sleep(interval)
-            checked_at = datetime.now(
-                timezone(timedelta(hours=5, minutes=30))
-            ).strftime("%d %b %Y, %I:%M:%S %p IST")
-
-            try:
-                results = await probe_ai_providers()
-            except Exception as exc:
-                print(f"[AI][HEALTH] Probe cycle failed: {type(exc).__name__}: {exc}")
-                results = {
-                    "elite": False,
-                    "chatgp": False,
-                    "cloudflare": False,
-                    "ollama": False,
-                }
-
-            configured = {
-                "elite": bool(ELITE_LLM_API_KEY),
-                "chatgp": bool(CHATGP_API_URL),
-                "cloudflare": bool(CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID),
-                "ollama": bool(OLLAMA_API_KEY and OLLAMA_API_URL),
-            }
-            labels = {
-                "elite": "Elite LLM",
-                "chatgp": "ChatGP",
-                "cloudflare": "Cloudflare Workers AI",
-                "ollama": "Ollama Cloud",
-            }
-
-            status_lines = []
-            for name in ("elite", "chatgp", "cloudflare", "ollama"):
-                if not configured[name]:
-                    status = "⚪ NOT CONFIGURED"
-                elif results.get(name):
-                    status = "🟢 WORKING"
-                else:
-                    status = "🔴 DOWN / FAILED"
-                status_lines.append(f"┃ {labels[name]}: <b>{status}</b>")
-
-            working = sum(
-                1 for name in ("elite", "chatgp", "cloudflare", "ollama")
-                if configured[name] and results.get(name)
-            )
-            available = sum(1 for name in ("elite", "chatgp", "cloudflare", "ollama") if configured[name])
-
-            message = (
-                "╭━━━〔 🩺 <b>AI API HEALTH CHECK</b> 〕━━━╮\n"
-                f"┃ 🕒 <b>Checked:</b> {html.escape(checked_at)}\n"
-                "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                + "\n".join(status_lines)
-                + "\n\n"
-                f"🧮 <b>Working:</b> {working}/{available} configured APIs\n"
-                "🔁 <b>Fallback:</b> Elite → ChatGP → Cloudflare → Ollama → Local Vanya"
-            )
-            await log_event(type("AIHealthContext", (), {"bot": bot})(), message)
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            print(f"[AI][HEALTH] Monitor error: {type(exc).__name__}: {exc}")
-
-
 async def _save_chat_state_background(user_id, user_text, answer):
     """Persist memory/history after the user already received the fast reply."""
     try:
@@ -1214,3 +1131,92 @@ def _strip_non_custom_emoji(text_value):
         if _is_emoji_codepoint(ch):
             i += 1
             while i < len(value):
+                cp = ord(value[i])
+                if cp in (0xFE0E, 0xFE0F, 0x200D) or 0x1F3FB <= cp <= 0x1F3FF or 0x20E3 <= cp <= 0x20FF:
+                    i += 1
+                    continue
+                if _is_emoji_codepoint(value[i]):
+                    i += 1
+                    continue
+                break
+            continue
+        if ord(ch) in (0xFE0E, 0xFE0F):
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+async def _premiumize_text(text_value):
+    """Sanitize AI text before sending it to Telegram.
+
+    AI/provider output must never expose Telegram custom-emoji markup or
+    emoji-id values. Keep the visible text only; custom emoji rendering is
+    intentionally disabled here so raw IDs can never leak to users.
+    """
+    text_value = str(text_value or "")
+
+    # Remove complete custom-emoji tags and their attributes.
+    text_value = re.sub(
+        r"<tg-emoji\\b[^>]*>(.*?)</tg-emoji>",
+        r"\\1",
+        text_value,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # Also handle malformed/incomplete tags produced by an AI provider.
+    text_value = re.sub(r"<tg-emoji\\b[^>]*>", "", text_value, flags=re.IGNORECASE)
+    text_value = re.sub(r"</tg-emoji>", "", text_value, flags=re.IGNORECASE)
+    # Never let an emoji-id attribute/value appear as visible chat text.
+    text_value = re.sub(r"\\bemoji-id\\s*=\\s*[\\\"']?[^\\s>\\\"']+[\\\"']?", "", text_value, flags=re.IGNORECASE)
+    text_value = re.sub(r"\\bemoji[_ -]?id\\s*[:=]\\s*\\d+", "", text_value, flags=re.IGNORECASE)
+
+    # Remove any other raw HTML tags that a provider may emit.
+    text_value = re.sub(r"<[^>]+>", "", text_value)
+
+    # Telegram parse_mode=HTML requires HTML escaping.
+    return html.escape(text_value), False
+
+
+async def send_vanya_reply(update, text_value):
+    try:
+        rendered, _ = await _premiumize_text(text_value)
+    except Exception as exc:
+        print(f"[CustomEmoji] sanitizing failed: {type(exc).__name__}: {exc}")
+        rendered = html.escape(str(text_value or ""))
+
+    if AI_DISCLOSURE and update.effective_chat.type=="private":
+        u=await get_user(update.effective_user.id)
+        if not u.get("ai_disclosure_sent"):
+            disclosure, _ = await _premiumize_text(
+                "Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
+            )
+            await update.effective_chat.send_message(disclosure, parse_mode="HTML")
+            await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
+
+    try:
+        await update.message.reply_text(rendered, parse_mode="HTML")
+    except Exception as exc:
+        # The original message can disappear before the AI reply is sent.
+        # Send a normal chat message instead of losing Vanya's response.
+        print(f"[GroupChat][ReplyFallback] {type(exc).__name__}: {exc}")
+        try:
+            await update.effective_chat.send_message(rendered, parse_mode="HTML")
+        except Exception as fallback_exc:
+            print(
+                f"[GroupChat][SendFallback] "
+                f"{type(fallback_exc).__name__}: {fallback_exc}"
+            )
+
+async def cleanup_expired_memory():
+    cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
+    try:
+        await users.update_many({}, {"$pull":{
+            "chat_history":{"ts":{"$lt":cutoff}},
+            "memory":{"ts":{"$lt":cutoff}},
+            "memories":{"ts":{"$lt":cutoff}}
+        }})
+    except Exception as exc:
+        print(f"[MemoryCleanup] {type(exc).__name__}: {exc}")
+
+# ───────────────────── callbacks + chat ─────────────────────
