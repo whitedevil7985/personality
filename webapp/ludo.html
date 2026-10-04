@@ -54,11 +54,11 @@ const COLORS=['red','green','yellow','blue'];
 const COLOR_FILL={green:'#58c77c',yellow:'#f2bd3a',red:'#ef645d',blue:'#5ea1df'};
 const COLOR_LIGHT={green:'#d4f0dc',yellow:'#fff0bd',red:'#ffd7d2',blue:'#d6e8fa'};
 const DICE=['','⚀','⚁','⚂','⚃','⚄','⚅'];
-const PATH=[[6,0],[6,1],[6,2],[6,3],[6,4],[6,5],[5,6],[4,6],[3,6],[2,6],[1,6],[0,6],[0,7],[0,8],[1,8],[2,8],[3,8],[4,8],[5,8],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[7,14],[8,14],[8,13],[8,12],[8,11],[8,10],[8,9],[9,8],[10,8],[11,8],[12,8],[13,8],[14,8],[14,7],[14,6],[13,6],[12,6],[11,6],[10,6],[9,6],[8,5],[8,4],[8,3],[8,2],[8,1],[8,0],[7,0]];
-const START={green:1,yellow:14,blue:27,red:40};
-const LANES={green:[[7,1],[7,2],[7,3],[7,4],[7,5]],yellow:[[1,7],[2,7],[3,7],[4,7],[5,7]],blue:[[7,13],[7,12],[7,11],[7,10],[7,9]],red:[[13,7],[12,7],[11,7],[10,7],[9,7]]};
-const HOME_SLOTS={green:[[80,80],[160,80],[80,160],[160,160]],yellow:[[440,80],[520,80],[440,160],[520,160]],red:[[80,440],[160,440],[80,520],[160,520]],blue:[[440,440],[520,440],[440,520],[520,520]]};
-const SAFE_INDEX=new Set([1,9,14,22,27,35,40,48]);
+const PATH=[[6,1],[6,2],[6,3],[6,4],[6,5],[5,6],[4,6],[3,6],[2,6],[1,6],[0,6],[0,7],[0,8],[1,8],[2,8],[3,8],[4,8],[5,8],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[7,14],[8,14],[8,13],[8,12],[8,11],[8,10],[8,9],[9,8],[10,8],[11,8],[12,8],[13,8],[14,8],[14,7],[14,6],[13,6],[12,6],[11,6],[10,6],[9,6],[8,5],[8,4],[8,3],[8,2],[8,1],[8,0],[7,0],[6,0]];
+const START={red:0,green:13,yellow:26,blue:39};
+const LANES={red:[[7,1],[7,2],[7,3],[7,4],[7,5],[7,6]],green:[[1,7],[2,7],[3,7],[4,7],[5,7],[6,7]],yellow:[[7,13],[7,12],[7,11],[7,10],[7,9],[7,8]],blue:[[13,7],[12,7],[11,7],[10,7],[9,7],[8,7]]};
+const HOME_SLOTS={red:[[80,80],[160,80],[80,160],[160,160]],green:[[440,80],[520,80],[440,160],[520,160]],yellow:[[440,440],[520,440],[440,520],[520,520]],blue:[[80,440],[160,440],[80,520],[160,520]]};
+const SAFE_INDEX=new Set([0,8,13,21,26,34,39,47]);
 let ws=null,room='',state=null,previous=null,myId='',selected='red',botUsername='ItzVanyaBot',diceTimer=null,spectator=false ,ended=false;
 const q=new URLSearchParams(location.search);room=(q.get('room')||'').toUpperCase();
 const tgUser=tg?.initDataUnsafe?.user;
@@ -84,7 +84,7 @@ function xy(r,c){return [c*40+20,r*40+20]}
 function svgEl(tag,attrs={}){const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const[k,v]of Object.entries(attrs))e.setAttribute(k,String(v));return e}
 function rect(svg,x,y,w,h,fill,rx=0,cls=''){const e=svgEl('rect',{x,y,width:w,height:h,fill,rx,class:cls});svg.appendChild(e);return e}
 function drawHome(svg,color,x,y){const h=rect(svg,x,y,240,240,COLOR_LIGHT[color],28,'home-base');h.setAttribute('stroke',COLOR_FILL[color]);const ix=x+50,iy=y+50;rect(svg,ix,iy,140,140,'#fffaf1',24);const slots=HOME_SLOTS[color];slots.forEach(([cx,cy],i)=>{const s=svgEl('circle',{cx,cy,r:25,fill:'#fffaf1',stroke:COLOR_FILL[color],'stroke-width':3,class:'slot',id:`slot-${color}-${i}`});svg.appendChild(s);})}
-function drawBoard(){const svg=document.getElementById('board');svg.innerHTML='';drawHome(svg,'green',0,0);drawHome(svg,'yellow',360,0);drawHome(svg,'red',0,360);drawHome(svg,'blue',360,360);
+function drawBoard(){const svg=document.getElementById('board');svg.innerHTML='';drawHome(svg,'red',0,0);drawHome(svg,'green',360,0);drawHome(svg,'yellow',360,360);drawHome(svg,'blue',0,360);
   PATH.forEach(([r,c],i)=>{const [cx,cy]=xy(r,c);const fill=(i===START.green?COLOR_FILL.green:i===START.yellow?COLOR_FILL.yellow:i===START.blue?COLOR_FILL.blue:i===START.red?COLOR_FILL.red:'#fffdf9');rect(svg,c*40,r*40,40,40,fill,0,'track-cell')});
   for(const [color,arr] of Object.entries(LANES))arr.forEach(([r,c])=>rect(svg,c*40,r*40,40,40,COLOR_LIGHT[color],0,'track-cell'));
   // centre finish triangle
@@ -92,17 +92,17 @@ function drawBoard(){const svg=document.getElementById('board');svg.innerHTML=''
   svg.appendChild(svgEl('polygon',{points:'240,240 360,240 300,300',fill:COLOR_FILL.yellow}));svg.appendChild(svgEl('polygon',{points:'360,240 360,360 300,300',fill:COLOR_FILL.blue}));svg.appendChild(svgEl('polygon',{points:'360,360 240,360 300,300',fill:COLOR_FILL.red}));svg.appendChild(svgEl('polygon',{points:'240,360 240,240 300,300',fill:COLOR_FILL.green}));
   SAFE_INDEX.forEach(i=>{const [r,c]=PATH[i];const [cx,cy]=xy(r,c);const t=svgEl('text',{x:cx,y:cy+5,class:'safe-star','text-anchor':'middle'});t.textContent='★';svg.appendChild(t)});
 }
-function posXY(color,pos){if(pos<0)return null;if(pos===56)return [300,300];if(pos<=51){const idx=(START[color]+pos)%52;return xy(PATH[idx][0],PATH[idx][1])}const lane=LANES[color];const p=lane[Math.min(pos-52,lane.length-1)];return xy(p[0],p[1])}
+function posXY(color,pos){if(pos<0)return null;if(pos===58)return [300,300];if(pos<=51){const idx=(START[color]+pos)%52;return xy(PATH[idx][0],PATH[idx][1])}const lane=LANES[color];const p=lane[pos-52];return p?xy(p[0],p[1]):null}
 function homeXY(color,token){return HOME_SLOTS[color][token]}
 function stackOffsets(n){if(n===1)return [[0,0]];if(n===2)return [[-9,0],[9,0]];if(n===3)return [[-9,-8],[9,-8],[0,9]];return [[-9,-9],[9,-9],[-9,9],[9,9]]}
 function tokenKey(pid,i){return 'token-'+String(pid).replace(/[^a-zA-Z0-9_-]/g,'_')+'-'+i}
 function renderBoard(d){drawBoard();const svg=document.getElementById('board');
   // Make empty home slots look like physical token pockets; actual goti stay hidden until a 6 moves them out.
   for(const p of d.players){const arr=d.positions[String(p.id)]||[-1,-1,-1,-1];arr.forEach((pos,i)=>{const slot=document.getElementById(`slot-${p.color}-${i}`);if(slot && String(p.id)===String(myId) && Array.isArray(d.movable) && d.movable.includes(i)){slot.classList.add('clickable');slot.addEventListener('click',()=>moveToken(i),{once:true})}
-    if(pos<0||pos===56)return;const target=posXY(p.color,pos);if(!target)return;const same=[];for(const op of d.players){const oa=d.positions[String(op.id)]||[];oa.forEach((ov,oi)=>{if(oi===i&&String(op.id)===String(p.id))return;if(ov>=0&&ov<56&&pos>=0&&pos<56&&posXY(op.color,ov)?.join(',')===target.join(','))same.push(1)})}
+    if(pos<0||pos===58)return;const target=posXY(p.color,pos);if(!target)return;const same=[];for(const op of d.players){const oa=d.positions[String(op.id)]||[];oa.forEach((ov,oi)=>{if(oi===i&&String(op.id)===String(p.id))return;if(ov>=0&&ov<=51&&pos>=0&&pos<=51&&posXY(op.color,ov)?.join(',')===target.join(','))same.push(1)})}
     const offsets=stackOffsets(same.length+1);const [dx,dy]=offsets[Math.min(same.length,offsets.length-1)];const c=svgEl('circle',{cx:target[0]+dx,cy:target[1]+dy,r:14,fill:COLOR_FILL[p.color],class:'token',id:tokenKey(p.id,i)});if(String(p.id)===String(myId)&&Array.isArray(d.movable)&&d.movable.includes(i)){c.classList.add('movable');c.addEventListener('click',()=>moveToken(i),{once:true})}svg.appendChild(c);const num=svgEl('text',{x:target[0]+dx,y:target[1]+dy+1,class:'token-id'});num.textContent=String(i+1);svg.appendChild(num);
   })}}
-function renderScore(d){const s=document.getElementById('score');s.innerHTML='';for(const p of d.players){const arr=d.positions[String(p.id)]||[];const done=arr.filter(v=>v===56).length;const div=document.createElement('div');div.className='pill';div.innerHTML=`<span style="color:${COLOR_FILL[p.color]}">●</span> ${escapeHtml(p.name)} · ${done}/4`;s.appendChild(div)}}
+function renderScore(d){const s=document.getElementById('score');s.innerHTML='';for(const p of d.players){const arr=d.positions[String(p.id)]||[];const done=arr.filter(v=>v===58).length;const div=document.createElement('div');div.className='pill';div.innerHTML=`<span style="color:${COLOR_FILL[p.color]}">●</span> ${escapeHtml(p.name)} · ${done}/4`;s.appendChild(div)}}
 function showRoll(n){if(!n)return;const b=document.getElementById('rollBtn');document.getElementById('diceFace').textContent=DICE[n]||'🎲';b.classList.remove('rolling');b.classList.add('show');clearTimeout(diceTimer);diceTimer=setTimeout(()=>{b.classList.remove('show')},900)}
 function resetDice(){const b=document.getElementById('rollBtn');b.classList.remove('rolling','show');document.getElementById('diceFace').textContent='🎲'}
 function showSix(){const f=document.getElementById('flash');f.classList.remove('show');void f.offsetWidth;f.classList.add('show')}
