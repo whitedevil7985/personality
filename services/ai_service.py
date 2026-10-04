@@ -458,17 +458,6 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
 
     for name, fn in providers:
         try:
-            if usage_context:
-                asyncio.create_task(record_ai_usage(
-                    name,
-                    usage_context.get("user_id"),
-                    usage_context.get("user_name"),
-                    usage_context.get("username"),
-                    usage_context.get("chat_id"),
-                    usage_context.get("chat_type"),
-                    usage_context.get("chat_title"),
-                ))
-
             answer = await asyncio.wait_for(
                 fn(prompt, usage_context=usage_context),
                 timeout=timeouts[name],
