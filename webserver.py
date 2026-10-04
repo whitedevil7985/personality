@@ -262,6 +262,38 @@ def ludo_advance_turn(room):
         room['turn'] = (room['turn'] + 1) % len(room['players'])
 
 
+async def _ludo_award(room):
+    """Pay out a finished Ludo match once and record leaderboard points."""
+    if room.get('payout_done') or not room.get('winner'):
+        return
+    room['payout_done'] = True
+
+    winner_id = str(room.get('winner'))
+    for player in room.get('players', []):
+        uid = player.get('id')
+        try:
+            numeric_uid = int(uid)
+        except (TypeError, ValueError):
+            # Guest/browser-only seats do not have a Telegram balance.
+            continue
+
+        try:
+            if str(uid) == winner_id:
+                await add_coins(numeric_uid, 500)
+                await add_xp(numeric_uid, 100)
+                await record_game_result(
+                    numeric_uid, 'LUDO', points=500, won=True,
+                    chat_id=room.get('group_id'),
+                )
+            else:
+                await record_game_result(
+                    numeric_uid, 'LUDO', points=100, won=False,
+                    chat_id=room.get('group_id'),
+                )
+        except Exception as exc:
+            print(f"[Ludo][Reward] {type(exc).__name__}: {exc}")
+
+
 def ludo_reset_roll(room):
     room['pending_roll'] = 0
     room['movable'] = []
@@ -315,6 +347,15 @@ async def maybe_ludo_bot_turn(room):
         'event': 'move', 'player': p['id'], 'token': token, 'newpos': newpos,
         'captured': captured, 'roll': roll,
     })
+    if room.get('winner'):
+        await _ludo_award(room)
+        await broadcast_ludo(room, {
+            'event': 'winner',
+            'winner': room.get('winner'),
+            'winner_name': p.get('name') or 'Player',
+            'reward_coins': 500,
+            'reward_points': 500,
+        })
     if room['started'] and not room['winner'] and current_player(room) and current_player(room).get('bot'):
         asyncio.create_task(maybe_ludo_bot_turn(room))
 
@@ -430,6 +471,7 @@ async def ludo_ws(request):
                 room['winner'] = None
                 room['turn'] = 0
                 room['last_roll'] = 0
+                room['payout_done'] = False
                 ludo_reset_roll(room)
                 room['updated'] = time.time()
                 await broadcast_ludo(room, {'event': 'started'})
@@ -490,6 +532,15 @@ async def ludo_ws(request):
                     'event': 'move', 'player': p['id'], 'token': token, 'newpos': newpos,
                     'captured': captured, 'roll': roll,
                 })
+                if room.get('winner'):
+                    await _ludo_award(room)
+                    await broadcast_ludo(room, {
+                        'event': 'winner',
+                        'winner': room.get('winner'),
+                        'winner_name': p.get('name') or 'Player',
+                        'reward_coins': 500,
+                        'reward_points': 500,
+                    })
                 if room['started'] and not room['winner'] and current_player(room) and current_player(room).get('bot'):
                     asyncio.create_task(maybe_ludo_bot_turn(room))
 
