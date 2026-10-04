@@ -1460,3 +1460,191 @@ async def uno_ws(request):
         except Exception:
             pass
     return ws
+
+async def world_identity(request):
+    tg_user = verify_telegram_init_data(request.query.get('initData', ''))
+    if tg_user:
+        class U: pass
+        u = U(); u.id = tg_user['id']; u.first_name = tg_user.get('first_name') or 'Player'; u.username = tg_user.get('username')
+        try: await ensure_user(u)
+        except Exception: pass
+        return ('user', tg_user['id'])
+    cid = ''.join(ch for ch in (request.query.get('cid') or '') if ch.isalnum() or ch in '_-')[:80]
+    if not cid: cid = 'guest-' + ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(16))
+    return ('guest', cid)
+
+async def world_load(request):
+    kind, ident = await world_identity(request)
+    if kind == 'user':
+        u = await users.find_one({'_id': ident}, {'world':1,'coins':1,'xp':1,'level':1,'name':1}) or {}
+        world = normalize_world(u.get('world'))
+        await users.update_one({'_id': ident}, {'$set': {'world': world}}, upsert=True)
+        return ident, world, int(u.get('coins',0)), int(u.get('xp',0)), int(u.get('level',1)), u.get('name') or 'Player'
+    world = normalize_world(WORLD_GUESTS.get(ident)); WORLD_GUESTS[ident] = world
+    return ident, world, 1000, 0, 1, 'Guest Player'
+
+def world_payload(world, coins, xp, level, name):
+    return {'ok': True, 'name': name, 'coins': coins, 'xp': xp, 'level': level, 'city': world['city'], 'room': world['room'], 'pet': world['pet']}
+
+async def world_state(request):
+    _, world, coins, xp, level, name = await world_load(request)
+    return web.json_response(world_payload(world, coins, xp, level, name))
+
+async def world_action(request):
+    try: data = await request.json()
+    except Exception: data = {}
+    action = (data.get('action') or '').strip()
+    kind, ident = await world_identity(request)
+    _, world, coins, xp, level, name = await world_load(request)
+    now = int(time.time()); city, room, pet = world['city'], world['room'], world['pet']; message='Done ✨'
+    if action == 'collect':
+        if now - int(city.get('last_collect') or 0) < 3600: return web.json_response({'ok':False,'message':'✨ City drop already collected. Come back later.'})
+        coins += 50; city['last_collect']=now; message='✨ You collected 50 coins from Vanya City!'
+    elif action == 'daily':
+        if now - int(city.get('last_drop') or 0) < 86400: return web.json_response({'ok':False,'message':'🎁 Today’s City Drop is already claimed.'})
+        coins += 150; city['last_drop']=now; message='🎁 City Drop claimed! +150 🪙'
+    elif action == 'upgrade':
+        building=data.get('building')
+        if building not in ('arcade','cafe','market'): return web.json_response({'ok':False,'message':'Unknown building.'})
+        cur=int(city['buildings'].get(building,1)); base={'arcade':250,'cafe':200,'market':300}[building]; cost=int(round(base*(1.45**(cur-1))))
+        if coins<cost: return web.json_response({'ok':False,'message':f'Need {cost} 🪙 for the next upgrade.'})
+        coins-=cost; city['buildings'][building]=cur+1; city['level']=1+sum(int(v)-1 for v in city['buildings'].values())//3; xp+=60; level=1+xp//1000; message=f'🏗️ {building.title()} upgraded to Lv.{cur+1}!'
+    elif action == 'theme':
+        themes={'neon':'Neon','sunset':'Sunset','mint':'Mint'}; key=str(data.get('theme') or '').lower()
+        if key not in themes: return web.json_response({'ok':False,'message':'Theme unavailable.'})
+        room['theme']=themes[key]; message=f'🎨 Room theme changed to {themes[key]}!'
+    elif action == 'buy':
+        item=str(data.get('item') or ''); prices={'lamp':300,'console':450,'bed':600}
+        if item not in prices: return web.json_response({'ok':False,'message':'Item unavailable.'})
+        if item in room['items']: return web.json_response({'ok':False,'message':'You already own that item.'})
+        if coins<prices[item]: return web.json_response({'ok':False,'message':f'Need {prices[item]} 🪙.'})
+        coins-=prices[item]; room['items'].append(item); message=f'🛋️ Unlocked {item.title()} for your room!'
+    elif action == 'pet_feed':
+        if coins<20: return web.json_response({'ok':False,'message':'Need 20 🪙 to feed Mochi.'})
+        coins-=20; pet['hunger']=min(100,pet['hunger']+20); pet['happiness']=min(100,pet['happiness']+8); pet['xp']+=12; message='🍖 Mochi loved the snack!'
+    elif action == 'pet_play':
+        if pet['energy']<12: return web.json_response({'ok':False,'message':'⚡ Mochi is tired. Let the pet sleep first.'})
+        pet['energy']=max(0,pet['energy']-12); pet['happiness']=min(100,pet['happiness']+18); pet['hunger']=max(0,pet['hunger']-5); pet['xp']+=22; coins+=10; message='🎾 Mochi had fun! +10 🪙'
+    elif action == 'pet_sleep':
+        pet['energy']=min(100,pet['energy']+30); pet['happiness']=min(100,pet['happiness']+4); pet['xp']+=6; message='🌙 Mochi took a cozy nap.'
+    elif action == 'rename':
+        new_name=str(data.get('name') or '').strip()[:18]
+        if not new_name: return web.json_response({'ok':False,'message':'Enter a valid pet name.'})
+        pet['name']=new_name; message=f'✨ Your pet is now called {new_name}!'
+    else:
+        return web.json_response({'ok':False,'message':'Unknown action.'})
+    pet['level']=1+pet['xp']//100; pet['last_tick']=now
+    if kind=='user':
+        await users.update_one({'_id':ident},{'$set':{'world':world,'coins':coins,'xp':xp,'level':level}},upsert=True)
+    else: WORLD_GUESTS[ident]=world
+    return web.json_response({'ok':True,'message':message,'state':world_payload(world,coins,xp,level,name)})
+
+
+async def config(request):
+    return web.json_response({'bot_username':os.getenv('BOT_USERNAME','ItzVanyaBot').lstrip('@')})
+
+
+async def health(request): return web.json_response({'ok':True,'app':'ItzVanyaBot Games Web Apps','ludo_rooms':sum(1 for k in ROOMS if k.startswith('L:')),'uno_rooms':sum(1 for k in ROOMS if k.startswith('U:')),'kingdom_rooms':len(KINGDOM_ROOMS)})
+
+
+async def end_web_rooms_for_group(group_id):
+    """End every active browser game room launched from this Telegram group.
+
+    /end lives only in the Telegram group. The web apps do not need their own
+    /end command; they receive a server-side game_ended event and close.
+    """
+    ended = 0
+    try:
+        gid = int(group_id)
+    except (TypeError, ValueError):
+        return 0
+
+    payload = json.dumps({
+        'type': 'game_ended',
+        'message': 'This game was ended from the Telegram group by /end.',
+    }, separators=(',', ':'))
+
+    async def stop_room(room):
+        # Mark ended first so delayed bot turns cannot keep the match alive.
+        room['ended'] = True
+        room['started'] = False
+        room['winner'] = None
+
+        sockets = []
+        for player in room.get('players', []):
+            ws = player.get('ws')
+            if ws and not ws.closed:
+                sockets.append(ws)
+
+        # Ludo can have spectators connected outside the player seats.
+        for ws in room.get('spectators', []):
+            if ws and not ws.closed:
+                sockets.append(ws)
+
+        seen = set()
+        for ws in sockets:
+            marker = id(ws)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            try:
+                await ws.send_str(payload)
+            except Exception:
+                pass
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+        room['spectators'] = []
+
+    for key, room in list(ROOMS.items()):
+        if room.get('group_id') != gid:
+            continue
+        await stop_room(room)
+        ROOMS.pop(key, None)
+        ended += 1
+
+    for code, room in list(CHESS_ROOMS.items()):
+        if room.get('group_id') != gid:
+            continue
+        await stop_room(room)
+        CHESS_ROOMS.pop(code, None)
+        ended += 1
+
+    return ended
+
+async def cleanup_rooms(app):
+    while True:
+        await asyncio.sleep(300); now=time.time()
+        for code,room in list(ROOMS.items()):
+            if now-room['updated']>21600: ROOMS.pop(code,None)
+        for code,room in list(CHESS_ROOMS.items()):
+            if now-room['updated']>21600: CHESS_ROOMS.pop(code,None)
+        for code,room in list(KINGDOM_ROOMS.items()):
+            if now-room['updated']>21600:
+                task=room.get('timer_task')
+                if task and not task.done(): task.cancel()
+                KINGDOM_ROOMS.pop(code,None)
+
+
+async def cleanup_ctx(app):
+    task=asyncio.create_task(cleanup_rooms(app))
+    try: yield
+    finally: task.cancel()
+
+
+async def start_web_server():
+    app=web.Application()
+    app.router.add_get('/',health); app.router.add_get('/health',health); app.router.add_get('/api/config',config)
+    app.router.add_post('/api/rooms',create_ludo_room); app.router.add_post('/api/uno/rooms',create_uno_room); app.router.add_post('/api/chess/rooms',create_chess_room); app.router.add_post('/api/scribble/rooms',create_scribble_room); app.router.add_post('/api/kingdom/rooms',create_kingdom_room)
+    app.router.add_get('/ludo',ludo_page); app.router.add_get('/ws/ludo/{code}',ludo_ws); app.router.add_get('/scribble',scribble_page); app.router.add_get('/ws/scribble/{code}',scribble_ws)
+    app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/ws/chess/{code}',chess_ws); app.router.add_get('/kingdom-wars',kingdom_page); app.router.add_get('/ws/kingdom/{code}',kingdom_ws )
+    # Vanya World aliases all point to the same 3D page; query ?tab= selects City/Room/Pet.
+    world_page = lambda request: web.FileResponse(WEB/'vanya_world.html')
+    app.router.add_get('/vanya-city', world_page); app.router.add_get('/world', world_page); app.router.add_get('/vanya-world', world_page)
+    app.router.add_get('/city', world_page); app.router.add_get('/room', world_page); app.router.add_get('/pet', world_page)
+    app.router.add_get('/api/world/state',world_state); app.router.add_post('/api/world/action',world_action)
+    app.router.add_static('/ludo/',WEB,show_index=False); app.router.add_static('/uno/',WEB,show_index=False); app.router.add_static('/chess/',WEB,show_index=False); app.router.add_static('/scribble/',WEB,show_index=False); app.router.add_static('/kingdom-wars/',WEB,show_index=False)
+    app.cleanup_ctx.append(cleanup_ctx)
+    runner=web.AppRunner(app); await runner.setup(); port=int(os.getenv('PORT','8080')); await web.TCPSite(runner,'0.0.0.0',port).start(); return runner
