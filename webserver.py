@@ -1293,13 +1293,36 @@ def uno_advance(room,steps=1): room['turn']=(room['turn']+room['direction']*step
 
 
 def uno_apply_card(room,p,card):
-    room['top']=card; room['discard'].append(card); room['pending_color']=None
-    if card['value']=='+2': uno_advance(room); uno_draw(room,2)
-    elif card['value']=='skip': uno_advance(room,2)
-    elif card['value']=='reverse':
-        room['direction']*=-1; uno_advance(room)
-    elif card['value']=='+4': uno_advance(room); uno_draw(room,4)
-    else: uno_advance(room)
+    room['top']=card
+    room['discard'].append(card)
+
+    # A wild card keeps the chosen color active for the next player.
+    # Normal cards clear any previous wild-color override.
+    if card['color'] == UNO_WILD:
+        if not room.get('pending_color'):
+            room['pending_color'] = random.choice(UNO_COLORS)
+    else:
+        room['pending_color'] = None
+
+    if card['value'] == '+2':
+        # Draw two and skip the affected player's turn.
+        uno_advance(room)
+        uno_draw(room,2)
+        uno_advance(room)
+    elif card['value'] == 'skip':
+        # With two players, skip must return the turn to the current player.
+        # With 3+, move past exactly one player.
+        uno_advance(room, 2)
+    elif card['value'] == 'reverse':
+        room['direction'] *= -1
+        uno_advance(room)
+    elif card['value'] == '+4':
+        # Draw four and skip the affected player's turn.
+        uno_advance(room)
+        uno_draw(room,4)
+        uno_advance(room)
+    else:
+        uno_advance(room)
 
 
 async def maybe_uno_bot_turn(room):
@@ -1369,7 +1392,9 @@ async def uno_ws(request):
                 if not room['started'] or room['winner']: continue
                 p=uno_find(room,session_id); cur=uno_current(room)
                 if not p or not cur or cur['id']!=session_id: await ws.send_json({'type':'error','message':'Wait for your turn'}); continue
-                uno_draw(room,1); uno_advance(room); room['updated']=time.time(); await send_uno_state(room)
+                # Draw exactly one card, then pass the turn.
+                uno_draw(room,1); uno_advance(room)
+                room['updated']=time.time(); await send_uno_state(room)
                 if uno_current(room).get('bot'): asyncio.create_task(maybe_uno_bot_turn(room))
             elif typ=='play':
                 if not room['started'] or room['winner']: continue
