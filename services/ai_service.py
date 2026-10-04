@@ -964,6 +964,71 @@ async def probe_ai_providers():
     return results
 
 
+async def _ai_health_monitor(bot=None):
+    """Check every configured AI provider every 30 minutes and log the results."""
+    interval = max(60, int(os.getenv("AI_HEALTH_CHECK_INTERVAL_SECONDS", "1800")))
+
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            results = await probe_ai_providers()
+
+            lines = [
+                "🩺 <b>AI PROVIDER HEALTH CHECK</b>",
+                f"⏱️ Interval: <code>{interval // 60} min</code>",
+            ]
+            labels = {
+                "elite": "Elite LLM",
+                "chatgp": "ChatGP",
+                "cloudflare": "Cloudflare Workers AI",
+                "ollama": "Ollama Cloud",
+            }
+            configured = {
+                "elite": bool(ELITE_LLM_API_KEY),
+                "chatgp": bool(CHATGP_API_URL),
+                "cloudflare": bool(CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID),
+                "ollama": bool(OLLAMA_API_KEY and OLLAMA_API_URL),
+            }
+
+            for provider, label in labels.items():
+                if not configured[provider]:
+                    lines.append(f"⚪ <b>{label}</b>: NOT CONFIGURED")
+                else:
+                    lines.append(
+                        f"{'🟢' if results.get(provider) else '🔴'} "
+                        f"<b>{label}</b>: {'ACTIVE' if results.get(provider) else 'DOWN'}"
+                    )
+
+            logger_bot = bot or _AI_LOGGER_BOT
+            if logger_bot is not None:
+                try:
+                    await log_event(
+                        type("AIHealthContext", (), {"bot": logger_bot})(),
+                        "\n".join(lines),
+                    )
+                except Exception as exc:
+                    print(
+                        f"[AI][HEALTH] logger failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+            print(
+                "[AI][HEALTH] "
+                + ", ".join(
+                    f"{provider}={'UP' if results.get(provider) else 'DOWN'}"
+                    for provider in labels
+                    if configured[provider]
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(
+                f"[AI][HEALTH] monitor cycle failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+
 async def _save_chat_state_background(user_id, user_text, answer):
     """Persist memory/history after the user already received the fast reply."""
     try:
