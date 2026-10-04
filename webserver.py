@@ -1228,9 +1228,14 @@ def uno_player_public(p):
 def uno_state(room, you=None):
     cur=room['players'][room['turn']%len(room['players'])]['id'] if room['players'] else None
     top=room['top']
+    me=uno_find(room,you) if you else None
+    playable_ids=[]
+    if me and cur==you and room.get('started') and not room.get('winner'):
+        playable_ids=[c['id'] for c in me.get('hand',[]) if uno_can_play_card(room,me,c)]
     return {'type':'state','game':'uno','room':room['code'],'started':room['started'],'turn':cur,'direction':room['direction'],
             'winner':room['winner'],'top':top,'players':[uno_player_public(p) for p in room['players']],
-            'you':you,'pending_color':room['pending_color'],'drawn_card':room.get('drawn_card')}
+            'you':you,'pending_color':room['pending_color'],'active_color':uno_active_color(room),
+            'playable_ids':playable_ids,'drawn_card':room.get('drawn_card')}
 
 
 async def _uno_award(room):
@@ -1274,10 +1279,27 @@ def uno_current(room): return room['players'][room['turn']%len(room['players'])]
 
 def uno_find(room,pid): return next((p for p in room['players'] if p['id']==pid),None)
 
+def uno_active_color(room):
+    top=room.get('top') or {}
+    return room.get('pending_color') or top.get('color')
+
 def uno_playable(card,top,pending_color):
-    if card['color']==UNO_WILD: return True
-    target_color=pending_color or top['color']
-    return card['color']==target_color or card['value']==top['value']
+    if not card or not top: return False
+    if card.get('color')==UNO_WILD: return True
+    target_color=pending_color or top.get('color')
+    return card.get('color')==target_color or card.get('value')==top.get('value')
+
+def uno_can_play_card(room,p,card):
+    if not uno_playable(card,room.get('top'),room.get('pending_color')):
+        return False
+    if card.get('color')==UNO_WILD and card.get('value')=='+4':
+        active=uno_active_color(room)
+        if active and any(
+            x.get('id')!=card.get('id') and x.get('color')==active
+            for x in p.get('hand',[])
+        ):
+            return False
+    return True
 
 
 def uno_draw(room,n=1):
@@ -1330,7 +1352,7 @@ async def maybe_uno_bot_turn(room):
     if room.get('ended') or not room['started'] or room['winner']: return
     p=uno_current(room)
     if not p or not p.get('bot'): return
-    playable=[c for c in p['hand'] if uno_playable(c,room['top'],room['pending_color'])]
+    playable=[c for c in p['hand'] if uno_can_play_card(room,p,c)]
     if playable:
         card=random.choice(playable); p['hand'].remove(card)
         if card['color']==UNO_WILD:
@@ -1338,7 +1360,17 @@ async def maybe_uno_bot_turn(room):
         uno_apply_card(room,p,card)
         event={'event':'play','player':p['id'],'card':card}
     else:
-        uno_draw(room,1); uno_advance(room); event={'event':'draw','player':p['id']}
+        before={c['id'] for c in p['hand']}
+        uno_draw(room,1)
+        drawn=next((c for c in p['hand'] if c['id'] not in before),None)
+        if drawn and uno_can_play_card(room,p,drawn):
+            p['hand'].remove(drawn)
+            if drawn['color']==UNO_WILD:
+                room['pending_color']=random.choice(UNO_COLORS)
+            uno_apply_card(room,p,drawn)
+            event={'event':'draw_play','player':p['id'],'card':drawn}
+        else:
+            uno_advance(room); event={'event':'draw','player':p['id']}
     if not p['hand']: room['winner']=p['id']
     if room.get('winner'): await _uno_award(room)
     room['updated']=time.time(); await send_uno_state(room)
@@ -1397,10 +1429,6 @@ async def uno_ws(request):
                 if room.get('drawn_card'):
                     await ws.send_json({'type':'error','message':'Play or pass the card you just drew'})
                     continue
-                playable=[card for card in p['hand'] if uno_playable(card,room['top'],room['pending_color'])]
-                if playable:
-                    await ws.send_json({'type':'error','message':'You already have a playable card'})
-                    continue
                 before={card['id'] for card in p['hand']}
                 uno_draw(room,1)
                 drawn=next((card for card in p['hand'] if card['id'] not in before),None)
@@ -1423,18 +1451,12 @@ async def uno_ws(request):
                 if room.get('drawn_card') and cid != room['drawn_card']:
                     await ws.send_json({'type':'error','message':'You can only play the card you just drew'})
                     continue
-                if not uno_playable(card,room['top'],room['pending_color']):
-                    await ws.send_json({'type':'error','message':'That card cannot be played on the current card'})
+                if not uno_can_play_card(room,p,card):
+                    if card.get('color')==UNO_WILD and card.get('value')=='+4':
+                        await ws.send_json({'type':'error','message':'+4 is blocked because you have a card matching the active color'})
+                    else:
+                        await ws.send_json({'type':'error','message':'That card cannot be played on the current card'})
                     continue
-                if card['value']=='+4':
-                    has_colored_match=any(
-                        x['id']!=card['id'] and x['color']!=UNO_WILD and
-                        uno_playable(x,room['top'],room['pending_color'])
-                        for x in p['hand']
-                    )
-                    if has_colored_match:
-                        await ws.send_json({'type':'error','message':'You cannot use +4 while you have a matching colored card'})
-                        continue
                 if card['color']==UNO_WILD:
                     chosen=data.get('color')
                     if chosen not in UNO_COLORS:
