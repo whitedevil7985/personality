@@ -1449,3 +1449,14 @@ async def uno_ws(request):
                 if room.get('winner'): await _uno_award(room)
                 room['updated']=time.time(); await send_uno_state(room)
                 if room['started'] and not room['winner'] and uno_current(room).get('bot'): asyncio.create_task(maybe_uno_bot_turn(room))
+    finally:
+        p=uno_find(room,session_id)
+        if p:
+            p['connected']=False
+            p['ws']=None
+            room['updated']=time.time()
+        try:
+            await send_uno_state(room)
+        except Exception:
+            pass
+    return ws
