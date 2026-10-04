@@ -1218,7 +1218,7 @@ def make_uno_deck():
 
 def new_uno_room():
     return {'code':None,'game':'uno','players':[],'started':False,'turn':0,'direction':1,'top':None,'deck':[],
-            'discard':[],'winner':None,'pending_color':None,'chat':[],'created':time.time(),'updated':time.time(),'ended':False}
+            'discard':[],'winner':None,'pending_color':None,'payout_done':False,'chat':[],'created':time.time(),'updated':time.time(),'ended':False}
 
 
 def uno_player_public(p):
@@ -1231,6 +1231,32 @@ def uno_state(room, you=None):
     return {'type':'state','game':'uno','room':room['code'],'started':room['started'],'turn':cur,'direction':room['direction'],
             'winner':room['winner'],'top':top,'players':[uno_player_public(p) for p in room['players']],
             'you':you,'pending_color':room['pending_color']}
+
+
+async def _uno_award(room):
+    """Reward Telegram players when an UNO match finishes."""
+    if room.get('payout_done') or not room.get('winner'):
+        return
+    room['payout_done'] = True
+    winner_id = str(room.get('winner'))
+    for player in room.get('players', []):
+        uid = player.get('id')
+        try:
+            numeric_uid = int(uid)
+        except (TypeError, ValueError):
+            continue
+        try:
+            won = str(uid) == winner_id
+            if won:
+                await add_coins(numeric_uid, 500)
+                await add_xp(numeric_uid, 100)
+                await record_game_result(numeric_uid, 'UNO', 500, True, room.get('group_id'))
+            else:
+                await add_coins(numeric_uid, 100)
+                await add_xp(numeric_uid, 25)
+                await record_game_result(numeric_uid, 'UNO', 100, False, room.get('group_id'))
+        except Exception as exc:
+            print(f"[UNO][Reward] {type(exc).__name__}: {exc}")
 
 
 async def send_uno_state(room):
@@ -1291,6 +1317,7 @@ async def maybe_uno_bot_turn(room):
     else:
         uno_draw(room,1); uno_advance(room); event={'event':'draw','player':p['id']}
     if not p['hand']: room['winner']=p['id']
+    if room.get('winner'): await _uno_award(room)
     room['updated']=time.time(); await send_uno_state(room)
     if room['started'] and not room['winner'] and uno_current(room).get('bot'): asyncio.create_task(maybe_uno_bot_turn(room))
 
@@ -1336,7 +1363,7 @@ async def uno_ws(request):
                 room['players'].append(p); room['updated']=time.time(); await send_uno_state(room)
             elif typ=='start':
                 if len(room['players'])<2: await ws.send_json({'type':'error','message':'At least 2 players are needed'}); continue
-                room['started']=True; room['winner']=None; room['turn']=0; room['updated']=time.time(); await send_uno_state(room)
+                room['started']=True; room['winner']=None; room['payout_done']=False; room['turn']=0; room['updated']=time.time(); await send_uno_state(room)
                 if uno_current(room).get('bot'): asyncio.create_task(maybe_uno_bot_turn(room))
             elif typ=='draw':
                 if not room['started'] or room['winner']: continue
