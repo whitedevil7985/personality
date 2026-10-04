@@ -1231,7 +1231,10 @@ def uno_state(room, you=None):
     me=uno_find(room,you) if you else None
     playable_ids=[]
     if me and cur==you and room.get('started') and not room.get('winner'):
-        playable_ids=[c['id'] for c in me.get('hand',[]) if uno_can_play_card(room,me,c)]
+        if room.get('drawn_card'):
+            playable_ids=[c['id'] for c in me.get('hand',[]) if c.get('id')==room.get('drawn_card') and uno_can_play_card(room,me,c)]
+        else:
+            playable_ids=[c['id'] for c in me.get('hand',[]) if uno_can_play_card(room,me,c)]
     return {'type':'state','game':'uno','room':room['code'],'started':room['started'],'turn':cur,'direction':room['direction'],
             'winner':room['winner'],'top':top,'players':[uno_player_public(p) for p in room['players']],
             'you':you,'pending_color':room['pending_color'],'active_color':uno_active_color(room),
