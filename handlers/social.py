@@ -7,6 +7,7 @@ import sys as _sys
 _core = _sys.modules.get("bot") or _sys.modules["__main__"]
 globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")})
 del _core, _sys
+from db import get_user_lock
 
 async def persona(update, context):
     await update.message.reply_html(
@@ -41,28 +42,45 @@ async def kill(update, context):
     if not target or target.id == update.effective_user.id:
         await update.message.reply_text("Reply to another player: /kill &lt;amount&gt;")
         return
+
+    uid = update.effective_user.id
+    victim_id = target.id
     try:
         amount = max(1, int(context.args[0]))
     except Exception:
         amount = 100
-    me = await get_user(update.effective_user.id)
-    victim = await get_user(target.id)
-    if not victim:
-        await ensure_user(target)
-        victim = await get_user(target.id)
+
+    await ensure_user(update.effective_user)
+    await ensure_user(target)
+
+    me = await get_user(uid)
+    victim = await get_user(victim_id)
     amount = min(amount, int(victim.get("coins", 0)))
     if amount <= 0:
         await update.message.reply_text("That player has no coins to bounty. 😭")
         return
+
     if random.random() < 0.5:
-        await add_coins(target.id, -amount)
-        await add_coins(update.effective_user.id, amount)
-        await users.update_one({"_id": update.effective_user.id}, {"$inc": {"kills": 1}})
+        debit = await users.update_one(
+            {"_id": victim_id, "coins": {"$gte": amount}},
+            {"$inc": {"coins": -amount}},
+        )
+        if debit.modified_count != 1:
+            await update.message.reply_text("That player's balance changed. Try again.")
+            return
+        await add_coins(uid, amount)
+        await users.update_one({"_id": uid}, {"$inc": {"kills": 1}})
         await update.message.reply_text(f"🎯 Fictional bounty won! +{amount:,} coins.")
     else:
         fine = min(100, int(me.get("coins", 0)))
-        await add_coins(update.effective_user.id, -fine)
-        await update.message.reply_text(f"💥 Bounty failed. You lost {fine:,} coins.")
+        debit = await users.update_one(
+            {"_id": uid, "coins": {"$gte": fine}},
+            {"$inc": {"coins": -fine}},
+        )
+        if debit.modified_count == 1:
+            await update.message.reply_text(f"💥 Bounty failed. You lost {fine:,} coins.")
+        else:
+            await update.message.reply_text("💥 Bounty failed, but your balance was already too low for the fine.")
 
 async def revive(update, context):
     target = await target_user(update)
