@@ -136,8 +136,8 @@ async def blacklist_message_guard(update, context):
     if chat.type == "private":
         try:
             await message.reply_html(
-                "🚫 <b>ACCESS BLOCKED</b>\\n\\n"
-                "Aap Vanya se blacklisted ho.\\n"
+                "🚫 <b>ACCESS BLOCKED</b>\n\n"
+                "Aap Vanya se blacklisted ho.\n"
                 "Bot ke commands, chat aur games aapke liye disabled hain."
             )
         except Exception as exc:
