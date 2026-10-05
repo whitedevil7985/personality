@@ -84,28 +84,27 @@ async def mines(update, context):
 
 
 async def mines_cb(q, data):
-        try:
-            uid_for_lock = int(q.from_user.id) if q and q.from_user else 0
-            async with _mines_lock(uid_for_lock):
-            if not q or not q.from_user:
-                return
-    
+    try:
+        if not q or not q.from_user:
+            return
+
+        uid = q.from_user.id
+        async with _mines_lock(uid):
             parts = list(data or [])
             if len(parts) != 2 or parts[0] != "mine":
                 await q.answer("Invalid Mines button.", show_alert=True)
                 return
-    
-            uid = q.from_user.id
+
             action = parts[1]
             u = await get_user(uid)
-    
+
             if not u or not u.get("mines_active"):
                 await q.answer(
                     "⛏️ No active Mines round. Use /mines to start one.",
                     show_alert=True,
                 )
                 return
-    
+
             if action == "cashout":
                 safe = list(u.get("mines_safe", []))
                 if not safe:
@@ -114,7 +113,7 @@ async def mines_cb(q, data):
                         show_alert=True,
                     )
                     return
-    
+
                 reward = len(safe) * SAFE_REWARD
                 await add_coins(uid, reward)
                 await record_game_result(
@@ -135,7 +134,7 @@ async def mines_cb(q, data):
                         }
                     },
                 )
-    
+
                 await q.answer("💰 Cash out successful!")
                 await q.edit_message_text(
                     "💰 <b>MINES CASHED OUT!</b>\n\n"
@@ -144,24 +143,24 @@ async def mines_cb(q, data):
                     parse_mode="HTML",
                 )
                 return
-    
+
             try:
                 pos = int(action)
             except (TypeError, ValueError):
                 await q.answer("Invalid tile.", show_alert=True)
                 return
-    
+
             if pos < 0 or pos >= BOARD_SIZE * BOARD_SIZE:
                 await q.answer("Invalid tile.", show_alert=True)
                 return
-    
+
             safe = list(u.get("mines_safe", []))
             mines_set = set(u.get("mines_set", []))
-    
+
             if pos in safe:
                 await q.answer("💎 Already opened.", show_alert=False)
                 return
-    
+
             if pos in mines_set:
                 await record_game_result(
                     uid,
@@ -181,7 +180,7 @@ async def mines_cb(q, data):
                         }
                     },
                 )
-    
+
                 await q.answer("💥 BOOM!", show_alert=True)
                 await q.edit_message_text(
                     "💥 <b>BOOM!</b>\n\n"
@@ -190,13 +189,13 @@ async def mines_cb(q, data):
                     parse_mode="HTML",
                 )
                 return
-    
+
             safe.append(pos)
             await users.update_one(
                 {"_id": uid},
                 {"$set": {"mines_safe": safe}},
             )
-    
+
             # If every non-mine tile is opened, automatically cash out.
             if len(safe) >= (BOARD_SIZE * BOARD_SIZE - MINE_COUNT):
                 reward = len(safe) * SAFE_REWARD
@@ -227,19 +226,18 @@ async def mines_cb(q, data):
                     parse_mode="HTML",
                 )
                 return
-    
+
             await q.answer("💎 Safe!")
-    
             await q.edit_message_reply_markup(
                 reply_markup=_board_markup(safe),
             )
-    
-        except Exception as exc:
-            try:
-                await q.answer(
-                    "⚠️ Mines error. Start a new round with /mines.",
-                    show_alert=True,
-                )
-            except Exception:
-                pass
-            print(f"[MINES] callback error: {type(exc).__name__}: {exc}")
+
+    except Exception as exc:
+        try:
+            await q.answer(
+                "⚠️ Mines error. Start a new round with /mines.",
+                show_alert=True,
+            )
+        except Exception:
+            pass
+        print(f"[MINES] callback error: {type(exc).__name__}: {exc}")
