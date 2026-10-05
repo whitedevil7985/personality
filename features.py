@@ -1,6 +1,6 @@
 import html
 from datetime import datetime, timezone, timedelta
-from db import ensure_user, get_user, add_coins, add_xp, users
+from db import ensure_user, get_user, add_coins, add_xp, users, get_user_lock
 from config import SPIN_COOLDOWN_HOURS, QUEST_REWARD, ACHIEVEMENT_REWARD
 
 async def _touch_streak(uid):
@@ -26,25 +26,38 @@ async def _touch_streak(uid):
 async def spin(update, context):
     await ensure_user(update.effective_user)
     uid = update.effective_user.id
-    u = await get_user(uid)
-    now = datetime.now(timezone.utc)
-    last = u.get("spin_at")
-    if last:
-        try:
-            remaining = timedelta(hours=SPIN_COOLDOWN_HOURS) - (now - datetime.fromisoformat(last))
-            if remaining.total_seconds() > 0:
-                hours = int(remaining.total_seconds() // 3600)
-                mins = int((remaining.total_seconds() % 3600) // 60)
-                await update.message.reply_text(f"🎡 Spin is cooling down. Try again in {hours}h {mins}m.")
-                return
-        except Exception:
-            pass
-    rewards = [(100, "💜"), (250, "✨"), (500, "💎"), (750, "🔥"), (1000, "👑")]
-    amount, icon = rewards[__import__("random").randrange(len(rewards))]
-    await add_coins(uid, amount)
-    streak = await _touch_streak(uid)
-    await users.update_one({"_id": uid}, {"$set": {"spin_at": now.isoformat()}})
-    await update.message.reply_text(f"🎡 {icon} <b>Daily Spin!</b>\nYou won <b>+{amount:,} coins</b>\n🔥 Streak: <b>{streak}</b> day(s)", parse_mode="HTML")
+    async with get_user_lock(uid):
+        u = await get_user(uid)
+        now = datetime.now(timezone.utc)
+        last = u.get("spin_at")
+        if last:
+            try:
+                remaining = timedelta(hours=SPIN_COOLDOWN_HOURS) - (now - datetime.fromisoformat(last))
+                if remaining.total_seconds() > 0:
+                    hours = int(remaining.total_seconds() // 3600)
+                    mins = int(remaining.total_seconds() % 3600 // 60)
+                    await update.message.reply_text(
+                        f"🎡 Spin is cooling down. Try again in {hours}h {mins}m."
+                    )
+                    return
+            except Exception:
+                pass
+
+        rewards = [(100, "💜"), (250, "✨"), (500, "💎"), (750, "🔥"), (1000, "👑")]
+        amount, icon = rewards[__import__("random").randrange(len(rewards))]
+        await add_coins(uid, amount)
+        streak = await _touch_streak(uid)
+        await users.update_one(
+            {"_id": uid},
+            {"$set": {"spin_at": now.isoformat()}},
+        )
+
+    await update.message.reply_text(
+        f"🎡 {icon} <b>Daily Spin!</b>\n"
+        f"You won <b>+{amount:,} coins</b>\n"
+        f"🔥 Streak: <b>{streak}</b> day(s)",
+        parse_mode="HTML",
+    )
 
 async def achievements(update, context):
     await ensure_user(update.effective_user)
@@ -77,16 +90,32 @@ async def quest(update, context):
     )
 
 async def progress_quest(uid, amount=1):
-    u = await get_user(uid)
-    if not u: return
-    today = datetime.now(timezone.utc).date().isoformat()
-    if u.get("quest_day") != today:
-        progress = 0
-        await users.update_one({"_id": uid}, {"$set": {"quest_day": today, "quest_progress": 0}})
-    else:
-        progress = int(u.get("quest_progress", 0))
-    if progress >= 3: return
-    progress = min(3, progress + amount)
-    await users.update_one({"_id": uid}, {"$set": {"quest_progress": progress}})
-    if progress == 3 and u.get("quest_day") == today:
-        await add_coins(uid, QUEST_REWARD)
+    if not uid or amount <= 0:
+        return
+
+    async with get_user_lock(uid):
+        u = await get_user(uid)
+        if not u:
+            return
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        if u.get("quest_day") != today:
+            progress = 0
+            await users.update_one(
+                {"_id": uid},
+                {"$set": {"quest_day": today, "quest_progress": 0}},
+            )
+        else:
+            progress = int(u.get("quest_progress", 0))
+
+        if progress >= 3:
+            return
+
+        new_progress = min(3, progress + int(amount))
+        await users.update_one(
+            {"_id": uid},
+            {"$set": {"quest_progress": new_progress}},
+        )
+        if progress < 3 and new_progress >= 3:
+            await add_coins(uid, QUEST_REWARD)
+
