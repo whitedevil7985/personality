@@ -126,14 +126,23 @@ async def blacklist_message_guard(update, context):
         return
 
     message = update.effective_message
-    if not message:
-        return
+    chat = update.effective_chat
+    if not message or not chat:
+        raise ApplicationHandlerStop
 
-    await message.reply_html(
-        "🚫 <b>ACCESS BLOCKED</b>\n\n"
-        "Aap Vanya se blacklisted ho.\n"
-        "Bot ke commands, chat aur games aapke liye disabled hain."
-    )
+    # Never post a blacklist notice into groups. A blacklisted user's group
+    # messages/commands are simply ignored. In a private chat (including when
+    # they open/start the bot), show the access-blocked notice in DM instead.
+    if chat.type == "private":
+        try:
+            await message.reply_html(
+                "🚫 <b>ACCESS BLOCKED</b>\\n\\n"
+                "Aap Vanya se blacklisted ho.\\n"
+                "Bot ke commands, chat aur games aapke liye disabled hain."
+            )
+        except Exception as exc:
+            print(f"[Blacklist] DM notice failed: {type(exc).__name__}: {exc}")
+
     raise ApplicationHandlerStop
 
 
