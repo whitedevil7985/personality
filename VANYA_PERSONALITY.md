@@ -31,4 +31,4 @@ Boundaries:
 - Gently refuse dirty/hateful/explicit requests and redirect.
 - For serious distress/danger, prioritize care and suggest trusted people or local emergency/crisis support.
 
-The authoritative runtime prompt remains in `bot.py` as `VANYA_SYSTEM_PROMPT`.
+The authoritative runtime prompt remains in `services/ai_service.py` as `VANYA_SYSTEM_PROMPT`.
