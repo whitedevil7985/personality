@@ -38,6 +38,14 @@ _AI_RECENT_REPLIES_LIMIT = max(
     int(os.getenv("AI_RECENT_REPLIES_LIMIT", "4")),
 )
 
+# Immediate per-chat conversation state. MongoDB remains the durable store,
+# but the latest exchanges must be available to the next message instantly.
+_AI_LIVE_CONTEXT = {}
+_AI_LIVE_CONTEXT_LIMIT = max(
+    6,
+    int(os.getenv("AI_LIVE_CONTEXT_LIMIT", "12")),
+)
+
 # Shared Vanya persona/instruction prompt used by both AI providers.
 VANYA_SYSTEM_PROMPT = r"""
 Tum Vanya ho — friendly, natural, masti-bhari girl-like chat companion.
@@ -440,6 +448,29 @@ def _finalize_ai_answer(answer, text_value, chat_id, reply_context=""):
     return safe
 
 
+def _record_live_exchange(chat_id, user_text, assistant_text):
+    """Keep the latest conversation turns available without waiting for MongoDB."""
+    if not chat_id:
+        return
+    bucket = _AI_LIVE_CONTEXT.setdefault(
+        int(chat_id),
+        deque(maxlen=_AI_LIVE_CONTEXT_LIMIT),
+    )
+    if user_text:
+        bucket.append(("user", str(user_text)[:1200]))
+    if assistant_text:
+        bucket.append(("assistant", str(assistant_text)[:1200]))
+
+
+def _live_history_text(chat_id):
+    if not chat_id:
+        return ""
+    bucket = _AI_LIVE_CONTEXT.get(int(chat_id))
+    if not bucket:
+        return ""
+    return "\n".join(f"{role}: {text}" for role, text in bucket)
+
+
 def _get_cached_ai_context(user_id):
     cached = _AI_CONTEXT_CACHE.get(user_id) or {}
     return str(cached.get("history", "")), str(cached.get("memory", ""))
@@ -601,12 +632,10 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
     if not configured:
         return None
 
-    # Do not keep hammering a provider that the current runtime already knows
-    # is down. A fresh health probe can move it back to the active tier.
-    active = [item for item in configured if _AI_PROVIDER_STATUS.get(item[0]) is True]
-    unknown = [item for item in configured if _AI_PROVIDER_STATUS.get(item[0]) is None]
-    down = [item for item in configured if _AI_PROVIDER_STATUS.get(item[0]) is False]
-    providers = active + unknown + down
+    # Keep a deterministic priority: Elite -> ChatGP -> Cloudflare -> Ollama.
+    # Health state is informational only; one stale probe must never demote a
+    # healthy primary API below its fallbacks.
+    providers = configured
 
     timeouts = {
         "elite": max(1.5, float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "4.0"))),
@@ -675,6 +704,12 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
                     usage_context.get("reply_context") if isinstance(usage_context, dict) else "",
                 )
                 print(f"[AI][FAILOVER] {name} SUCCESS")
+                if isinstance(usage_context, dict):
+                    _record_live_exchange(
+                        usage_context.get("chat_id"),
+                        usage_context.get("user_text"),
+                        safe,
+                    )
                 return safe
 
             print(
@@ -1469,6 +1504,17 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
     quick = _privacy_quick_reply(text_value)
     if quick:
         quick = _finalize_ai_answer(quick, text_value, chat_id)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
+        _record_live_exchange(chat_id, text_value, quick)
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
         return quick
 
@@ -1511,7 +1557,10 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
     # for a cold user, the first reply intentionally goes out without history
     # and the cache is warmed in the background for the next message.
     history, memory = _get_cached_ai_context(user.id)
-    if not history and not memory:
+    live_history = _live_history_text(chat_id)
+    if live_history:
+        history = live_history
+    elif not history and not memory:
         asyncio.create_task(_warm_ai_context_cache(user.id))
 
     # Keep the LLM context compact for faster first-token/response latency.
@@ -1535,8 +1584,11 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         f"Message Vanya is being replied to:\n{reply_context or '- None (not a reply)'}\n\n"
         f"User's new message:\n{text_value}\n\n"
         "Reply only as Vanya. Be natural, concise, warm, and context-aware. "
-        "When the user is replying to Vanya, continue that conversation directly "
-        "instead of giving a generic acknowledgement such as 'bolo' or 'sun rahi hu'. "
+        "Answer the user's actual message first. If it is a question, answer the question. "
+        "If it is casual conversation, continue the same topic naturally. "
+        "Do not replace a real answer with filler such as 'bolo', 'haanji', or 'sun rahi hu' "
+        "unless the user literally only greeted/called you. "
+        "When the user is replying to Vanya, continue that exact conversation directly. "
         f"Normal reply: maximum {max_words} words and {max_lines} short lines. "
         "Do not write long paragraphs, lectures, or repeated explanations. "
         "Only use the longer limit when the user explicitly asks for detail."
@@ -1614,6 +1666,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
             "Haanji 💕 kya hua?",
         ])
     answer = _finalize_ai_answer(answer, text_value, chat_id, reply_context)
+    _record_live_exchange(chat_id, text_value, answer)
     asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
     return answer
 
