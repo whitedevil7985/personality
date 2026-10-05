@@ -1,5 +1,5 @@
 from games.common import safe_name
-from db import get_user, add_coins, record_game_result
+from db import get_user, add_coins, record_game_result, ensure_user, get_user_lock
 
 
 def _slot_symbols(value: int):
@@ -17,82 +17,78 @@ async def slots(update, context):
     """
     Telegram-native slot machine.
 
-    Telegram generates the animation/outcome server-side. Instead of treating
-    only 777 as a win, regular matching combinations now also pay out.
+    Telegram generates the animation/outcome server-side. Matching combinations
+    pay out according to the virtual-coin rules below.
     """
     user_id = update.effective_user.id
+    await ensure_user(update.effective_user)
 
-    try:
-        amount = int(context.args[0]) if context.args else 100
-    except (IndexError, ValueError, TypeError):
-        amount = 100
+    async with get_user_lock(user_id):
+        try:
+            amount = int(context.args[0]) if context.args else 100
+        except (IndexError, ValueError, TypeError):
+            amount = 100
 
-    if amount <= 0:
-        await update.message.reply_text("❌ Bet must be greater than 0.")
-        return
+        if amount <= 0:
+            await update.message.reply_text("❌ Bet must be greater than 0.")
+            return
 
-    user = await get_user(user_id)
-    balance = int((user or {}).get("coins", 0))
+        user = await get_user(user_id)
+        balance = int((user or {}).get("coins", 0))
+        if balance < amount:
+            await update.message.reply_text(
+                f"❌ Not enough coins.\n"
+                f"💰 Balance: {balance:,}\n"
+                f"🎰 Bet: {amount:,}"
+            )
+            return
 
-    if balance < amount:
-        await update.message.reply_text(
-            f"❌ Not enough coins.\n"
-            f"💰 Balance: {balance:,}\n"
-            f"🎰 Bet: {amount:,}"
-        )
-        return
+        await add_coins(user_id, -amount)
 
-    # Take the stake before the spin.
-    await add_coins(user_id, -amount)
+        spin = await update.message.reply_dice(emoji="🎰")
+        value = int(getattr(spin.dice, "value", 0) or 0)
 
-    # Telegram's native slot animation. The server chooses the result.
-    spin = await update.message.reply_dice(emoji="🎰")
-    value = int(getattr(spin.dice, "value", 0) or 0)
-
-    if value == 64:
-        # Telegram's documented jackpot outcome: 777.
-        payout = amount * 10
-        profit = payout - amount
-        won = True
-        title = "🎰 JACKPOT — 777!"
-        result = f"💎 +{profit:,} coins"
-    else:
-        symbols = _slot_symbols(value)
-        unique = len(set(symbols))
-
-        if unique == 1:
-            # Three matching symbols (non-777).
-            payout = amount * 3
+        if value == 64:
+            payout = amount * 10
             profit = payout - amount
             won = True
-            title = "🎰 THREE MATCH!"
-            result = f"🔥 +{profit:,} coins"
-        elif unique == 2:
-            # Two matching symbols.
-            payout = max(amount + 1, round(amount * 1.2))
-            profit = payout - amount
-            won = True
-            title = "🎰 TWO MATCH!"
-            result = f"✨ +{profit:,} coins"
+            title = "🎰 JACKPOT — 777!"
+            result = f"💎 +{profit:,} coins"
         else:
-            payout = 0
-            profit = -amount
-            won = False
-            title = "🎰 No match"
-            result = f"💥 -{amount:,} coins"
+            symbols = _slot_symbols(value)
+            unique = len(set(symbols))
 
-    if payout:
-        await add_coins(user_id, payout)
+            if unique == 1:
+                payout = amount * 3
+                profit = payout - amount
+                won = True
+                title = "🎰 THREE MATCH!"
+                result = f"🔥 +{profit:,} coins"
+            elif unique == 2:
+                payout = max(amount + 1, round(amount * 1.2))
+                profit = payout - amount
+                won = True
+                title = "🎰 TWO MATCH!"
+                result = f"✨ +{profit:,} coins"
+            else:
+                payout = 0
+                profit = -amount
+                won = False
+                title = "🎰 No match"
+                result = f"💥 -{amount:,} coins"
 
-    await record_game_result(
-        user_id,
-        "SLOTS",
-        profit if won else 0,
-        won,
-        update.effective_chat.id,
-    )
+        if payout:
+            await add_coins(user_id, payout)
 
-    new_balance = balance - amount + payout
+        await record_game_result(
+            user_id,
+            "SLOTS",
+            profit if won else 0,
+            won,
+            update.effective_chat.id,
+        )
+
+        new_balance = balance - amount + payout
 
     await update.message.reply_text(
         f"{title}\n"
