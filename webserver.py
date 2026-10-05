@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import time
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote
 from aiohttp import web, WSMsgType
 from db import users, ensure_user, add_coins, add_xp, record_game_result
 try:
@@ -84,27 +85,39 @@ def verify_kingdom_join_token(room_code, token):
 
 
 def verify_telegram_init_data(init_data: str):
+    """Validate Telegram Mini App initData using Telegram's HMAC format."""
     if not init_data:
         return None
     try:
-        pairs = [p.split('=', 1) for p in init_data.split('&') if '=' in p]
-        data = {k: v for k, v in pairs}
+        pairs = parse_qsl(str(init_data), keep_blank_values=True)
+        data = dict(pairs)
         received = data.pop('hash', '')
         if not received:
             return None
+
         bot_token = os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN') or ''
         if not bot_token:
             return None
-        check = '\n'.join(f'{k}={data[k]}' for k in sorted(data))
-        secret = hmac.new(b'WebAppData', bot_token.encode(), hashlib.sha256).digest()
-        digest = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+
+        check = '\\n'.join(f'{k}={data[k]}' for k in sorted(data))
+        secret = hmac.new(
+            b'WebAppData',
+            bot_token.encode(),
+            hashlib.sha256,
+        ).digest()
+        digest = hmac.new(
+            secret,
+            check.encode(),
+            hashlib.sha256,
+        ).hexdigest()
         if not hmac.compare_digest(digest, received):
             return None
-        auth_date = int(data.get('auth_date', '0'))
+
+        auth_date = int(data.get('auth_date', '0') or 0)
         if auth_date and time.time() - auth_date > 86400:
             return None
-        import urllib.parse
-        user = json.loads(urllib.parse.unquote(data.get('user', '{}')))
+
+        user = json.loads(data.get('user', '{}'))
         return user if user.get('id') is not None else None
     except Exception:
         return None
@@ -883,7 +896,7 @@ CHESS_PIECES = {
 
 def new_chess_room():
     return {'code':None,'board':chesslib.Board() if chesslib else None,'players':[],
-            'started':False,'winner':None,'chat':[],'created':time.time(),'updated':time.time(),'ended':False,'drawn_card':None}
+            'started':False,'winner':None,'payout_done':False,'chat':[],'created':time.time(),'updated':time.time(),'ended':False,'drawn_card':None}
 
 def chess_player_public(p):
     return {'id':p['id'],'name':p['name'],'color':p['color'],'bot':p.get('bot',False),'connected':p.get('connected',False)}
@@ -913,6 +926,34 @@ def chess_current_player(room):
     color='white' if room['board'].turn else 'black'
     return next((p for p in room['players'] if p['color']==color),None)
 
+
+async def _chess_award(room):
+    """Reward the Telegram winner once and record Chess leaderboard points."""
+    if room.get('payout_done') or not room.get('winner'):
+        return
+    room['payout_done'] = True
+    winner_id = str(room.get('winner'))
+    for player in room.get('players', []):
+        uid = player.get('id')
+        try:
+            numeric_uid = int(uid)
+        except (TypeError, ValueError):
+            continue
+        if str(uid) != winner_id:
+            continue
+        try:
+            await add_coins(numeric_uid, 750)
+            await add_xp(numeric_uid, 100)
+            await record_game_result(
+                numeric_uid,
+                'CHESS',
+                points=750,
+                won=True,
+                chat_id=room.get('group_id'),
+            )
+        except Exception as exc:
+            print(f"[Chess][Reward] {type(exc).__name__}: {exc}")
+
 async def create_chess_room(request):
     if chesslib is None: return web.json_response({'ok':False,'error':'Chess package unavailable'},status=500)
     async with CHESS_LOCK:
@@ -932,7 +973,10 @@ async def maybe_chess_bot_turn(room):
     captures=[m for m in moves if room['board'].is_capture(m)]
     move=random.choice(captures or moves)
     room['board'].push(move); room['updated']=time.time()
-    if room['board'].is_checkmate(): room['winner']=p['id']
+    if room['board'].is_checkmate():
+        room['winner']=p['id']
+        room['started']=False
+        await _chess_award(room)
     await broadcast_chess(room)
 
 async def chess_ws(request):
@@ -975,13 +1019,21 @@ async def chess_ws(request):
                 except Exception: await ws.send_json({'type':'error','message':'Invalid move'}); continue
                 if move not in room['board'].legal_moves: await ws.send_json({'type':'error','message':'Illegal move'}); continue
                 room['board'].push(move); room['updated']=time.time()
-                if room['board'].is_checkmate(): room['winner']=session_id
+                if room['board'].is_checkmate():
+                    room['winner']=session_id
+                    room['started']=False
+                    await _chess_award(room)
                 await broadcast_chess(room)
                 if room['started'] and not room['winner'] and chess_current_player(room).get('bot'): asyncio.create_task(maybe_chess_bot_turn(room))
             elif typ=='resign':
                 p=next((x for x in room['players'] if x['id']==session_id),None)
                 if p:
-                    opp=next((x for x in room['players'] if x['id']!=session_id),None); room['winner']=opp['id'] if opp else None; room['started']=False; await broadcast_chess(room)
+                    opp=next((x for x in room['players'] if x['id']!=session_id),None)
+                    room['winner']=opp['id'] if opp else None
+                    room['started']=False
+                    if room.get('winner'):
+                        await _chess_award(room)
+                    await broadcast_chess(room)
             elif typ=='chat':
                 p=next((x for x in room['players'] if x['id']==session_id),None); msgtext=(data.get('text') or '').strip()[:180]
                 if p and msgtext:
