@@ -344,7 +344,7 @@ def _reply_fingerprint(text_value):
     value = re.sub(r"<[^>]+>", "", str(text_value or ""))
     value = html.unescape(value).casefold()
     value = re.sub(r"[^\w\s]", "", value, flags=re.UNICODE)
-    return re.sub(r"\\s+", " ", value).strip()
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def _recent_reply_fingerprints(chat_id):
@@ -530,6 +530,38 @@ def _extract_chatgp_text(data):
                     return value
     return ""
 
+def _is_generic_group_reply(text_value, user_text, reply_context=""):
+    """Reject canned acknowledgements when a real group reply needs substance."""
+    if not reply_context:
+        return False
+    text = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
+    user = re.sub(r"\s+", " ", str(user_text or "")).strip().casefold()
+    canned = {
+        "haanji bolo",
+        "haanji bolo.",
+        "haanji bolo na",
+        "haanji bolo na.",
+        "bolo na",
+        "bolo na.",
+        "haan yaar bolo",
+        "haan yaar bolo.",
+        "haanji sun rahi hu",
+        "haanji sun rahi hu.",
+        "haan yaar sun rahi hu",
+        "haan yaar sun rahi hu.",
+        "sun rahi hu",
+        "sun rahi hu.",
+        "haan, bolo na",
+        "haan, bolo na.",
+    }
+    if text not in canned:
+        return False
+    # Keep these acknowledgements valid for actual greetings/very short calls.
+    if user in {"hi", "hii", "hiii", "hello", "hey", "heyy", "sun", "are"}:
+        return False
+    return len(user.split()) >= 2
+
+
 def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     """Remove accidental internal implementation details before sending."""
     text = str(answer or "").strip()
@@ -590,6 +622,17 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
             safe = _sanitize_vanya_reply(
                 answer, max_words=max_words, max_lines=max_lines
             ) if answer else ""
+
+            if safe and _is_generic_group_reply(
+                safe,
+                usage_context.get("user_text") if isinstance(usage_context, dict) else "",
+                usage_context.get("reply_context") if isinstance(usage_context, dict) else "",
+            ):
+                print(
+                    f"[AI][FAILOVER] {name} returned a generic group acknowledgement; "
+                    "trying another provider."
+                )
+                safe = ""
 
             if safe:
                 safe = _finalize_ai_answer(
@@ -1344,6 +1387,20 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
             "Haan, bolo na 😌",
             "Hmm, sun rahi hu 👀",
             "Batao yaar, kya poochna hai? 😄",
+        ])
+    elif t in {"kuch nhi", "kuch nahi", "nothing", "nothing much", "not much"}:
+        answer = random.choice([
+            "Achha 😌 theek hai.",
+            "Ohh okayy 😄",
+            "Acha ji, samajh gayi 😌",
+            "Hehe theek hai, main yahin hu 💕",
+        ])
+    elif reply_context and chat_type == "group":
+        answer = random.choice([
+            "Achha 😌 main sun rahi hu, continue karo.",
+            "Haan 😄 samajh gayi. Ab batao kya chal raha hai?",
+            "Hehe okayy 👀 phir aage bolo.",
+            "Achhaaa 😌 got it.",
         ])
     elif len(words) <= 2:
         # Short messages such as "are", "ku", "bro", "sun" should get a
