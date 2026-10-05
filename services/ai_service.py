@@ -458,6 +458,7 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
 
     for name, fn in providers:
         try:
+            print(f"[AI][FAILOVER] {name} request start")
             answer = await asyncio.wait_for(
                 fn(prompt, usage_context=usage_context),
                 timeout=timeouts[name],
@@ -467,6 +468,7 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
             ) if answer else ""
 
             if safe:
+                print(f"[AI][FAILOVER] {name} SUCCESS")
                 return safe
 
             print(f"[AI][FAILOVER] {name} returned no usable response; trying next provider.")
@@ -478,6 +480,7 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
                 f"{type(exc).__name__}: {exc}; trying next provider."
             )
 
+    print("[AI][FAILSAFE] All remote providers failed; using local Vanya fallback.")
     return None
 
 def _instant_chat_reply(text_value: str):
@@ -782,11 +785,19 @@ async def _call_cloudflare_api(text_value, usage_context=None):
             {"role": "user", "content": text_value},
         ],
         "stream": False,
+        # Fail fast when Workers AI has no capacity so the next provider
+        # can answer instead of this request sitting in a capacity queue.
+        "options": {"rejectIfBusy": True},
     }
 
+    print(
+        f"[AI][CLOUDFLARE] REQUEST START model={payload['model']} "
+        f"timeout={CLOUDFLARE_TIMEOUT_SECONDS}s"
+    )
     try:
         async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
             raw = await resp.text()
+            print(f"[AI][CLOUDFLARE] HTTP {resp.status}")
             if resp.status >= 400:
                 await _set_ai_provider_status(
                     "cloudflare", False, f"HTTP {resp.status}: {raw[:300]}"
@@ -1241,27 +1252,66 @@ async def send_vanya_reply(update, text_value):
         rendered = html.escape(str(text_value or ""))
 
     if AI_DISCLOSURE and update.effective_chat.type=="private":
-        u=await get_user(update.effective_user.id)
-        if not u.get("ai_disclosure_sent"):
-            disclosure, _ = await _premiumize_text(
-                "Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
+        try:
+            u=await get_user(update.effective_user.id)
+            if not u.get("ai_disclosure_sent"):
+                disclosure, _ = await _premiumize_text(
+                    "Just so it's clear: I'm Vanya, an AI character — not a real person. I keep the chat natural and remember useful things for 30 days."
+                )
+                try:
+                    await update.effective_chat.send_message(disclosure, parse_mode="HTML")
+                except Exception as disclosure_exc:
+                    # Disclosure must never block the actual Vanya reply.
+                    print(
+                        f"[AI][Disclosure] send failed: "
+                        f"{type(disclosure_exc).__name__}: {disclosure_exc}"
+                    )
+                try:
+                    await users.update_one(
+                        {"_id":update.effective_user.id},
+                        {"$set":{"ai_disclosure_sent":True}},
+                    )
+                except Exception as db_exc:
+                    print(
+                        f"[AI][Disclosure] state save failed: "
+                        f"{type(db_exc).__name__}: {db_exc}"
+                    )
+        except Exception as disclosure_setup_exc:
+            print(
+                f"[AI][Disclosure] skipped: "
+                f"{type(disclosure_setup_exc).__name__}: {disclosure_setup_exc}"
             )
-            await update.effective_chat.send_message(disclosure, parse_mode="HTML")
-            await users.update_one({"_id":update.effective_user.id},{"$set":{"ai_disclosure_sent":True}})
 
     try:
         await update.message.reply_text(rendered, parse_mode="HTML")
+        return
     except Exception as exc:
         # The original message can disappear before the AI reply is sent.
-        # Send a normal chat message instead of losing Vanya's response.
         print(f"[GroupChat][ReplyFallback] {type(exc).__name__}: {exc}")
-        try:
-            await update.effective_chat.send_message(rendered, parse_mode="HTML")
-        except Exception as fallback_exc:
-            print(
-                f"[GroupChat][SendFallback] "
-                f"{type(fallback_exc).__name__}: {fallback_exc}"
-            )
+
+    try:
+        await update.effective_chat.send_message(rendered, parse_mode="HTML")
+        return
+    except Exception as fallback_exc:
+        print(
+            f"[GroupChat][SendFallback] "
+            f"{type(fallback_exc).__name__}: {fallback_exc}"
+        )
+
+    # Last Telegram fallback: send plain text without parse_mode. This also
+    # protects against malformed HTML in provider output.
+    try:
+        await asyncio.sleep(0.35)
+        await update.effective_chat.send_message(
+            str(text_value or "Haanji 😌 bolo na."),
+            parse_mode=None,
+        )
+        print("[GroupChat][FinalFallback] plain-text reply sent")
+    except Exception as final_exc:
+        print(
+            f"[GroupChat][FinalFallback] Telegram send failed: "
+            f"{type(final_exc).__name__}: {final_exc}"
+        )
 
 async def cleanup_expired_memory():
     cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
