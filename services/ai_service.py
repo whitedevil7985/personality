@@ -615,11 +615,37 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
                 answer, max_words=max_words, max_lines=max_lines
             ) if answer else ""
 
+            user_text = (
+                usage_context.get("user_text")
+                if isinstance(usage_context, dict)
+                else ""
+            )
+            reply_context = (
+                usage_context.get("reply_context")
+                if isinstance(usage_context, dict)
+                else ""
+            )
+
             if safe and _is_generic_group_reply(
                 safe,
-                usage_context.get("user_text") if isinstance(usage_context, dict) else "",
-                usage_context.get("reply_context") if isinstance(usage_context, dict) else "",
+                user_text,
+                reply_context,
             ):
+                print(
+                    f"[AI][FAILOVER] {name} returned a generic group acknowledgement; "
+                    "trying another provider."
+                )
+                safe = ""
+
+            if safe and isinstance(usage_context, dict) and usage_context.get("chat_type") == "private":
+                if _is_generic_dm_reply(safe, user_text):
+                    print(
+                        f"[AI][FAILOVER] {name} returned a generic DM acknowledgement; "
+                        "trying another provider."
+                    )
+                    safe = ""
+
+            if safe:
                 print(
                     f"[AI][FAILOVER] {name} returned a generic group acknowledgement; "
                     "trying another provider."
@@ -755,6 +781,85 @@ def _group_context_quick_reply(text_value):
     }
     values = options.get(t)
     return random.choice(values) if values else None
+
+
+def _dm_smart_reply(text_value):
+    """Handle common Hinglish DM small-talk intents instantly and naturally."""
+    t = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
+
+    if re.search(r"\b(?:kkrh|kya kr(?:\s+rahe|\s+rhi|\s+kar)?)\b", t):
+        return random.choice([
+            "Tumse baat kar rahi hu 😌 tum kya kar rahe ho?",
+            "Bas yahin tumhari baatein sun rahi hu 😄 tum batao?",
+            "Tumse hi gupshup chal rahi hai 😜 tum kya scene hai?",
+        ])
+
+    if re.search(r"\b(?:kya sun rahi|ky sun rhi|ky sun nhi|kya sun nhi)\b", t):
+        return random.choice([
+            "Haan 😭 tumhari hi baatein sun rahi hu, bolo na.",
+            "Arre tum hi bolo na 😄 main dhyaan se sun rahi hu.",
+            "Haanji 👀 tum kya keh rahe the?",
+        ])
+
+    if re.search(
+        r"\b(?:kahan|kaha|kha|kidhar)\s+(?:se|ki|ke)\s+ho\b"
+        r"|\bor\s+(?:kahan|kaha|kha)\s+se\s+ho\b",
+        t,
+    ):
+        return random.choice([
+            "Jaipur se hu 😊 Pune mein design padh rahi hu.",
+            "Jaipur meri hai yaar ✨ aur Pune mein design padh rahi hu.",
+            "Jaipur se hu 😌 Pune mein design ki padhai chal rahi hai.",
+        ])
+
+    if re.search(r"\b(?:kya kar|ky kar|kya kr)\s*(?:rhi|rahi|kar)\b", t):
+        return random.choice([
+            "Tumse baat 😌 aur thodi gupshup. Tum batao?",
+            "Bas tumhari baatein sun rahi hu 😄 tum kya kar rahe ho?",
+            "Gupshup mode on 😜 tumhara kya scene hai?",
+        ])
+
+    return None
+
+
+def _is_generic_dm_reply(text_value, user_text):
+    """Reject a canned acknowledgement for a substantive DM message."""
+    text = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
+    user = re.sub(r"\s+", " ", str(user_text or "")).strip().casefold()
+    if not text or not user:
+        return False
+
+    generic = {
+        "haanji bolo",
+        "haanji bolo.",
+        "haanji bolo na",
+        "haanji bolo na.",
+        "haan yaar batao",
+        "haan yaar batao.",
+        "haan yaar sun rahi hu",
+        "haan yaar sun rahi hu.",
+        "haan sun rahi hu",
+        "haan sun rahi hu.",
+        "sun rahi hu",
+        "sun rahi hu.",
+        "bolo na",
+        "bolo na.",
+        "batao na",
+        "batao na.",
+        "haanji 👀 bolo",
+        "haanji 👀 bolo.",
+    }
+    if text not in generic:
+        return False
+
+    questionish = (
+        "?" in user
+        or bool(re.search(
+            r"\b(?:kya|ky|kaise|kaisa|kyun|kahan|kaha|kha|kab|kon|kaun|who|what|where|how|why)\b",
+            user,
+        ))
+    )
+    return len(user.split()) >= 2 or questionish
 
 
 def _instant_chat_reply(text_value: str):
@@ -1334,6 +1439,12 @@ async def _save_chat_state_background(user_id, user_text, answer):
 async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None, chat_id=None, reply_context=""):
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
     quick = _privacy_quick_reply(text_value)
+    if quick:
+        quick = _finalize_ai_answer(quick, text_value, chat_id)
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        return quick
+
+    quick = _dm_smart_reply(text_value) if chat_type == "private" else None
     if quick:
         quick = _finalize_ai_answer(quick, text_value, chat_id)
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
