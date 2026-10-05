@@ -40,10 +40,10 @@ from games.mines import mines, mines_cb
 from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek, WORDSEEK_GAMES
 from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_wordgrid
 from games.crash import crash
-from games.charades import charades
+from games.charades import charades, CHARADES_GAMES, charades_answer
 from games.wordchain import wordchain, wordchain_join, wordchain_answer, WORDCHAIN_GAMES
 from games.wordscramble import wordscramble, wordscramble_answer, WORDSCRAMBLE_GAMES
-from games.hack import hack
+from games.hack import hack, HACK_GAMES, hack_answer
 from games.scribble import scribble
 from games.kingdomwars import kingdomwars
 from features import spin, achievements, quest, progress_quest
