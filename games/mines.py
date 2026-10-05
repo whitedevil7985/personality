@@ -1,4 +1,5 @@
 import random
+import asyncio
 
 from telegram import InlineKeyboardButton
 from games.common import kb
@@ -8,6 +9,16 @@ from db import ensure_user, get_user, add_coins, users, record_game_result
 BOARD_SIZE = 5
 MINE_COUNT = 5
 SAFE_REWARD = 100
+
+_MINES_LOCKS = {}
+
+
+def _mines_lock(uid):
+    lock = _MINES_LOCKS.get(int(uid))
+    if lock is None:
+        lock = asyncio.Lock()
+        _MINES_LOCKS[int(uid)] = lock
+    return lock
 
 
 def _board_markup(safe_tiles, mines_set=None, reveal_mines=False):
@@ -73,160 +84,162 @@ async def mines(update, context):
 
 
 async def mines_cb(q, data):
-    try:
-        if not q or not q.from_user:
-            return
-
-        parts = list(data or [])
-        if len(parts) != 2 or parts[0] != "mine":
-            await q.answer("Invalid Mines button.", show_alert=True)
-            return
-
-        uid = q.from_user.id
-        action = parts[1]
-        u = await get_user(uid)
-
-        if not u or not u.get("mines_active"):
-            await q.answer(
-                "⛏️ No active Mines round. Use /mines to start one.",
-                show_alert=True,
-            )
-            return
-
-        if action == "cashout":
-            safe = list(u.get("mines_safe", []))
-            if not safe:
+        try:
+            uid_for_lock = int(q.from_user.id) if q and q.from_user else 0
+            async with _mines_lock(uid_for_lock):
+            if not q or not q.from_user:
+                return
+    
+            parts = list(data or [])
+            if len(parts) != 2 or parts[0] != "mine":
+                await q.answer("Invalid Mines button.", show_alert=True)
+                return
+    
+            uid = q.from_user.id
+            action = parts[1]
+            u = await get_user(uid)
+    
+            if not u or not u.get("mines_active"):
                 await q.answer(
-                    "Open at least one safe tile first.",
+                    "⛏️ No active Mines round. Use /mines to start one.",
                     show_alert=True,
                 )
                 return
-
-            reward = len(safe) * SAFE_REWARD
-            await add_coins(uid, reward)
-            await record_game_result(
-                uid,
-                "MINES",
-                reward,
-                True,
-                q.message.chat_id if q.message else None,
-            )
+    
+            if action == "cashout":
+                safe = list(u.get("mines_safe", []))
+                if not safe:
+                    await q.answer(
+                        "Open at least one safe tile first.",
+                        show_alert=True,
+                    )
+                    return
+    
+                reward = len(safe) * SAFE_REWARD
+                await add_coins(uid, reward)
+                await record_game_result(
+                    uid,
+                    "MINES",
+                    reward,
+                    True,
+                    q.message.chat_id if q.message else None,
+                )
+                await users.update_one(
+                    {"_id": uid},
+                    {
+                        "$set": {
+                            "mines_active": False,
+                            "mines_safe": [],
+                            "mines_set": [],
+                            "mines_bet": 0,
+                        }
+                    },
+                )
+    
+                await q.answer("💰 Cash out successful!")
+                await q.edit_message_text(
+                    "💰 <b>MINES CASHED OUT!</b>\n\n"
+                    f"💎 Safe tiles: <b>{len(safe)}</b>\n"
+                    f"🏆 Reward: <b>+{reward:,} coins</b>",
+                    parse_mode="HTML",
+                )
+                return
+    
+            try:
+                pos = int(action)
+            except (TypeError, ValueError):
+                await q.answer("Invalid tile.", show_alert=True)
+                return
+    
+            if pos < 0 or pos >= BOARD_SIZE * BOARD_SIZE:
+                await q.answer("Invalid tile.", show_alert=True)
+                return
+    
+            safe = list(u.get("mines_safe", []))
+            mines_set = set(u.get("mines_set", []))
+    
+            if pos in safe:
+                await q.answer("💎 Already opened.", show_alert=False)
+                return
+    
+            if pos in mines_set:
+                await record_game_result(
+                    uid,
+                    "MINES",
+                    0,
+                    False,
+                    q.message.chat_id if q.message else None,
+                )
+                await users.update_one(
+                    {"_id": uid},
+                    {
+                        "$set": {
+                            "mines_active": False,
+                            "mines_safe": [],
+                            "mines_set": [],
+                            "mines_bet": 0,
+                        }
+                    },
+                )
+    
+                await q.answer("💥 BOOM!", show_alert=True)
+                await q.edit_message_text(
+                    "💥 <b>BOOM!</b>\n\n"
+                    "You hit a mine. The round is over.\n"
+                    "🎮 Use /mines to try again.",
+                    parse_mode="HTML",
+                )
+                return
+    
+            safe.append(pos)
             await users.update_one(
                 {"_id": uid},
-                {
-                    "$set": {
-                        "mines_active": False,
-                        "mines_safe": [],
-                        "mines_set": [],
-                        "mines_bet": 0,
-                    }
-                },
+                {"$set": {"mines_safe": safe}},
             )
-
-            await q.answer("💰 Cash out successful!")
-            await q.edit_message_text(
-                "💰 <b>MINES CASHED OUT!</b>\n\n"
-                f"💎 Safe tiles: <b>{len(safe)}</b>\n"
-                f"🏆 Reward: <b>+{reward:,} coins</b>",
-                parse_mode="HTML",
+    
+            # If every non-mine tile is opened, automatically cash out.
+            if len(safe) >= (BOARD_SIZE * BOARD_SIZE - MINE_COUNT):
+                reward = len(safe) * SAFE_REWARD
+                await add_coins(uid, reward)
+                await record_game_result(
+                    uid,
+                    "MINES",
+                    reward,
+                    True,
+                    q.message.chat_id if q.message else None,
+                )
+                await users.update_one(
+                    {"_id": uid},
+                    {
+                        "$set": {
+                            "mines_active": False,
+                            "mines_safe": [],
+                            "mines_set": [],
+                            "mines_bet": 0,
+                        }
+                    },
+                )
+                await q.answer("🏆 All safe tiles found!")
+                await q.edit_message_text(
+                    "🏆 <b>MINES CLEARED!</b>\n\n"
+                    f"💎 Safe tiles: <b>{len(safe)}</b>\n"
+                    f"💰 Reward: <b>+{reward:,} coins</b>",
+                    parse_mode="HTML",
+                )
+                return
+    
+            await q.answer("💎 Safe!")
+    
+            await q.edit_message_reply_markup(
+                reply_markup=_board_markup(safe),
             )
-            return
-
-        try:
-            pos = int(action)
-        except (TypeError, ValueError):
-            await q.answer("Invalid tile.", show_alert=True)
-            return
-
-        if pos < 0 or pos >= BOARD_SIZE * BOARD_SIZE:
-            await q.answer("Invalid tile.", show_alert=True)
-            return
-
-        safe = list(u.get("mines_safe", []))
-        mines_set = set(u.get("mines_set", []))
-
-        if pos in safe:
-            await q.answer("💎 Already opened.", show_alert=False)
-            return
-
-        if pos in mines_set:
-            await record_game_result(
-                uid,
-                "MINES",
-                0,
-                False,
-                q.message.chat_id if q.message else None,
-            )
-            await users.update_one(
-                {"_id": uid},
-                {
-                    "$set": {
-                        "mines_active": False,
-                        "mines_safe": [],
-                        "mines_set": [],
-                        "mines_bet": 0,
-                    }
-                },
-            )
-
-            await q.answer("💥 BOOM!", show_alert=True)
-            await q.edit_message_text(
-                "💥 <b>BOOM!</b>\n\n"
-                "You hit a mine. The round is over.\n"
-                "🎮 Use /mines to try again.",
-                parse_mode="HTML",
-            )
-            return
-
-        safe.append(pos)
-        await users.update_one(
-            {"_id": uid},
-            {"$set": {"mines_safe": safe}},
-        )
-
-        # If every non-mine tile is opened, automatically cash out.
-        if len(safe) >= (BOARD_SIZE * BOARD_SIZE - MINE_COUNT):
-            reward = len(safe) * SAFE_REWARD
-            await add_coins(uid, reward)
-            await record_game_result(
-                uid,
-                "MINES",
-                reward,
-                True,
-                q.message.chat_id if q.message else None,
-            )
-            await users.update_one(
-                {"_id": uid},
-                {
-                    "$set": {
-                        "mines_active": False,
-                        "mines_safe": [],
-                        "mines_set": [],
-                        "mines_bet": 0,
-                    }
-                },
-            )
-            await q.answer("🏆 All safe tiles found!")
-            await q.edit_message_text(
-                "🏆 <b>MINES CLEARED!</b>\n\n"
-                f"💎 Safe tiles: <b>{len(safe)}</b>\n"
-                f"💰 Reward: <b>+{reward:,} coins</b>",
-                parse_mode="HTML",
-            )
-            return
-
-        await q.answer("💎 Safe!")
-
-        await q.edit_message_reply_markup(
-            reply_markup=_board_markup(safe),
-        )
-
-    except Exception as exc:
-        try:
-            await q.answer(
-                "⚠️ Mines error. Start a new round with /mines.",
-                show_alert=True,
-            )
-        except Exception:
-            pass
-        print(f"[MINES] callback error: {type(exc).__name__}: {exc}")
+    
+        except Exception as exc:
+            try:
+                await q.answer(
+                    "⚠️ Mines error. Start a new round with /mines.",
+                    show_alert=True,
+                )
+            except Exception:
+                pass
+            print(f"[MINES] callback error: {type(exc).__name__}: {exc}")
