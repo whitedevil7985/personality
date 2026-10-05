@@ -1529,7 +1529,8 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
     quick = _privacy_quick_reply(text_value)
     if quick:
-        quick = _finalize_ai_answer(quick, text_value, chat_id)        _record_live_exchange(chat_id, text_value, quick)
+        quick = _finalize_ai_answer(quick, text_value, chat_id)
+        _record_live_exchange(chat_id, text_value, quick)
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick, chat_id=chat_id))
         return quick
 
