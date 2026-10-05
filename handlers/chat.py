@@ -328,7 +328,27 @@ async def mention_chat(update,context):
         pass
     group_title = getattr(update.effective_chat, "title", "") or ""
     try:
-        answer = await ai_reply(update.effective_user, text, "group", group_title, chat_id=chat.id)
+        reply_context = ""
+        reply_to = update.message.reply_to_message
+        if (
+            reply_to is not None
+            and reply_to.from_user is not None
+            and reply_to.from_user.id == context.bot.id
+        ):
+            reply_context = (
+                getattr(reply_to, "text", None)
+                or getattr(reply_to, "caption", None)
+                or ""
+            ).strip()[:1200]
+
+        answer = await ai_reply(
+            update.effective_user,
+            text,
+            "group",
+            group_title,
+            chat_id=chat.id,
+            reply_context=reply_context,
+        )
 
         # Group AI may intentionally decide that a general conversation is
         # not directed at Vanya. Never leak that internal decision to users.
