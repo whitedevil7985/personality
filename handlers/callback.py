@@ -82,6 +82,22 @@ async def callback(update,context):
         await mines_cb(q, data.split(":"))
         return
 
+    if data.startswith("rps:"):
+        await rps_cb(q, data.split(":"))
+        return
+    if data.startswith("card:"):
+        await card_cb(q, data.split(":"))
+        return
+    if data.startswith("uno:"):
+        await uno_cb(q, data.split(":"))
+        return
+    if data.startswith("ludo:"):
+        await ludo_cb(q, data.split(":")[1])
+        return
+    if data.startswith("chess:") or data.startswith("resign:"):
+        await chess_cb(q, data.split(":"))
+        return
+
     await q.answer()
 
     if data == "wordgrid:new":
@@ -629,15 +645,3 @@ async def callback(update,context):
             parse_mode="HTML",
             reply_markup=kb([[InlineKeyboardButton("🎮 Back to Arena",callback_data=f"game:{key}" if key!="ARCADE" else "cat:games")], [InlineKeyboardButton("⌂ Home",callback_data="home")]]))
         return
-    if data.startswith("rps:"):
-        await rps_cb(q, data.split(":"))
-        return
-    if data.startswith("card:"):
-        await card_cb(q, data.split(":"))
-        return
-    if data.startswith("uno:"):
-        await uno_cb(q,data.split(":"));return
-    if data.startswith("ludo:"):
-        await ludo_cb(q,data.split(":")[1]);return
-    if data.startswith("chess:") or data.startswith("resign:"):
-        await chess_cb(q,data.split(":"));return
