@@ -357,9 +357,13 @@ async def _warm_ai_context_cache(user_id, chat_id=None, force=False):
         and now - float(cached.get("at", 0.0)) < _AI_CONTEXT_CACHE_TTL
     ):
         return
-    if user_id in _AI_CONTEXT_WARMING:
+    warming_key = (
+        int(user_id),
+        int(chat_id) if chat_id is not None else None,
+    )
+    if warming_key in _AI_CONTEXT_WARMING:
         return
-    _AI_CONTEXT_WARMING.add(user_id)
+    _AI_CONTEXT_WARMING.add(warming_key)
     try:
         u = await get_user(user_id) or {}
         _AI_CONTEXT_CACHE[key] = {
@@ -370,7 +374,7 @@ async def _warm_ai_context_cache(user_id, chat_id=None, force=False):
     except Exception as exc:
         print(f"[AI][DB] context warm skipped: {type(exc).__name__}: {exc}")
     finally:
-        _AI_CONTEXT_WARMING.discard(user_id)
+        _AI_CONTEXT_WARMING.discard(warming_key)
 
 
 def _reply_fingerprint(text_value):
@@ -1525,17 +1529,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
     quick = _privacy_quick_reply(text_value)
     if quick:
-        quick = _finalize_ai_answer(quick, text_value, chat_id)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
+        quick = _finalize_ai_answer(quick, text_value, chat_id)        _record_live_exchange(chat_id, text_value, quick)
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick, chat_id=chat_id))
         return quick
 
