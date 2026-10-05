@@ -24,6 +24,93 @@ def get_uno_webapp_url():
         webapp_url += "/uno"
     return webapp_url
 
+def _room_url(base_url, code):
+    base_url = (base_url or "").rstrip("/")
+    return base_url + ("&" if "?" in base_url else "?") + "room=" + str(code).upper()[:12]
+
+
+def _latest_group_web_room(group_id, prefix=None, code=None):
+    """Find a Mini App room created from this Telegram group."""
+    try:
+        from webserver import ROOMS, CHESS_ROOMS
+    except Exception:
+        return None
+
+    if code:
+        wanted = str(code).upper().strip()
+        candidates = []
+        for key, room in list(ROOMS.items()):
+            if key.upper() == f"{prefix}:{wanted}" or room.get("code") == wanted:
+                candidates.append(room)
+        if prefix == "C":
+            room = CHESS_ROOMS.get(wanted)
+            if room:
+                candidates.append(room)
+        return candidates[-1] if candidates else None
+
+    if prefix == "C":
+        rooms = list(CHESS_ROOMS.values())
+    else:
+        rooms = [
+            room for key, room in list(ROOMS.items())
+            if key.startswith(f"{prefix}:")
+        ]
+
+    for room in reversed(rooms):
+        if room.get("group_id") == group_id and not room.get("ended") and not room.get("winner"):
+            return room
+    return None
+
+
+async def _open_join_room(update, context, kind):
+    chat = update.effective_chat
+    if not chat or chat.type == "private":
+        await update.message.reply_text(
+            f"🎮 /{kind.lower()}join group mein use karo, ya room link se Mini App open karo."
+        )
+        return
+
+    code = (context.args[0].strip().upper() if context.args else "")
+    configs = {
+        "LUDO": ("L", get_ludo_webapp_url(), "🎲"),
+        "UNO": ("U", get_uno_webapp_url(), "🃏"),
+        "CHESS": ("C", get_chess_webapp_url(), "♟️"),
+    }
+    prefix, base_url, icon = configs[kind]
+
+    room = _latest_group_web_room(chat.id, prefix, code or None)
+    if not room:
+        await update.message.reply_text(
+            f"{icon} Koi active {kind.title()} Mini App room nahi mila. Pehle /{kind.lower()} se room banao."
+        )
+        return
+
+    join_url = _room_url(base_url, room.get("code"))
+    label = f"{icon} Join {kind.title()} Room"
+    await update.message.reply_text(
+        f"{icon} <b>{kind.title()} room {html.escape(str(room.get('code')))} ready hai.</b>\n\n"
+        "👇 Tap karke same live room join karo.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(label, web_app=WebAppInfo(url=join_url))]
+            if chat.type == "private"
+            else [InlineKeyboardButton(label, url=join_url)]
+        ]),
+    )
+
+
+async def unojoin(update, context):
+    await _open_join_room(update, context, "UNO")
+
+
+async def ludojoin(update, context):
+    await _open_join_room(update, context, "LUDO")
+
+
+async def chessjoin(update, context):
+    await _open_join_room(update, context, "CHESS")
+
+
 async def uno(update, context):
     """Open the Vanya UNO Telegram Mini App."""
     webapp_url = get_uno_webapp_url()
