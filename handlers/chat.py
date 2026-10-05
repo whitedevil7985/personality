@@ -145,92 +145,81 @@ async def mention_chat(update,context):
         return
 
     if chat.type == "private":
-        # Natural DM replies without requiring /chat.
-        if not AI_DM_MODE:
-            return
+        # DM chat is always enabled. A stale Railway AI_DM_MODE=false should
+        # never silently make Vanya stop replying to private messages.
         if text.startswith("/"):
             return
+
         typing_stop = asyncio.Event()
-        typing_started_at = time.monotonic()
         try:
-            await context.bot.send_chat_action(chat_id=chat.id, action="typing")
+            await context.bot.send_chat_action(
+                chat_id=chat.id,
+                action="typing",
+            )
         except Exception:
             pass
+
         typing_task = asyncio.create_task(
             _typing_heartbeat(context.bot, chat.id, typing_stop)
         )
 
-        stream_state = {"message": None, "last_text": "", "last_edit": 0.0}
-
-        async def stream_to_telegram(current_text):
-            clean = re.sub(r"<[^>]+>", "", str(current_text or "")).strip()
-            if not clean:
-                return
-            rendered = html.escape(clean)
-            now = time.monotonic()
-            message = stream_state.get("message")
-
-            try:
-                if message is None:
-                    message = await update.message.reply_text(
-                        rendered,
-                        parse_mode="HTML",
-                    )
-                    stream_state["message"] = message
-                    stream_state["last_text"] = clean
-                    stream_state["last_edit"] = now
-                    return
-
-                if clean == stream_state.get("last_text"):
-                    return
-                if now - float(stream_state.get("last_edit", 0.0)) < 0.30:
-                    return
-
-                await context.bot.edit_message_text(
-                    chat_id=chat.id,
-                    message_id=message.message_id,
-                    text=rendered,
-                    parse_mode="HTML",
-                )
-                stream_state["last_text"] = clean
-                stream_state["last_edit"] = now
-            except Exception as exc:
-                print(f"[AI][STREAM] Telegram update skipped: {type(exc).__name__}: {exc}")
-
         try:
+            reply_context = ""
+            reply_to = update.message.reply_to_message
+            if (
+                reply_to is not None
+                and reply_to.from_user is not None
+                and reply_to.from_user.id == context.bot.id
+            ):
+                reply_context = (
+                    getattr(reply_to, "text", None)
+                    or getattr(reply_to, "caption", None)
+                    or ""
+                ).strip()[:1200]
+
             answer = await ai_reply(
                 update.effective_user,
                 text,
                 "private",
-                stream_callback=stream_to_telegram,
                 chat_id=chat.id,
+                reply_context=reply_context,
             )
 
-            min_typing = max(0.0, float(os.getenv("AI_MIN_TYPING_SECONDS", "0.7")))
-            remaining = min_typing - (time.monotonic() - typing_started_at)
-            if remaining > 0:
-                await asyncio.sleep(remaining)
+            if not answer:
+                # ai_reply should already have a local failsafe, but keep a
+                # final DM-only safety net so a provider/DB edge case can
+                # never leave the user without a response.
+                answer = random.choice([
+                    "Haanji 😌 bolo na.",
+                    "Sun rahi hu 👀 kya hua?",
+                    "Batao yaar 😄",
+                ])
 
-            # If streaming already created the message, only make sure the
-            # final text is present. Otherwise use the normal reply path.
-            if stream_state.get("message") is None:
-                await send_vanya_reply(update, answer)
-            elif answer:
-                final_clean = re.sub(r"<[^>]+>", "", str(answer)).strip()
-                final_rendered = html.escape(final_clean)
-                if final_clean and final_clean != stream_state.get("last_text"):
-                    try:
-                        await context.bot.edit_message_text(
-                            chat_id=chat.id,
-                            message_id=stream_state["message"].message_id,
-                            text=final_rendered,
-                            parse_mode="HTML",
-                        )
-                    except Exception as exc:
-                        print(f"[AI][STREAM] final edit skipped: {type(exc).__name__}: {exc}")
+            min_typing = max(
+                0.0,
+                float(os.getenv("AI_MIN_TYPING_SECONDS", "0.7")),
+            )
+            elapsed = 0.0
+            if min_typing:
+                await asyncio.sleep(min_typing)
+
+            await send_vanya_reply(update, answer)
+
+        except Exception as exc:
+            print(f"[DMChat] {type(exc).__name__}: {exc}")
+            try:
+                await update.message.reply_text(
+                    "Haanji 😌 main yahin hu, bolo."
+                )
+            except Exception as reply_exc:
+                print(
+                    f"[DMChat][Fallback] {type(reply_exc).__name__}: "
+                    f"{reply_exc}"
+                )
         finally:
             typing_stop.set()
             typing_task.cancel()
+
         return
 
     if not AI_GROUP_MODE:
