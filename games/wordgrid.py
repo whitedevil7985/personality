@@ -1,4 +1,5 @@
 import random
+import asyncio
 from io import BytesIO
 from typing import List, Set, Tuple
 
@@ -25,6 +26,8 @@ WORD_POOL = [
     ("FLOWER", 6), ("GALAXY", 6), ("CASTLE", 6), ("DRAGON", 6),
 ]
 DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
+
+_WORDGRID_LOCK = asyncio.Lock()
 
 
 def _font(size: int, bold: bool = False):
@@ -460,80 +463,74 @@ async def wordgrid(update, context):
 
 async def wordgrid_answer(update, context):
     chat_id = update.effective_chat.id
-    active = context.application.bot_data.get("wordgrid_active", {}).get(chat_id)
-    if not active:
-        return
-    # Once all words are found, stop treating later normal messages as
-    # WordGrid guesses. The New Grid button will create a fresh active game.
-    if active.get("game_over"):
-        return
-
-    # WordGrid answers are now plain text only. The old /answer command is
-    # intentionally ignored so users cannot get a usage prompt.
-    if context.args:
-        guess = "".join(context.args).strip().lower()
-    else:
-        guess = (update.message.text or "").strip().lower()
-        if not guess or guess.startswith("/"):
+    async with _WORDGRID_LOCK:
+        active = context.application.bot_data.get("wordgrid_active", {}).get(chat_id)
+        if not active or active.get("game_over"):
             return
-    if guess not in active["words"]:
-        await update.message.reply_text("❌ That word isn't in this grid. Try again!")
-        return
-    if guess in active["found"]:
-        await update.message.reply_text("👀 You already found that word!")
-        return
 
-    active["found"].add(guess)
-    user_id = update.effective_user.id
-    word_points = len(guess) * 10
-    points = active.setdefault("points", {})
-    points[user_id] = int(points.get(user_id, 0)) + word_points
-    active["last_finder"] = user_id
+        if context.args:
+            guess = "".join(context.args).strip().lower()
+        else:
+            guess = (update.message.text or "").strip().lower()
+            if not guess or guess.startswith("/"):
+                return
 
-    from db import add_coins, add_xp, record_game_result
-    await add_coins(user_id, 40)
-    await add_xp(user_id, 20)
-    await record_game_result(user_id, "WORDGRID", word_points, False, chat_id)
+        if guess not in active["words"]:
+            await update.message.reply_text("❌ That word isn't in this grid. Try again!")
+            return
+        if guess in active["found"]:
+            await update.message.reply_text("👀 You already found that word!")
+            return
 
-    remaining = len(active["words"] - active["found"])
-    if remaining == 0:
-        active["game_over"] = True
-        completion_bonus = 50
-        points[user_id] += completion_bonus
-        await record_game_result(user_id, "WORDGRID", completion_bonus, True, chat_id)
-        await add_coins(user_id, 100)
-        await add_xp(user_id, 50)
-        await _refresh_wordgrid_message(
-            context,
-            chat_id,
-            active,
-            game_over=True,
-        )
-        total_points = points[user_id]
-        await update.message.reply_text(
-            f"🏆 <b>Wordgrid GAME OVER!</b>\n\n"
-            f"✅ <b>{guess.upper()}</b> found!\n"
-            f"⭕ All solved words are circled on the grid.\n"
-            f"🔎 <b>Words found:</b> {len(active['found'])}/{len(active['words'])}\n"
-            f"⭐ Word points: +{word_points}\n"
-            f"🎁 Completion bonus: +{completion_bonus}\n"
-            f"💎 <b>Your total game points: {total_points}</b>\n\n"
-            f"🪙 Bonus rewards: +100 coins +50 XP",
-            parse_mode="HTML",
-        )
-        # Keep the final board visible, but remove the completed game from
-        # the active-answer map so later group messages are not treated as guesses.
-        context.application.bot_data.get("wordgrid_active", {}).pop(chat_id, None)
-    else:
-        await _refresh_wordgrid_message(context, chat_id, active)
-        found_count = len(active["found"])
-        player_points = int(points.get(user_id, 0))
-        await update.message.reply_text(
-            f"✅ <b>{guess.upper()}</b> found!\n"
-            f"⭕ Grid updated — solved letters are now circled.\n"
-            f"🔎 <b>Words found:</b> {found_count}/{len(active['words'])}\n"
-            f"⭐ <b>Your points:</b> {player_points} (+{word_points})\n"
-            f"🪙 +40 coins | +20 XP\n"
-            f"📌 <b>{remaining}</b> word(s) left.",
-            parse_mode="HTML",
-        )
+        active["found"].add(guess)
+        user_id = update.effective_user.id
+        word_points = len(guess) * 10
+        points = active.setdefault("points", {})
+        points[user_id] = int(points.get(user_id, 0)) + word_points
+        active["last_finder"] = user_id
+
+        from db import add_coins, add_xp, record_game_result
+        await add_coins(user_id, 40)
+        await add_xp(user_id, 20)
+        await record_game_result(user_id, "WORDGRID", word_points, False, chat_id)
+
+        remaining = len(active["words"] - active["found"])
+        if remaining == 0:
+            active["game_over"] = True
+            completion_bonus = 50
+            points[user_id] += completion_bonus
+            await record_game_result(user_id, "WORDGRID", completion_bonus, True, chat_id)
+            await add_coins(user_id, 100)
+            await add_xp(user_id, 50)
+            await _refresh_wordgrid_message(
+                context,
+                chat_id,
+                active,
+                game_over=True,
+            )
+            total_points = points[user_id]
+            await update.message.reply_text(
+                f"🏆 <b>Wordgrid GAME OVER!</b>\n\n"
+                f"✅ <b>{guess.upper()}</b> found!\n"
+                f"⭕ All solved words are circled on the grid.\n"
+                f"🔎 <b>Words found:</b> {len(active['found'])}/{len(active['words'])}\n"
+                f"⭐ Word points: +{word_points}\n"
+                f"🎁 Completion bonus: +{completion_bonus}\n"
+                f"💎 <b>Your total game points: {total_points}</b>\n\n"
+                f"🪙 Bonus rewards: +100 coins +50 XP",
+                parse_mode="HTML",
+            )
+            context.application.bot_data.get("wordgrid_active", {}).pop(chat_id, None)
+        else:
+            await _refresh_wordgrid_message(context, chat_id, active)
+            found_count = len(active["found"])
+            player_points = int(points.get(user_id, 0))
+            await update.message.reply_text(
+                f"✅ <b>{guess.upper()}</b> found!\n"
+                f"⭕ Grid updated — solved letters are now circled.\n"
+                f"🔎 <b>Words found:</b> {found_count}/{len(active['words'])}\n"
+                f"⭐ <b>Your points:</b> {player_points} (+{word_points})\n"
+                f"🪙 +40 coins | +20 XP\n"
+                f"📌 <b>{remaining}</b> word(s) left.",
+                parse_mode="HTML",
+            )
