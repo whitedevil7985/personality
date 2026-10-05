@@ -29,6 +29,15 @@ _AI_CONTEXT_CACHE_TTL = max(
 )
 _AI_CONTEXT_WARMING = set()
 
+# Keep a tiny chat-scoped reply window so Vanya does not repeat the same
+# canned/LLM response across consecutive messages, even when providers
+# return identical text or concurrent updates see the same cached context.
+_AI_RECENT_REPLIES = {}
+_AI_RECENT_REPLIES_LIMIT = max(
+    3,
+    int(os.getenv("AI_RECENT_REPLIES_LIMIT", "4")),
+)
+
 # Shared Vanya persona/instruction prompt used by both AI providers.
 VANYA_SYSTEM_PROMPT = r"""
 Tum Vanya ho — friendly, natural, masti-bhari girl-like chat companion.
@@ -330,6 +339,102 @@ async def _warm_ai_context_cache(user_id, force=False):
         _AI_CONTEXT_WARMING.discard(user_id)
 
 
+def _reply_fingerprint(text_value):
+    """Normalize visible reply text for simple same-message repetition checks."""
+    value = re.sub(r"<[^>]+>", "", str(text_value or ""))
+    value = html.unescape(value).casefold()
+    value = re.sub(r"[^\\w\\s]", "", value, flags=re.UNICODE)
+    return re.sub(r"\\s+", " ", value).strip()
+
+
+def _recent_reply_fingerprints(chat_id):
+    if not chat_id:
+        return set()
+    return {
+        fp for fp in _AI_RECENT_REPLIES.get(chat_id, deque())
+        if fp
+    }
+
+
+def _remember_recent_reply(chat_id, answer):
+    if not chat_id or not answer:
+        return
+    fp = _reply_fingerprint(answer)
+    if not fp:
+        return
+    bucket = _AI_RECENT_REPLIES.setdefault(
+        chat_id,
+        deque(maxlen=_AI_RECENT_REPLIES_LIMIT),
+    )
+    bucket.append(fp)
+    # Avoid unbounded growth when the bot has many long-lived chats.
+    if len(_AI_RECENT_REPLIES) > 2000:
+        oldest = next(iter(_AI_RECENT_REPLIES), None)
+        if oldest is not None:
+            _AI_RECENT_REPLIES.pop(oldest, None)
+
+
+def _recent_reply_text(chat_id):
+    bucket = _AI_RECENT_REPLIES.get(chat_id)
+    if not bucket:
+        return ""
+    # We only store fingerprints; the prompt needs the actual last reply, so
+    # this helper intentionally returns an empty string until a parallel text
+    # cache is available. Repetition prevention itself uses the fingerprints.
+    return ""
+
+
+def _varied_local_reply(text_value, chat_id):
+    """Pick a short natural reply that is different from recent replies."""
+    t = re.sub(r"\\s+", " ", str(text_value or "")).strip().casefold()
+    if "?" in t:
+        options = [
+            "Hmm 👀 batao, exactly kya hua?",
+            "Haanji 😌 bol, sun rahi hu.",
+            "Accha 👀 kya jaan'na hai?",
+            "Bolo na 😄 main sun rahi hu.",
+        ]
+    elif any(word in t.split() for word in ("maar", "gussa", "ladungi", "ladunga", "kill")):
+        options = [
+            "Areyy 😂 itna gussa kyun? Bolo na.",
+            "Oho 😭 pehle shaant, phir batao kya scene hai.",
+            "Areee 😭 itna serious mat ho, bol kya hua?",
+            "Hehe 😌 pehle baat toh karo, phir faisla karna.",
+        ]
+    elif any(word in t.split() for word in ("haha", "hehe", "lol")):
+        options = [
+            "Hehe 😂 kya chal raha hai?",
+            "Hahaha 😭 batao na.",
+            "Accha ji 😂 continue karo.",
+            "Hehe, samajh rahi hu 😌",
+        ]
+    else:
+        options = [
+            "Haanji 😌 bolo, kya hua?",
+            "Achhaaa 👀 batao na.",
+            "Haan yaar 😄 sun rahi hu.",
+            "Bolo na 💕 kya scene hai?",
+            "Hmm 😌 continue karo.",
+        ]
+
+    recent = _recent_reply_fingerprints(chat_id)
+    available = [x for x in options if _reply_fingerprint(x) not in recent]
+    return random.choice(available or options)
+
+
+def _finalize_ai_answer(answer, text_value, chat_id):
+    """Prevent consecutive identical replies while preserving normal AI output."""
+    safe = str(answer or "").strip()
+    if not safe:
+        return ""
+    fp = _reply_fingerprint(safe)
+    recent = _recent_reply_fingerprints(chat_id)
+    if fp and fp in recent:
+        safe = _varied_local_reply(text_value, chat_id)
+    _remember_recent_reply(chat_id, safe)
+    return safe
+
+
 def _get_cached_ai_context(user_id):
     cached = _AI_CONTEXT_CACHE.get(user_id) or {}
     return str(cached.get("history", "")), str(cached.get("memory", ""))
@@ -468,6 +573,11 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
             ) if answer else ""
 
             if safe:
+                safe = _finalize_ai_answer(
+                    safe,
+                    usage_context.get("user_text") if isinstance(usage_context, dict) else "",
+                    usage_context.get("chat_id") if isinstance(usage_context, dict) else None,
+                )
                 print(f"[AI][FAILOVER] {name} SUCCESS")
                 return safe
 
@@ -1117,6 +1227,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
             "chat_id": chat_id if chat_id is not None else (user.id if chat_type == "private" else None),
             "chat_type": chat_type,
             "chat_title": group_title if chat_type == "group" else "",
+            "user_text": text_value,
         },
     )
     if answer:
@@ -1161,6 +1272,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
             "Achhaaa 😄 continue karo.",
             "Haanji 💕 kya hua?",
         ])
+    answer = _finalize_ai_answer(answer, text_value, chat_id)
     asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
     return answer
 
