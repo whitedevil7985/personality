@@ -99,7 +99,7 @@ def verify_telegram_init_data(init_data: str):
         if not bot_token:
             return None
 
-        check = '\\n'.join(f'{k}={data[k]}' for k in sorted(data))
+        check = '\n'.join(f'{k}={data[k]}' for k in sorted(data))
         secret = hmac.new(
             b'WebAppData',
             bot_token.encode(),
