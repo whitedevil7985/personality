@@ -18,12 +18,14 @@ def _resolve_user_id(update, context):
     if update.message and update.message.reply_to_message and update.message.reply_to_message.from_user:
         return update.message.reply_to_message.from_user.id, update.message.reply_to_message.from_user
     if context.args:
+        raw = str(context.args[0] or "").strip().lstrip("@")
         try:
-            uid = int(context.args[0])
+            uid = int(raw)
             if uid > 0:
                 return uid, None
         except (TypeError, ValueError):
             pass
+
     return None, None
 
 
@@ -52,7 +54,7 @@ async def blacklist(update, context):
         else f"User {target_id}"
     )
     now = datetime.now(timezone.utc)
-    await users.update_one(
+    result = await users.update_one(
         {"_id": target_id},
         {"$set": {
             "blacklisted": True,
@@ -63,6 +65,12 @@ async def blacklist(update, context):
         }},
         upsert=True,
     )
+    if not result.acknowledged:
+        await update.effective_message.reply_text(
+            "❌ Blacklist save nahi ho paya. MongoDB ne operation acknowledge nahi kiya."
+        )
+        return
+
 
     await update.effective_message.reply_html(
         "🚫 <b>USER BLACKLISTED</b>\n\n"
