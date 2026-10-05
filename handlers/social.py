@@ -11,14 +11,13 @@ del _core, _sys
 async def persona(update, context):
     await update.message.reply_html(
         "💜 <b>Meet Vanya</b>\n\n"
-        "I'm <b>ItzVanya</b>, a fictional AI character with an 18-year-old "
-        "Delhi-style personality. I chat in casual English/Hinglish, remember "
-        "recent messages, and can join conversations in DMs and groups.\n\n"
+        "I'm <b>Vanya</b>, a fictional AI character. I'm 22, from Jaipur, "
+        "and I study design in Pune. I chat in casual Hinglish like a good friend.\n\n"
         "✨ Natural DM chat\n"
         "💬 Mention/reply-to chat in groups\n"
         "🧠 Short conversation memory\n"
-        "⌨️ Typing-style delays\n"
-        "😂 Casual reactions + light Delhi slang\n"
+        "⌨️ Natural typing feel\n"
+        "😂 Warm, funny, slightly teasing replies\n"
         "🎮 Games + economy + social features\n\n"
         "<i>I'm an AI character, not a real human.</i>"
     )
