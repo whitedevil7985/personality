@@ -307,10 +307,17 @@ async def mention_chat(update,context):
     ):
         return
 
-    # Group AI mode: reply to ordinary messages too, even without a mention,
-    # greeting, or reply-to-Vanya. Commands and active game answers are
-    # excluded above.
-    should_reply = True
+    # Respect the group reply mode. When AI_GROUP_REPLY_ALL is disabled,
+    # Vanya only answers when addressed directly, replied to, or greeted.
+    # This prevents her from interrupting ordinary member-to-member chat.
+    should_reply = bool(
+        AI_GROUP_REPLY_ALL
+        or mentioned
+        or replied_to_bot
+        or greeting
+    )
+    if not should_reply:
+        return
 
     # Do non-critical progression work in the background so it cannot add
     # MongoDB latency to the visible chat reply.
