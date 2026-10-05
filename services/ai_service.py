@@ -343,7 +343,7 @@ def _reply_fingerprint(text_value):
     """Normalize visible reply text for simple same-message repetition checks."""
     value = re.sub(r"<[^>]+>", "", str(text_value or ""))
     value = html.unescape(value).casefold()
-    value = re.sub(r"[^\\w\\s]", "", value, flags=re.UNICODE)
+    value = re.sub(r"[^\w\s]", "", value, flags=re.UNICODE)
     return re.sub(r"\\s+", " ", value).strip()
 
 
@@ -386,7 +386,7 @@ def _recent_reply_text(chat_id):
 
 def _varied_local_reply(text_value, chat_id):
     """Pick a short natural reply that is different from recent replies."""
-    t = re.sub(r"\\s+", " ", str(text_value or "")).strip().casefold()
+    t = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
     if "?" in t:
         options = [
             "Hmm 👀 batao, exactly kya hua?",
