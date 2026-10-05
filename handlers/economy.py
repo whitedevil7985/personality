@@ -8,6 +8,7 @@ import sys as _sys
 _core = _sys.modules.get("bot") or _sys.modules["__main__"]
 globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")})
 del _core, _sys
+from db import get_user_lock
 
 async def toprich(update, context):
     """Show the richest users by current coin balance."""
@@ -277,14 +278,17 @@ async def rob(update,context):
         await update.message.reply_text("Reply to someone: /rob [amount]")
         return
 
-    thief = await get_user(update.effective_user.id)
-    victim = await get_user(target.id)
-    if not thief:
-        await ensure_user(update.effective_user)
-        thief = await get_user(update.effective_user.id)
-    if not victim:
-        await ensure_user(target)
-        victim = await get_user(target.id)
+    thief_id = update.effective_user.id
+    victim_id = target.id
+    if thief_id == victim_id:
+        await update.message.reply_text("😅 Khud ko rob nahi kar sakte.")
+        return
+
+    await ensure_user(update.effective_user)
+    await ensure_user(target)
+
+    thief = await get_user(thief_id)
+    victim = await get_user(victim_id)
 
     if _is_dead(thief):
         await update.message.reply_text("💀 You're dead. Use /revive first.")
@@ -299,7 +303,7 @@ async def rob(update,context):
         await update.message.reply_text("💀 Target is dead. You can't rob them until they revive.")
         return
 
-    if thief.get("coins", 0) < 100:
+    if int(thief.get("coins", 0)) < 100:
         await update.message.reply_text("❌ You need at least 100 coins to rob.")
         return
 
@@ -308,8 +312,6 @@ async def rob(update,context):
         await update.message.reply_text("💸 Target has no coins to rob.")
         return
 
-    # /rob [amount] lets the robber choose an amount, capped at the target's
-    # current balance. Without an amount, rob half of the target's balance.
     try:
         amount = int(context.args[0]) if context.args else max(1, victim_coins // 2)
     except Exception:
@@ -318,28 +320,32 @@ async def rob(update,context):
     amount = min(max(1, amount), victim_coins)
 
     if random.random() < 0.45:
-        await add_coins(target.id, -amount)
-        await add_coins(update.effective_user.id, amount)
+        # Debit the victim only if the requested balance still exists.
+        debit = await users.update_one(
+            {"_id": victim_id, "coins": {"$gte": amount}},
+            {"$inc": {"coins": -amount}},
+        )
+        if debit.modified_count != 1:
+            await update.message.reply_text("💸 Target balance changed. Try /rob again.")
+            return
+
+        await add_coins(thief_id, amount)
         await update.message.reply_text(f"🕵️ Rob successful! +{amount:,} coins.")
     else:
         fine = min(100, int(thief.get("coins", 0)))
-        await add_coins(update.effective_user.id, -fine)
-        await update.message.reply_text(f"🚨 Caught! You lost {fine:,} coins.")
+        debit = await users.update_one(
+            {"_id": thief_id, "coins": {"$gte": fine}},
+            {"$inc": {"coins": -fine}},
+        )
+        if debit.modified_count == 1:
+            await update.message.reply_text(f"🚨 Caught! You lost {fine:,} coins.")
+        else:
+            await update.message.reply_text("🚨 Caught, but your balance was already too low for the fine.")
 
 
 async def protect(update,context):
     await ensure_user(update.effective_user)
-    u = await get_user(update.effective_user.id)
-    now = datetime.now(timezone.utc)
-    existing = _protection_until(u)
-    if existing:
-        remaining = existing - now
-        hours = max(1, int(remaining.total_seconds() // 3600))
-        mins = int((remaining.total_seconds() % 3600) // 60)
-        await update.message.reply_text(
-            f"🛡️ Protection already active for {hours}h {mins}m. Use /shield to check it."
-        )
-        return
+    uid = update.effective_user.id
 
     duration_arg = (context.args[0].lower().strip() if context.args else "")
     plans = {
@@ -359,18 +365,32 @@ async def protect(update,context):
         )
         return
 
-    if int(u.get("coins", 0)) < price:
-        await update.message.reply_text(
-            f"❌ You need {price:,} coins for {duration_arg} protection."
-        )
-        return
+    async with get_user_lock(uid):
+        u = await get_user(uid)
+        now = datetime.now(timezone.utc)
+        existing = _protection_until(u)
+        if existing:
+            remaining = existing - now
+            hours = max(1, int(remaining.total_seconds() // 3600))
+            mins = int((remaining.total_seconds() % 3600) // 60)
+            await update.message.reply_text(
+                f"🛡️ Protection already active for {hours}h {mins}m. Use /shield to check it."
+            )
+            return
 
-    until = now + duration
-    await add_coins(update.effective_user.id, -price)
-    await users.update_one(
-        {"_id": update.effective_user.id},
-        {"$set": {"protected_until": until.isoformat()}},
-    )
+        if int(u.get("coins", 0)) < price:
+            await update.message.reply_text(
+                f"❌ You need {price:,} coins for {duration_arg} protection."
+            )
+            return
+
+        await add_coins(uid, -price)
+        until = now + duration
+        await users.update_one(
+            {"_id": uid},
+            {"$set": {"protected_until": until.isoformat()}},
+        )
+
     await update.message.reply_text(
         f"🛡️ <b>Protection activated!</b>\n"
         f"⏱️ Duration: <b>{duration_arg}</b>\n"
@@ -379,7 +399,6 @@ async def protect(update,context):
         "Use /shield anytime to check the timer.",
         parse_mode="HTML",
     )
-
 
 async def shield(update,context):
     await ensure_user(update.effective_user)
