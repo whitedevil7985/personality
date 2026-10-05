@@ -896,7 +896,8 @@ CHESS_PIECES = {
 
 def new_chess_room():
     return {'code':None,'board':chesslib.Board() if chesslib else None,'players':[],
-            'started':False,'winner':None,'payout_done':False,'chat':[],'created':time.time(),'updated':time.time(),'ended':False,'drawn_card':None}
+            'started':False,'winner':None,'draw':False,'payout_done':False,
+            'chat':[],'created':time.time(),'updated':time.time(),'ended':False,'drawn_card':None}
 
 def chess_player_public(p):
     return {'id':p['id'],'name':p['name'],'color':p['color'],'bot':p.get('bot',False),'connected':p.get('connected',False)}
@@ -913,7 +914,8 @@ def chess_state(room, you=None):
             'turn':turn,'fen':b.fen() if b else '', 'pieces':pieces,
             'players':[chess_player_public(p) for p in room['players']], 'you':you,
             'check':bool(b and b.is_check()), 'checkmate':bool(b and b.is_checkmate()),
-            'stalemate':bool(b and b.is_stalemate()), 'draw':bool(b and b.is_insufficient_material()),
+            'stalemate':bool(b and b.is_stalemate()),
+            'draw':bool(room.get('draw') or (b and b.is_draw())),
             'chat':room['chat'][-30:]}
 
 async def broadcast_chess(room):
@@ -975,8 +977,12 @@ async def maybe_chess_bot_turn(room):
     room['board'].push(move); room['updated']=time.time()
     if room['board'].is_checkmate():
         room['winner']=p['id']
+        room['draw']=False
         room['started']=False
         await _chess_award(room)
+    elif room['board'].is_game_over():
+        room['draw']=True
+        room['started']=False
     await broadcast_chess(room)
 
 async def chess_ws(request):
@@ -1008,9 +1014,18 @@ async def chess_ws(request):
                     room['players'].append({'id':bid,'name':'Bot Alpha','color':'black','bot':True,'connected':True,'ws':None})
                     await broadcast_chess(room)
             elif typ=='start':
-                if len(room['players'])<2: await ws.send_json({'type':'error','message':'2 players are needed, or add a bot'}); continue
-                room['started']=True; room['updated']=time.time(); await broadcast_chess(room)
-                if chess_current_player(room).get('bot'): asyncio.create_task(maybe_chess_bot_turn(room))
+                if room.get('winner') or room.get('draw'):
+                    await ws.send_json({'type':'error','message':'This chess room has finished. Create a new room.'})
+                    continue
+                if len(room['players'])<2:
+                    await ws.send_json({'type':'error','message':'2 players are needed, or add a bot'})
+                    continue
+                room['started']=True
+                room['draw']=False
+                room['updated']=time.time()
+                await broadcast_chess(room)
+                if chess_current_player(room).get('bot'):
+                    asyncio.create_task(maybe_chess_bot_turn(room))
             elif typ=='move':
                 if not room['started'] or room['winner']: continue
                 p=next((x for x in room['players'] if x['id']==session_id),None); cur=chess_current_player(room)
@@ -1021,8 +1036,12 @@ async def chess_ws(request):
                 room['board'].push(move); room['updated']=time.time()
                 if room['board'].is_checkmate():
                     room['winner']=session_id
+                    room['draw']=False
                     room['started']=False
                     await _chess_award(room)
+                elif room['board'].is_game_over():
+                    room['draw']=True
+                    room['started']=False
                 await broadcast_chess(room)
                 if room['started'] and not room['winner'] and chess_current_player(room).get('bot'): asyncio.create_task(maybe_chess_bot_turn(room))
             elif typ=='resign':
@@ -1030,6 +1049,7 @@ async def chess_ws(request):
                 if p:
                     opp=next((x for x in room['players'] if x['id']!=session_id),None)
                     room['winner']=opp['id'] if opp else None
+                    room['draw']=False
                     room['started']=False
                     if room.get('winner'):
                         await _chess_award(room)
