@@ -56,19 +56,34 @@ async def balance(update, context):
 
 async def daily(update, context):
     await ensure_user(update.effective_user)
-    u=await get_user(update.effective_user.id)
-    now=datetime.now(timezone.utc)
-    last=u.get("daily")
+    uid = update.effective_user.id
+    now = datetime.now(timezone.utc)
+    u = await get_user(uid)
+    last = u.get("daily") if u else None
     if last:
         try:
-            if now-datetime.fromisoformat(last)<timedelta(hours=24):
+            if now - datetime.fromisoformat(last) < timedelta(hours=24):
                 await update.message.reply_text("⏳ Daily already claimed. Come back later.")
                 return
-        except: pass
-    reward=random.randint(250,750)
-    await add_coins(update.effective_user.id,reward); await add_xp(update.effective_user.id,50)
-    await users.update_one({"_id":update.effective_user.id},{"$set":{"daily":now.isoformat()}})
-    await update.message.reply_text(f"🎁 Daily reward: +{reward:,} coins\n⭐ +50 XP")
+        except Exception:
+            pass
+
+    reward = random.randint(250, 750)
+    # Claim the cooldown atomically against the value we just observed.
+    # Concurrent /daily commands can no longer both pass the cooldown check.
+    claim = await users.update_one(
+        {"_id": uid, "daily": last},
+        {"$set": {"daily": now.isoformat()}},
+    )
+    if claim.modified_count != 1:
+        await update.message.reply_text("⏳ Daily already claimed. Come back later.")
+        return
+
+    await add_coins(uid, reward)
+    await add_xp(uid, 50)
+    await update.message.reply_text(
+        f"🎁 Daily reward: +{reward:,} coins\n⭐ +50 XP"
+    )
 
 async def work(update, context):
     await ensure_user(update.effective_user)
@@ -195,32 +210,36 @@ async def give(update, context):
         return
 
     receiver = update.message.reply_to_message.from_user
-    sender = await get_user(update.effective_user.id)
-    if not sender:
-        await ensure_user(update.effective_user)
-        sender = await get_user(update.effective_user.id)
+    if not receiver:
+        return
 
-    # /give charges a 10% transfer tax. The displayed "Sent" amount is the
-    # net amount the receiver actually gets, matching the transaction-style UI.
+    sender_id = update.effective_user.id
+    receiver_id = receiver.id
+
+    # /give charges a 10% transfer tax. The receiver gets the net amount.
     tax = amount // 10
     net_amount = amount - tax
-
     if net_amount <= 0:
         await update.message.reply_text("❌ Amount is too small after tax.")
         return
 
-    if int(sender.get("coins", 0)) < amount:
+    await ensure_user(update.effective_user)
+    await ensure_user(receiver)
+
+    # Atomic balance check + debit prevents concurrent transfers from
+    # overdrawing the sender.
+    debit = await users.update_one(
+        {"_id": sender_id, "coins": {"$gte": amount}},
+        {"$inc": {"coins": -amount}},
+    )
+    if debit.modified_count != 1:
         await update.message.reply_text("❌ Not enough coins.")
         return
 
-    await add_coins(update.effective_user.id, -amount)
-    await add_coins(receiver.id, net_amount)
+    await add_coins(receiver_id, net_amount)
 
-    sender_name = html.escape(
-        update.effective_user.first_name or "User"
-    )
+    sender_name = html.escape(update.effective_user.first_name or "User")
     receiver_name = html.escape(receiver.first_name or "User")
-
     await update.message.reply_html(
         f"╭━━━〔 💸 <b>TRANSACTION SUCCESSFUL!</b> 〕━━━╮\n"
         f"┃ 💵 <b>Sent:</b> <code>{net_amount:,}</code> coins\n"
