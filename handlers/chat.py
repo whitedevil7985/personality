@@ -322,6 +322,22 @@ async def mention_chat(update,context):
     group_title = getattr(update.effective_chat, "title", "") or ""
     try:
         answer = await ai_reply(update.effective_user, text, "group", group_title, chat_id=chat.id)
+
+        # Group AI may intentionally decide that a general conversation is
+        # not directed at Vanya. Never leak that internal decision to users.
+        # Providers have returned both plain text and HTML-escaped variants.
+        no_reply_text = html.unescape(str(answer or "")).strip()
+        no_reply_patterns = (
+            r"^no[ _-]?reply$",
+            r"^no[ _-]?reply\s+needed(?:\b|[:.-])",
+            r"^<!--\s*no\s+reply\s+needed\b.*?-->$",
+            r"^<\!--\s*no\s+reply\s+needed\b.*?-->$",
+            r"no\s+reply\s+needed\s+as\s+this\s+is\s+a\s+general\s+group\s+message",
+        )
+        if any(re.search(pattern, no_reply_text, re.I | re.S) for pattern in no_reply_patterns):
+            print("[GroupChat] AI decided: no reply needed; internal decision suppressed.")
+            return
+
         await send_vanya_reply(update, answer)
     except Exception as exc:
         print(f"[GroupChat] {type(exc).__name__}: {exc}")
