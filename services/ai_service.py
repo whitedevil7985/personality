@@ -718,6 +718,53 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
 
+def _group_context_quick_reply(text_value):
+    """Instant natural replies for common short group conversation turns."""
+    t = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
+    options = {
+        "kuch nhi": [
+            "Achha 😌 theek hai.",
+            "Ohh okayy 😄",
+            "Acha ji, samajh gayi 😌",
+            "Hehe theek hai 💕",
+        ],
+        "kuch nahi": [
+            "Achha 😌 theek hai.",
+            "Ohh okayy 😄",
+            "Acha ji, samajh gayi 😌",
+            "Hehe theek hai 💕",
+        ],
+        "kya bolu": [
+            "Jo mann mein hai woh bolo 😄",
+            "Kuch bhi random bolo, main sun rahi hu 😌",
+            "Hehe jo dil kare woh batao 👀",
+            "Arre kuch bhi bolo yaar 😂",
+        ],
+        "theek": [
+            "Theek hai 😌",
+            "Achha, done 😄",
+            "Haanji, samajh gayi.",
+        ],
+        "thik": [
+            "Theek hai 😌",
+            "Achha, done 😄",
+            "Haanji, samajh gayi.",
+        ],
+        "okay": [
+            "Okayy 😄",
+            "Theek hai ji 😌",
+            "Done, noted 💕",
+        ],
+        "ok": [
+            "Okayy 😄",
+            "Theek hai ji 😌",
+            "Done, noted 💕",
+        ],
+    }
+    values = options.get(t)
+    return random.choice(values) if values else None
+
+
 def _instant_chat_reply(text_value: str):
     """Instant local replies for very short DM small-talk messages."""
     t = re.sub(r"\s+", " ", (text_value or "").strip().casefold())
@@ -1311,6 +1358,20 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         quick = _finalize_ai_answer(quick, text_value, chat_id)
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
         return quick
+
+    # Common short replies in a group conversation should feel immediate and
+    # should not depend on an upstream API being available.
+    if chat_type == "group" and reply_context:
+        quick = _group_context_quick_reply(text_value)
+        if quick:
+            quick = _finalize_ai_answer(
+                quick,
+                text_value,
+                chat_id,
+                reply_context,
+            )
+            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+            return quick
 
     # Never wait for MongoDB on the hot path. Use warm in-memory context;
     # for a cold user, the first reply intentionally goes out without history
