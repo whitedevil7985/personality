@@ -7,7 +7,7 @@ from telegram import InlineKeyboardButton
 from PIL import Image, ImageDraw, ImageFont
 
 from games.common import kb, safe_name
-from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result
+from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result, get_user_lock
 
 
 def _bet_font(size, bold=False):
@@ -94,27 +94,30 @@ async def bet(update, context):
         await update.message.reply_text("Usage: /bet <amount>")
         return
 
-    u = await get_user(update.effective_user.id)
-    if not u or amount <= 0 or u.get("coins", 0) < amount:
-        await update.message.reply_text("❌ Invalid amount.")
-        return
+    uid = update.effective_user.id
+    await ensure_user(update.effective_user)
 
-    won = random.random() < 0.48
+    async with get_user_lock(uid):
+        u = await get_user(uid)
+        if not u or amount <= 0 or int(u.get("coins", 0)) < amount:
+            await update.message.reply_text("❌ Invalid amount.")
+            return
 
-    if won:
-        await add_coins(update.effective_user.id, amount)
-        await record_game_result(
-            update.effective_user.id, "BET", amount, True, update.effective_chat.id
-        )
-        balance = int(u.get("coins", 0)) + amount
-        caption = f"🎉 You gained {amount:,} coins!"
-    else:
-        await add_coins(update.effective_user.id, -amount)
-        await record_game_result(
-            update.effective_user.id, "BET", 0, False, update.effective_chat.id
-        )
-        balance = int(u.get("coins", 0)) - amount
-        caption = f"💥 You lost {amount:,} coins."
+        won = random.random() < 0.48
+        if won:
+            await add_coins(uid, amount)
+            await record_game_result(
+                uid, "BET", amount, True, update.effective_chat.id
+            )
+            balance = int(u.get("coins", 0)) + amount
+            caption = f"🎉 You gained {amount:,} coins!"
+        else:
+            await add_coins(uid, -amount)
+            await record_game_result(
+                uid, "BET", 0, False, update.effective_chat.id
+            )
+            balance = int(u.get("coins", 0)) - amount
+            caption = f"💥 You lost {amount:,} coins."
 
     image = _make_bet_result_image(won, amount, balance)
     try:
