@@ -690,13 +690,6 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
                     safe = ""
 
             if safe:
-                print(
-                    f"[AI][FAILOVER] {name} returned a generic group acknowledgement; "
-                    "trying another provider."
-                )
-                safe = ""
-
-            if safe:
                 safe = _finalize_ai_answer(
                     safe,
                     usage_context.get("user_text") if isinstance(usage_context, dict) else "",
