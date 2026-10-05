@@ -1,5 +1,6 @@
 import html
 import random
+import asyncio
 
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
@@ -7,6 +8,7 @@ from db import ensure_user, get_user, add_coins, add_xp, users, record_game_resu
 
 rps_choices = ["rock", "paper", "scissors"]
 RPS_GAMES = {}
+_RPS_LOCK = asyncio.Lock()
 
 
 def _choice_label(choice):
@@ -105,51 +107,52 @@ async def rps(update, context):
 
 
 async def rps_cb(q, parts):
-    if len(parts) < 2:
-        await q.answer("Invalid RPS game.", show_alert=True)
-        return
-
-    action = parts[1]
-
-    if action == "join":
-        if len(parts) < 3:
-            await q.answer("Invalid RPS room.", show_alert=True)
-            return
-        gid = parts[2]
-        game = RPS_GAMES.get(gid)
-        if not game:
-            await q.answer("RPS game is over.", show_alert=True)
+    async with _RPS_LOCK:
+        if len(parts) < 2:
+            await q.answer("Invalid RPS game.", show_alert=True)
             return
 
-        uid = q.from_user.id
-        if uid not in game["players"] and len(game["players"]) >= 2:
-            await q.answer("This RPS duel already has 2 players.", show_alert=True)
+        action = parts[1]
+
+        if action == "join":
+            if len(parts) < 3:
+                await q.answer("Invalid RPS room.", show_alert=True)
+                return
+            gid = parts[2]
+            game = RPS_GAMES.get(gid)
+            if not game:
+                await q.answer("RPS game is over.", show_alert=True)
+                return
+
+            uid = q.from_user.id
+            if uid not in game["players"] and len(game["players"]) >= 2:
+                await q.answer("This RPS duel already has 2 players.", show_alert=True)
+                return
+
+            if uid not in game["players"]:
+                await ensure_user(q.from_user)
+                game["players"].append(uid)
+                game["names"][uid] = q.from_user.first_name
+                await q.answer("Joined RPS! Choose your move.")
+                await q.edit_message_text(
+                    "╭━━━〔 🪨 <b>RPS DUEL</b> 〕━━━╮\n"
+                    "┃ <i>2 Player Rock • Paper • Scissors</i> ✦\n"
+                    "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                    f"👤 Player 1: <b>{html.escape(game['names'][game['players'][0]])}</b>\n"
+                    f"👤 Player 2: <b>{html.escape(game['names'][game['players'][1]])}</b>\n\n"
+                    "🎯 Both players choose your move secretly.",
+                    parse_mode="HTML",
+                    reply_markup=_rps_keyboard(gid),
+                )
+                return
+
+            await q.answer("You're already in this duel.", show_alert=True)
             return
 
-        if uid not in game["players"]:
-            await ensure_user(q.from_user)
-            game["players"].append(uid)
-            game["names"][uid] = q.from_user.first_name
-            await q.answer("Joined RPS! Choose your move.")
-            await q.edit_message_text(
-                "╭━━━〔 🪨 <b>RPS DUEL</b> 〕━━━╮\n"
-                "┃ <i>2 Player Rock • Paper • Scissors</i> ✦\n"
-                "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                f"👤 Player 1: <b>{html.escape(game['names'][game['players'][0]])}</b>\n"
-                f"👤 Player 2: <b>{html.escape(game['names'][game['players'][1]])}</b>\n\n"
-                "🎯 Both players choose your move secretly.",
-                parse_mode="HTML",
-                reply_markup=_rps_keyboard(gid),
-            )
-            return
-
-        await q.answer("You're already in this duel.", show_alert=True)
-        return
-
-    if action == "choice":
-        if len(parts) < 4:
+        if action != "choice" or len(parts) < 4:
             await q.answer("Invalid RPS choice.", show_alert=True)
             return
+
         gid = parts[2]
         choice = parts[3].lower()
         game = RPS_GAMES.get(gid)
@@ -183,6 +186,10 @@ async def rps_cb(q, parts):
         c1, c2 = game["choices"][p1], game["choices"][p2]
         result = _winner(c1, c2)
 
+        # Consume the room before awarding so duplicate callback deliveries
+        # cannot pay the same result twice.
+        RPS_GAMES.pop(gid, None)
+
         if result == 0:
             reward = 25
             await add_coins(p1, reward)
@@ -215,5 +222,3 @@ async def rps_cb(q, parts):
             "╰━━━━━━━━━━━━━━━━━━━━╯\n\n" + result_text,
             parse_mode="HTML",
         )
-        RPS_GAMES.pop(gid, None)
-        return
