@@ -134,9 +134,8 @@ _AI_PROVIDER_MESSAGES = {
 
 _AI_HTTP_SESSION_LOCK = asyncio.Lock()
 
-# Elite LLM public defaults are 10 chat requests/10 seconds and
-# 60 chat requests/60 seconds. Keep a local limiter so a busy group does
-# not create a thundering herd of 429s at the provider.
+# Keep concurrency bounded locally. Do not duplicate the provider's own
+# request-rate policy here; HTTP 429/5xx responses are handled by failover.
 _AI_RATE_LOCK = asyncio.Lock()
 _AI_RATE_EVENTS_10S = deque()
 _AI_RATE_EVENTS_60S = deque()
@@ -164,21 +163,14 @@ async def _wait_for_ai_slot():
         await asyncio.sleep(delay)
 
 async def _try_get_ai_slot(max_wait=0.8):
-    """Get an Elite slot quickly; skip to fallback instead of queueing users."""
-    deadline = time.monotonic() + max(0.05, float(max_wait))
-    while time.monotonic() < deadline:
-        async with _AI_RATE_LOCK:
-            now = time.monotonic()
-            _ai_rate_cleanup(now)
-            if len(_AI_RATE_EVENTS_10S) < 10 and len(_AI_RATE_EVENTS_60S) < 60:
-                _AI_RATE_EVENTS_10S.append(now)
-                _AI_RATE_EVENTS_60S.append(now)
-                return True
-            wait_10 = (10 - (now - _AI_RATE_EVENTS_10S[0])) if _AI_RATE_EVENTS_10S else 0
-            wait_60 = (60 - (now - _AI_RATE_EVENTS_60S[0])) if _AI_RATE_EVENTS_60S else 0
-            delay = min(0.15, max(0.01, wait_10, wait_60))
-        await asyncio.sleep(delay)
-    return False
+    """Do not impose a second request-rate limit in front of Elite.
+
+    Elite's public gateway already applies its own server-side abuse/rate
+    controls. The bot should send the request and react to the provider's
+    actual HTTP result instead of inventing another 10/60 gate locally.
+    Concurrency is still bounded separately by _AI_SEMAPHORE.
+    """
+    return True
 
 async def _get_ai_http_session():
     global _AI_HTTP_SESSION
@@ -192,7 +184,7 @@ async def _get_ai_http_session():
                 sock_connect=3.0,
             )
             connector = aiohttp.TCPConnector(
-                limit=max(20, _AI_CONCURRENCY + 4),
+                limit=max(32, _AI_CONCURRENCY * 2),
                 ttl_dns_cache=300,
                 enable_cleanup_closed=True,
             )
