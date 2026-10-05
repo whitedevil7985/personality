@@ -255,7 +255,7 @@ def _active_memories(u):
         dedup[item["text"].casefold()]=item
     return list(dedup.values())[-MAX_MEMORY:], changed
 
-def _history_text(u):
+def _history_text(u, chat_id=None):
     hist=u.get("chat_history", []) if u else []
     cutoff=datetime.utcnow()-timedelta(days=MEMORY_DAYS)
     kept=[]
@@ -263,9 +263,26 @@ def _history_text(u):
         if not isinstance(x, dict):
             continue
         ts=_parse_ts(x.get("ts"))
-        if ts is None or ts >= cutoff:
-            kept.append(x)
-    return "\n".join(f"{x.get('role','user')}: {str(x.get('text',''))[:1200]}" for x in kept[-MAX_HISTORY:])
+        if ts is not None and ts < cutoff:
+            continue
+
+        stored_chat_id=x.get("chat_id")
+        if chat_id is not None:
+            try:
+                matches_chat = stored_chat_id is not None and int(stored_chat_id) == int(chat_id)
+            except (TypeError, ValueError):
+                matches_chat = False
+            # Legacy history has no chat_id. Keep it for DMs (where the
+            # chat/user IDs are the same) but never leak it into groups.
+            if not matches_chat:
+                if int(chat_id) != int(u.get("_id", 0) or 0) or stored_chat_id is not None:
+                    continue
+
+        kept.append(x)
+    return "\n".join(
+        f"{x.get('role','user')}: {str(x.get('text',''))[:1200]}"
+        for x in kept[-MAX_HISTORY:]
+    )
 
 def _memory_text(u):
     active,_=_active_memories(u)
@@ -307,21 +324,32 @@ async def remember_facts(user_id, text_value):
         by_text[fact.casefold()]={"text":fact,"ts":now}
     await users.update_one({"_id":user_id},{"$set":{"memory":list(by_text.values())[-MAX_MEMORY:]}})
 
-async def _append_history(user_id, user_text, assistant_text):
+async def _append_history(user_id, user_text, assistant_text, chat_id=None):
     now=datetime.utcnow()
+    try:
+        stored_chat_id = int(chat_id) if chat_id is not None else None
+    except (TypeError, ValueError):
+        stored_chat_id = None
+
+    turns = [
+        {"role":"user","text":str(user_text)[:3500],"ts":now},
+        {"role":"assistant","text":str(assistant_text)[:3500],"ts":now},
+    ]
+    if stored_chat_id is not None:
+        turns[0]["chat_id"] = stored_chat_id
+        turns[1]["chat_id"] = stored_chat_id
+
     await users.update_one(
         {"_id":user_id},
-        {"$push":{"chat_history":{"$each":[
-            {"role":"user","text":str(user_text)[:3500],"ts":now},
-            {"role":"assistant","text":str(assistant_text)[:3500],"ts":now}
-        ],"$slice":-MAX_HISTORY}}},
+        {"$push":{"chat_history":{"$each":turns,"$slice":-MAX_HISTORY}}},
         upsert=True)
 
-async def _warm_ai_context_cache(user_id, force=False):
+async def _warm_ai_context_cache(user_id, chat_id=None, force=False):
     """Warm one user's chat context without blocking the current reply."""
     if not user_id:
         return
-    cached = _AI_CONTEXT_CACHE.get(user_id)
+    key = (int(user_id), int(chat_id)) if chat_id is not None else (int(user_id), None)
+    cached = _AI_CONTEXT_CACHE.get(key)
     now = time.monotonic()
     if (
         not force
@@ -334,8 +362,8 @@ async def _warm_ai_context_cache(user_id, force=False):
     _AI_CONTEXT_WARMING.add(user_id)
     try:
         u = await get_user(user_id) or {}
-        _AI_CONTEXT_CACHE[user_id] = {
-            "history": _history_text(u),
+        _AI_CONTEXT_CACHE[key] = {
+            "history": _history_text(u, chat_id),
             "memory": _memory_text(u),
             "at": time.monotonic(),
         }
@@ -471,15 +499,16 @@ def _live_history_text(chat_id):
     return "\n".join(f"{role}: {text}" for role, text in bucket)
 
 
-def _get_cached_ai_context(user_id):
-    cached = _AI_CONTEXT_CACHE.get(user_id) or {}
+def _get_cached_ai_context(user_id, chat_id=None):
+    key = (int(user_id), int(chat_id)) if chat_id is not None else (int(user_id), None)
+    cached = _AI_CONTEXT_CACHE.get(key) or {}
     return str(cached.get("history", "")), str(cached.get("memory", ""))
 
 
-async def _save_ai_context_after_reply(user_id):
+async def _save_ai_context_after_reply(user_id, chat_id=None):
     # Let the persistent write finish first, then refresh the in-memory view
     # for the next message. This refresh is deliberately background-only.
-    await _warm_ai_context_cache(user_id, force=True)
+    await _warm_ai_context_cache(user_id, chat_id=chat_id, force=True)
 
 
 def _remote_ai_configured():
@@ -1476,18 +1505,18 @@ async def _ai_health_monitor(bot=None):
             )
 
 
-async def _save_chat_state_background(user_id, user_text, answer):
+async def _save_chat_state_background(user_id, user_text, answer, chat_id=None):
     """Persist memory/history after the user already received the fast reply."""
     try:
         await remember_facts(user_id, user_text)
     except Exception as exc:
         print(f"[AI][DB] remember skipped: {type(exc).__name__}: {exc}")
     try:
-        await _append_history(user_id, user_text, answer)
+        await _append_history(user_id, user_text, answer, chat_id=chat_id)
     except Exception as exc:
         print(f"[AI][DB] history save skipped: {type(exc).__name__}: {exc}")
     try:
-        await _save_ai_context_after_reply(user_id)
+        await _save_ai_context_after_reply(user_id, chat_id=chat_id)
     except Exception as exc:
         print(f"[AI][DB] context refresh skipped: {type(exc).__name__}: {exc}")
 
@@ -1507,8 +1536,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         _record_live_exchange(chat_id, text_value, quick)
         _record_live_exchange(chat_id, text_value, quick)
         _record_live_exchange(chat_id, text_value, quick)
-        _record_live_exchange(chat_id, text_value, quick)
-        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick, chat_id=chat_id))
         return quick
 
     # Normal DM messages must reach a configured remote AI provider.
@@ -1517,19 +1545,19 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         quick = _dm_smart_reply(text_value) if chat_type == "private" else None
         if quick:
             quick = _finalize_ai_answer(quick, text_value, chat_id)
-            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick, chat_id=chat_id))
             return quick
 
         quick = _instant_chat_reply(text_value) if chat_type == "private" else None
         if quick:
             quick = _finalize_ai_answer(quick, text_value, chat_id)
-            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick, chat_id=chat_id))
             return quick
 
     quick = _identity_quick_reply(text_value)
     if quick and chat_type == "private":
         quick = _finalize_ai_answer(quick, text_value, chat_id)
-        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick, chat_id=chat_id))
         return quick
 
     # Common short replies in a group conversation should feel immediate and
@@ -1543,18 +1571,18 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
                 chat_id,
                 reply_context,
             )
-            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick, chat_id=chat_id))
             return quick
 
     # Never wait for MongoDB on the hot path. Use warm in-memory context;
     # for a cold user, the first reply intentionally goes out without history
     # and the cache is warmed in the background for the next message.
-    history, memory = _get_cached_ai_context(user.id)
+    history, memory = _get_cached_ai_context(user.id, chat_id)
     live_history = _live_history_text(chat_id)
     if live_history:
         history = live_history
     elif not history and not memory:
-        asyncio.create_task(_warm_ai_context_cache(user.id))
+        asyncio.create_task(_warm_ai_context_cache(user.id, chat_id=chat_id))
 
     # Keep the LLM context compact for faster first-token/response latency.
     history_limit = int(os.getenv("AI_PROMPT_HISTORY_CHARS", "3600" if chat_type == "private" else "6000"))
@@ -1603,7 +1631,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         },
     )
     if answer:
-        asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
+        asyncio.create_task(_save_chat_state_background(user.id, text_value, answer, chat_id=chat_id))
         return answer
 
     # If both remote providers fail, keep Vanya conversational instead of
@@ -1660,7 +1688,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         ])
     answer = _finalize_ai_answer(answer, text_value, chat_id, reply_context)
     _record_live_exchange(chat_id, text_value, answer)
-    asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
+    asyncio.create_task(_save_chat_state_background(user.id, text_value, answer, chat_id=chat_id))
     return answer
 
 async def _load_custom_emoji_map():
