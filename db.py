@@ -1,5 +1,6 @@
 import os
 import random
+import asyncio
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -22,6 +23,19 @@ game_stats = db.game_stats
 custom_emojis = db.custom_emojis
 logs = db.logs
 ai_usage = db.ai_usage
+
+# Per-user in-process locks protect economy/reward flows from duplicate
+# concurrent Telegram updates. The bot runs one asyncio event loop on Railway.
+_USER_LOCKS = {}
+
+
+def get_user_lock(uid):
+    key = int(uid)
+    lock = _USER_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _USER_LOCKS[key] = lock
+    return lock
 
 async def ensure_user(user):
     if not user:
