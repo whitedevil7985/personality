@@ -30,12 +30,12 @@ from games.dice import dice
 from games.coinflip import coinflip
 from games.slots import slots
 from games.card import card, cardjoin, cardstart, cardcancel, card_cb, CARD_ROOMS
-from games.jumble import jumble
+from games.jumble import jumble, JUMBLE_GAMES, jumble_answer
 from games.tap import tap, tap_cb
 from games.bet import bet
-from games.uno import uno as uno_legacy, unojoin, uno_cb, uno_games
-from games.ludo import ludo as ludo_legacy, ludojoin, ludo_cb, ludo_games
-from games.chess import chess_cmd, chessjoin, chess_cb, chess_games
+from games.uno import uno as uno_legacy, uno_cb, uno_games
+from games.ludo import ludo as ludo_legacy, ludo_cb, ludo_games
+from games.chess import chess_cmd, chess_cb, chess_games
 from games.mines import mines, mines_cb
 from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek, WORDSEEK_GAMES
 from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_wordgrid
@@ -60,7 +60,7 @@ if not TOKEN:
 # ║                        VANYA UI                             ║
 # ╚══════════════════════════════════════════════════════════════╝
 
-from handlers.webapp import get_uno_webapp_url, uno, get_chess_webapp_url, chess, get_ludo_webapp_url, get_world_webapp_url, world_cmd, city, room, pet, ludo
+from handlers.webapp import get_uno_webapp_url, uno, unojoin, get_chess_webapp_url, chess, chessjoin, get_ludo_webapp_url, ludojoin, get_world_webapp_url, world_cmd, city, room, pet, ludo
 from handlers.ui import kb, developer_button, home, start_menu, back, game_chat_kb, game_room_ui, log_event, _get_group_log_link, log_bot_membership, start, profile, safe_html
 from handlers.economy import toprich, balance, daily, work, _leaderboard_since, _leaderboard_label, leaderboard_kb, _render_leaderboard, leaderboard, give, target_user, _protection_until, _is_dead, rob, protect, shield, propose, _complete_proposal_callback, accept, divorce, couple, topcouples
 from handlers.moderation import is_admin, _moderation_ready, ban, unban, warn, mute, unmute, purge
