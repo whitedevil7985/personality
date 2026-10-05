@@ -1241,7 +1241,7 @@ async def _save_chat_state_background(user_id, user_text, answer):
         print(f"[AI][DB] context refresh skipped: {type(exc).__name__}: {exc}")
 
 
-async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None, chat_id=None):
+async def ai_reply(user, text_value, chat_type="private", group_title="", stream_callback=None, chat_id=None, reply_context=""):
     """Latency-first AI path: no MongoDB round-trip blocks the LLM request."""
     quick = _privacy_quick_reply(text_value)
     if quick:
@@ -1286,8 +1286,11 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         f"User display name: {user.first_name or 'User'}\n\n"
         f"Saved memory (last {MEMORY_DAYS} days):\n{memory}\n\n"
         f"Recent conversation:\n{history or '- None yet.'}\n\n"
+        f"Message Vanya is being replied to:\n{reply_context or '- None (not a reply)'}\n\n"
         f"User's new message:\n{text_value}\n\n"
         "Reply only as Vanya. Be natural, concise, warm, and context-aware. "
+        "When the user is replying to Vanya, continue that conversation directly "
+        "instead of giving a generic acknowledgement such as 'bolo' or 'sun rahi hu'. "
         f"Normal reply: maximum {max_words} words and {max_lines} short lines. "
         "Do not write long paragraphs, lectures, or repeated explanations. "
         "Only use the longer limit when the user explicitly asks for detail."
@@ -1305,6 +1308,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
             "chat_type": chat_type,
             "chat_title": group_title if chat_type == "group" else "",
             "user_text": text_value,
+            "reply_context": reply_context,
         },
     )
     if answer:
