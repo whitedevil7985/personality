@@ -384,10 +384,17 @@ def _recent_reply_text(chat_id):
     return ""
 
 
-def _varied_local_reply(text_value, chat_id):
+def _varied_local_reply(text_value, chat_id, reply_context=""):
     """Pick a short natural reply that is different from recent replies."""
     t = re.sub(r"\s+", " ", str(text_value or "")).strip().casefold()
-    if "?" in t:
+    if reply_context:
+        options = [
+            "Haan 😄 ab tum batao, kya scene hai?",
+            "Hehe, main toh bol chuki 😌 ab tumhari baari.",
+            "Achhaaa 😄 continue karo, sun rahi hu.",
+            "Haanji 👀 tum kya keh rahe the?",
+        ]
+    elif "?" in t:
         options = [
             "Hmm 👀 batao, exactly kya hua?",
             "Haanji 😌 bol, sun rahi hu.",
@@ -422,7 +429,7 @@ def _varied_local_reply(text_value, chat_id):
     return random.choice(available or options)
 
 
-def _finalize_ai_answer(answer, text_value, chat_id):
+def _finalize_ai_answer(answer, text_value, chat_id, reply_context=""):
     """Prevent consecutive identical replies while preserving normal AI output."""
     safe = str(answer or "").strip()
     if not safe:
@@ -430,7 +437,7 @@ def _finalize_ai_answer(answer, text_value, chat_id):
     fp = _reply_fingerprint(safe)
     recent = _recent_reply_fingerprints(chat_id)
     if fp and fp in recent:
-        safe = _varied_local_reply(text_value, chat_id)
+        safe = _varied_local_reply(text_value, chat_id, reply_context)
     _remember_recent_reply(chat_id, safe)
     return safe
 
@@ -589,6 +596,7 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
                     safe,
                     usage_context.get("user_text") if isinstance(usage_context, dict) else "",
                     usage_context.get("chat_id") if isinstance(usage_context, dict) else None,
+                    usage_context.get("reply_context") if isinstance(usage_context, dict) else "",
                 )
                 print(f"[AI][FAILOVER] {name} SUCCESS")
                 return safe
@@ -1353,7 +1361,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
             "Achhaaa 😄 continue karo.",
             "Haanji 💕 kya hua?",
         ])
-    answer = _finalize_ai_answer(answer, text_value, chat_id)
+    answer = _finalize_ai_answer(answer, text_value, chat_id, reply_context)
     asyncio.create_task(_save_chat_state_background(user.id, text_value, answer))
     return answer
 
