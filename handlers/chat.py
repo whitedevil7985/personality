@@ -328,11 +328,11 @@ async def mention_chat(update,context):
         # Providers have returned both plain text and HTML-escaped variants.
         no_reply_text = html.unescape(str(answer or "")).strip()
         no_reply_patterns = (
-            r"^no[ _-]?reply$",
-            r"^no[ _-]?reply\s+needed(?:\b|[:.-])",
+            r"^\(?\s*no[ _-]?reply\s*\)?$",
+            r"^\(?\s*no[ _-]?reply\s+needed(?:\b|[:.-]).*\)?$",
+            r"^\(?\s*no[ _-]?reply\s+needed\s+as\s+this\s+is\s+a\s+general\s+group\s+message.*\)?$",
             r"^<!--\s*no\s+reply\s+needed\b.*?-->$",
             r"^<\!--\s*no\s+reply\s+needed\b.*?-->$",
-            r"no\s+reply\s+needed\s+as\s+this\s+is\s+a\s+general\s+group\s+message",
         )
         if any(re.search(pattern, no_reply_text, re.I | re.S) for pattern in no_reply_patterns):
             print("[GroupChat] AI decided: no reply needed; internal decision suppressed.")
