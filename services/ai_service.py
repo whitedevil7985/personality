@@ -541,27 +541,39 @@ def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
     return _compact_vanya_reply(text, max_words=max_words, max_lines=max_lines)
 
 async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None):
-    """Sequential fallback: only call the next provider when the previous fails."""
-    providers = []
+    """Fast failover: start the next provider before a slow provider can stall chat."""
+    configured = []
     if ELITE_LLM_API_KEY:
-        providers.append(("elite", _call_elite_api))
+        configured.append(("elite", _call_elite_api))
     if CHATGP_API_URL:
-        providers.append(("chatgp", _call_chatgp_api))
+        configured.append(("chatgp", _call_chatgp_api))
     if CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID:
-        providers.append(("cloudflare", _call_cloudflare_api))
+        configured.append(("cloudflare", _call_cloudflare_api))
     if OLLAMA_API_KEY and OLLAMA_API_URL:
-        providers.append(("ollama", _call_ollama_api))
-    if not providers:
+        configured.append(("ollama", _call_ollama_api))
+
+    if not configured:
         return None
 
+    # Do not keep hammering a provider that the current runtime already knows
+    # is down. A fresh health probe can move it back to the active tier.
+    active = [item for item in configured if _AI_PROVIDER_STATUS.get(item[0]) is True]
+    unknown = [item for item in configured if _AI_PROVIDER_STATUS.get(item[0]) is None]
+    down = [item for item in configured if _AI_PROVIDER_STATUS.get(item[0]) is False]
+    providers = active + unknown + down
+
     timeouts = {
-        "elite": max(1.0, float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "4.0"))),
+        "elite": max(1.5, float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "4.0"))),
         "chatgp": max(1.5, float(os.getenv("CHATGP_TIMEOUT_SECONDS", "6.0"))),
         "cloudflare": max(1.5, float(os.getenv("CLOUDFLARE_TIMEOUT_SECONDS", "6.0"))),
         "ollama": max(1.5, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "6.0"))),
     }
+    stagger = max(
+        0.35,
+        float(os.getenv("AI_FAILOVER_STAGGER_SECONDS", "1.25")),
+    )
 
-    for name, fn in providers:
+    async def _attempt(name, fn):
         try:
             print(f"[AI][FAILOVER] {name} request start")
             answer = await asyncio.wait_for(
@@ -581,17 +593,79 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
                 print(f"[AI][FAILOVER] {name} SUCCESS")
                 return safe
 
-            print(f"[AI][FAILOVER] {name} returned no usable response; trying next provider.")
+            print(
+                f"[AI][FAILOVER] {name} returned no usable response; "
+                "trying the next available provider."
+            )
+        except asyncio.CancelledError:
+            raise
         except asyncio.TimeoutError:
-            print(f"[AI][FAILOVER] {name} timed out; trying next provider.")
+            print(
+                f"[AI][FAILOVER] {name} timed out after "
+                f"{timeouts[name]:.1f}s; another provider may already be answering."
+            )
         except Exception as exc:
             print(
                 f"[AI][FAILOVER] {name} failed: "
-                f"{type(exc).__name__}: {exc}; trying next provider."
+                f"{type(exc).__name__}: {exc}; trying another provider."
+            )
+        return None
+
+    pending = {}
+    next_index = 0
+
+    try:
+        while next_index < len(providers) or pending:
+            # Start the primary provider, then progressively add fallbacks.
+            # This keeps normal traffic on the preferred API while making a
+            # slow "ACTIVE" provider unable to hold the whole chat hostage.
+            if next_index < len(providers):
+                name, fn = providers[next_index]
+                task = asyncio.create_task(_attempt(name, fn))
+                pending[task] = name
+                next_index += 1
+
+            if not pending:
+                continue
+
+            timeout = stagger if next_index < len(providers) else None
+            done, _ = await asyncio.wait(
+                pending.keys(),
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
             )
 
-    print("[AI][FAILSAFE] All remote providers failed; using local Vanya fallback.")
-    return None
+            if not done:
+                continue
+
+            for task in done:
+                pending.pop(task, None)
+                try:
+                    result = task.result()
+                except asyncio.CancelledError:
+                    continue
+                except Exception as exc:
+                    print(
+                        f"[AI][FAILOVER] {type(exc).__name__}: {exc}"
+                    )
+                    result = None
+
+                if result:
+                    for other in pending:
+                        other.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+                    return result
+
+        print("[AI][FAILSAFE] All remote providers failed; using local Vanya fallback.")
+        return None
+    finally:
+        # Never leave provider tasks running after the winning result/error.
+        for task in pending:
+            if not task.done():
+                task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
 def _instant_chat_reply(text_value: str):
     """Instant local replies for very short DM small-talk messages."""
