@@ -130,6 +130,11 @@ async def direct_game_answer(update, context):
         if handled:
             return
 
+    if chat_id in JUMBLE_GAMES:
+        handled = await jumble_answer(update, context)
+        if handled:
+            return
+
 
 async def mention_chat(update,context):
     if not update.message:
