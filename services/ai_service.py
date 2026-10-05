@@ -123,7 +123,13 @@ async def _set_ai_provider_status(provider, active, detail=""):
             f"Failures: <code>{_AI_PROVIDER_FAILURES[provider]}</code>\n"
             f"Last error: <code>{html.escape(str(detail)[:250])}</code>"
         )
-    await log_event(type("AIStatusContext", (), {"bot": bot})(), message)
+    async def _write_status_log():
+        try:
+            await log_event(type("AIStatusContext", (), {"bot": bot})(), message)
+        except Exception as exc:
+            print(f"[AI][STATUSLOG] skipped: {type(exc).__name__}: {exc}")
+
+    asyncio.create_task(_write_status_log())
 
 _AI_PROVIDER_MESSAGES = {
     "elite": "Elite LLM",
@@ -443,6 +449,15 @@ async def _save_ai_context_after_reply(user_id):
     # Let the persistent write finish first, then refresh the in-memory view
     # for the next message. This refresh is deliberately background-only.
     await _warm_ai_context_cache(user_id, force=True)
+
+
+def _remote_ai_configured():
+    return bool(
+        ELITE_LLM_API_KEY
+        or CHATGP_API_URL
+        or (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID)
+        or (OLLAMA_API_KEY and OLLAMA_API_URL)
+    )
 
 
 def _privacy_quick_reply(text_value):
@@ -999,6 +1014,10 @@ async def _call_elite_api(text_value, usage_context=None):
                         json=payload,
                     ) as resp:
                         raw = await resp.text()
+                        print(
+                            f"[AI][ELITE] HTTP {resp.status} "
+                            f"model={model_name} bytes={len(raw)}"
+                        )
                         if resp.status == 429:
                             last_error = RuntimeError(f"HTTP 429: {raw[:250]}")
                             if attempt < max_attempts - 1:
@@ -1030,6 +1049,15 @@ async def _call_elite_api(text_value, usage_context=None):
                         answer = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
                         answer = str(answer or "").strip()
                         if not answer:
+                            if isinstance(data, dict):
+                                print(
+                                    "[AI][ELITE] empty content; keys="
+                                    + ",".join(list(data.keys())[:12])
+                                )
+                            else:
+                                print(
+                                    f"[AI][ELITE] unexpected response type={type(data).__name__}"
+                                )
                             raise RuntimeError("Empty response")
                         await _set_ai_provider_status("elite", True)
                         await _record_ai_request("elite", usage_context)
@@ -1444,17 +1472,20 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
         return quick
 
-    quick = _dm_smart_reply(text_value) if chat_type == "private" else None
-    if quick:
-        quick = _finalize_ai_answer(quick, text_value, chat_id)
-        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
-        return quick
+    # Normal DM messages must reach a configured remote AI provider.
+    # Keep these local shortcuts only for installations with no AI API at all.
+    if not _remote_ai_configured():
+        quick = _dm_smart_reply(text_value) if chat_type == "private" else None
+        if quick:
+            quick = _finalize_ai_answer(quick, text_value, chat_id)
+            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+            return quick
 
-    quick = _instant_chat_reply(text_value) if chat_type == "private" else None
-    if quick:
-        quick = _finalize_ai_answer(quick, text_value, chat_id)
-        asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
-        return quick
+        quick = _instant_chat_reply(text_value) if chat_type == "private" else None
+        if quick:
+            quick = _finalize_ai_answer(quick, text_value, chat_id)
+            asyncio.create_task(_save_chat_state_background(user.id, text_value, quick))
+            return quick
 
     quick = _identity_quick_reply(text_value)
     if quick and chat_type == "private":
