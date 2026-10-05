@@ -135,6 +135,16 @@ async def direct_game_answer(update, context):
         if handled:
             return
 
+    if chat_id in CHARADES_GAMES:
+        handled = await charades_answer(update, context)
+        if handled:
+            return
+
+    if chat_id in HACK_GAMES:
+        handled = await hack_answer(update, context)
+        if handled:
+            return
+
 
 async def mention_chat(update,context):
     if not update.message:
