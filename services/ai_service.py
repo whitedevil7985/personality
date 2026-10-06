@@ -11,10 +11,10 @@ del _core, _sys
 
 # AI runtime state lives here so assignments made by AI functions stay in the
 # same module that owns the provider/session lifecycle.
-_AI_PROVIDER_STATUS = {"elite": None, "chatgp": None, "cloudflare": None, "ollama": None}
-_AI_PROVIDER_FAILURES = {"elite": 0, "chatgp": 0, "cloudflare": 0, "ollama": 0}
-_AI_PROVIDER_LAST_FAILURE = {"elite": 0.0, "chatgp": 0.0, "cloudflare": 0.0, "ollama": 0.0}
-_AI_PROVIDER_LAST_LOG = {"elite": 0.0, "chatgp": 0.0, "cloudflare": 0.0, "ollama": 0.0}
+_AI_PROVIDER_STATUS = {"dedicated": None, "elite": None, "chatgp": None, "cloudflare": None, "ollama": None}
+_AI_PROVIDER_FAILURES = {"dedicated": 0, "elite": 0, "chatgp": 0, "cloudflare": 0, "ollama": 0}
+_AI_PROVIDER_LAST_FAILURE = {"dedicated": 0.0, "elite": 0.0, "chatgp": 0.0, "cloudflare": 0.0, "ollama": 0.0}
+_AI_PROVIDER_LAST_LOG = {"dedicated": 0.0, "elite": 0.0, "chatgp": 0.0, "cloudflare": 0.0, "ollama": 0.0}
 _AI_PROVIDER_FAILURE_THRESHOLD = max(1, int(os.getenv("AI_PROVIDER_FAILURE_THRESHOLD", "3")))
 _AI_PROVIDER_LOG_COOLDOWN = max(10.0, float(os.getenv("AI_PROVIDER_LOG_COOLDOWN_SECONDS", "300")))
 _AI_HTTP_SESSION = None
@@ -103,13 +103,16 @@ async def _set_ai_provider_status(provider, active, detail=""):
     _AI_PROVIDER_LAST_LOG[provider] = now
 
     label = {
+        "dedicated": "Dedicated LLMs",
         "elite": "Elite LLM",
         "chatgp": "ChatGP",
         "cloudflare": "Cloudflare Workers AI",
         "ollama": "Ollama Cloud",
     }.get(provider, provider)
     endpoint = (
-        (ELITE_LLM_BASE_URL + "/chat/completions")
+        (DEDICATED_API_URL + "/chat/completions")
+        if provider == "dedicated"
+        else (ELITE_LLM_BASE_URL + "/chat/completions")
         if provider == "elite"
         else CHATGP_API_URL
         if provider == "chatgp"
@@ -517,7 +520,8 @@ async def _save_ai_context_after_reply(user_id, chat_id=None):
 
 def _remote_ai_configured():
     return bool(
-        ELITE_LLM_API_KEY
+        DEDICATED_API_KEY
+        or ELITE_LLM_API_KEY
         or CHATGP_API_URL
         or (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID)
         or (OLLAMA_API_KEY and OLLAMA_API_URL)
@@ -653,6 +657,8 @@ def _sanitize_vanya_reply(answer, max_words=25, max_lines=2):
 async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None):
     """Fast failover: start the next provider before a slow provider can stall chat."""
     configured = []
+    if DEDICATED_API_KEY and DEDICATED_API_URL:
+        configured.append(("dedicated", _call_dedicated_api))
     if ELITE_LLM_API_KEY:
         configured.append(("elite", _call_elite_api))
     if CHATGP_API_URL:
@@ -665,12 +671,13 @@ async def _fast_ai_answer(prompt, max_words=25, max_lines=2, usage_context=None)
     if not configured:
         return None
 
-    # Keep a deterministic priority: Elite -> ChatGP -> Cloudflare -> Ollama.
+    # Keep a deterministic priority: Dedicated -> Elite -> ChatGP -> Cloudflare -> Ollama.
     # Health state is informational only; one stale probe must never demote a
     # healthy primary API below its fallbacks.
     providers = configured
 
     timeouts = {
+        "dedicated": max(1.5, float(os.getenv("DEDICATED_TIMEOUT_SECONDS", "10.0"))),
         "elite": max(1.5, float(os.getenv("AI_ELITE_FAILOVER_TIMEOUT_SECONDS", "4.0"))),
         "chatgp": max(1.5, float(os.getenv("CHATGP_TIMEOUT_SECONDS", "6.0"))),
         "cloudflare": max(1.5, float(os.getenv("CLOUDFLARE_TIMEOUT_SECONDS", "6.0"))),
@@ -1021,6 +1028,73 @@ async def _record_ai_request(provider, usage_context):
     except RuntimeError:
         pass
 
+
+async def _call_dedicated_api(text_value, usage_context=None):
+    """Call the primary Dedicated LLMs OpenAI-compatible endpoint."""
+    import aiohttp
+    if not DEDICATED_API_KEY or not DEDICATED_API_URL:
+        return None
+
+    session = await _get_ai_http_session()
+    timeout = aiohttp.ClientTimeout(
+        total=max(1.5, float(DEDICATED_TIMEOUT_SECONDS)),
+        sock_connect=3.0,
+    )
+    payload = {
+        "model": DEDICATED_AI_MODEL or "gpt-6.1-sol",
+        "messages": [
+            {"role": "system", "content": VANYA_SYSTEM_PROMPT},
+            {"role": "user", "content": text_value},
+        ],
+        "stream": False,
+        "max_tokens": 512,
+        "temperature": 0.7,
+    }
+
+    try:
+        async with session.post(
+            f"{DEDICATED_API_URL}/chat/completions",
+            headers=_ai_headers(DEDICATED_API_KEY),
+            json=payload,
+            timeout=timeout,
+        ) as resp:
+            raw = await resp.text()
+            print(f"[AI][DEDICATED] HTTP {resp.status}")
+            if resp.status >= 400:
+                await _set_ai_provider_status(
+                    "dedicated", False, f"HTTP {resp.status}: {raw[:300]}"
+                )
+                return None
+
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = {}
+
+            answer = ""
+            if isinstance(data, dict):
+                choices = data.get("choices") or []
+                if choices and isinstance(choices[0], dict):
+                    message = choices[0].get("message") or {}
+                    if isinstance(message, dict):
+                        answer = str(message.get("content") or "").strip()
+                    if not answer:
+                        answer = str(choices[0].get("text") or "").strip()
+
+            if not answer:
+                await _set_ai_provider_status(
+                    "dedicated", False, "Empty response"
+                )
+                return None
+
+            await _set_ai_provider_status("dedicated", True)
+            await _record_ai_request("dedicated", usage_context)
+            return answer
+    except Exception as exc:
+        await _set_ai_provider_status(
+            "dedicated", False, f"{type(exc).__name__}: {exc}"
+        )
+        return None
 
 async def _call_elite_api(text_value, usage_context=None):
     """Call the documented OpenAI-compatible Elite endpoint."""
@@ -1415,7 +1489,13 @@ async def _call_chatgp_api(text_value, usage_context=None):
 async def probe_ai_providers():
     """Probe providers at startup without allowing a bad model/config to crash the bot."""
     probe = "Reply with only: OK"
-    results = {"elite": False, "chatgp": False, "cloudflare": False, "ollama": False}
+    results = {"dedicated": False, "elite": False, "chatgp": False, "cloudflare": False, "ollama": False}
+
+    if DEDICATED_API_KEY and DEDICATED_API_URL:
+        try:
+            results["dedicated"] = bool(await _call_dedicated_api(probe))
+        except Exception as exc:
+            print(f"[AI][PROBE] Dedicated probe failed: {type(exc).__name__}: {exc}")
 
     if ELITE_LLM_API_KEY:
         try:
@@ -1458,12 +1538,14 @@ async def _ai_health_monitor(bot=None):
                 f"⏱️ Interval: <code>{interval // 60} min</code>",
             ]
             labels = {
+                "dedicated": "Dedicated LLMs",
                 "elite": "Elite LLM",
                 "chatgp": "ChatGP",
                 "cloudflare": "Cloudflare Workers AI",
                 "ollama": "Ollama Cloud",
             }
             configured = {
+                "dedicated": bool(DEDICATED_API_KEY and DEDICATED_API_URL),
                 "elite": bool(ELITE_LLM_API_KEY),
                 "chatgp": bool(CHATGP_API_URL),
                 "cloudflare": bool(CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID),
@@ -1629,7 +1711,7 @@ async def ai_reply(user, text_value, chat_type="private", group_title="", stream
         asyncio.create_task(_save_chat_state_background(user.id, text_value, answer, chat_id=chat_id))
         return answer
 
-    # If both remote providers fail, keep Vanya conversational instead of
+    # If all remote providers fail, keep Vanya conversational instead of
     # repeating one generic line. This is deliberately local and short, so a
     # temporary provider outage does not make every group message identical.
     fallback_text = re.sub(r"\s+", " ", str(text_value or "")).strip()
