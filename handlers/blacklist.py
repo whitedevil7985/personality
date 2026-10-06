@@ -13,18 +13,43 @@ from config import OWNER_ID
 from db import get_user, users
 
 
-def _resolve_user_id(update, context):
-    """Resolve a moderation target from a replied message or a numeric user ID."""
+async def _resolve_user_id(update, context):
+    """Resolve target from reply, numeric ID, or stored @username."""
     if update.message and update.message.reply_to_message and update.message.reply_to_message.from_user:
         return update.message.reply_to_message.from_user.id, update.message.reply_to_message.from_user
-    if context.args:
-        raw = str(context.args[0] or "").strip().lstrip("@")
+
+    if not context.args:
+        return None, None
+
+    raw = str(context.args[0] or "").strip()
+    if not raw:
+        return None, None
+
+    # Direct numeric Telegram user ID.
+    try:
+        uid = int(raw.lstrip("@"))
+        if uid > 0 and raw.lstrip("@").isdigit():
+            return uid, None
+    except (TypeError, ValueError):
+        pass
+
+    # Also support /blacklist @username using the username tracked by the bot.
+    username = raw.lstrip("@").strip().casefold()
+    if username:
         try:
-            uid = int(raw)
-            if uid > 0:
-                return uid, None
-        except (TypeError, ValueError):
-            pass
+            record = await users.find_one(
+                {"username": {"$regex": f"^{__import__('re').escape(username)}$", "$options": "i"}},
+                {"_id": 1, "name": 1, "username": 1},
+            )
+        except Exception:
+            record = None
+        if record and record.get("_id"):
+            class _Target:
+                pass
+            target = _Target()
+            target.full_name = str(record.get("name") or username)
+            target.username = record.get("username")
+            return int(record["_id"]), target
 
     return None, None
 
@@ -40,7 +65,7 @@ async def blacklist(update, context):
         await update.effective_message.reply_html(
             "🚫 <b>Blacklist User</b>\n\n"
             "Reply to the user's message with <code>/blacklist</code>\n"
-            "or use <code>/blacklist &lt;user_id&gt;</code>."
+            "or use <code>/blacklist &lt;user_id&gt;</code> / <code>/blacklist @username</code>."
         )
         return
 
@@ -91,7 +116,7 @@ async def unblacklist(update, context):
         await update.effective_message.reply_html(
             "♻️ <b>Unblacklist User</b>\n\n"
             "Reply to the user's message with <code>/unblacklist</code>\n"
-            "or use <code>/unblacklist &lt;user_id&gt;</code>."
+            "or use <code>/unblacklist &lt;user_id&gt;</code> / <code>/unblacklist @username</code>."
         )
         return
 
