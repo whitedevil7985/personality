@@ -74,7 +74,10 @@ Set these in `.env`:
 - `OWNER_ID`
 - `DEVELOPER_NAME` and `OWNER_PROFILE_URL` — control the Developer button and owner profile link.
   - The **Developer** button appears in the main/start/help/profile menus and opens the configured owner profile directly.
-- `ELITE_LLM_API_KEY` — API key for Elite LLMs
+- `DEDICATED_API_KEY` — API key for the primary Dedicated LLMs service
+- `DEDICATED_API_URL=https://dedicated-ai.pages.dev/v1`
+- `DEDICATED_AI_MODEL=gpt-6.1-sol`
+- `ELITE_LLM_API_KEY` — API key for Elite LLMs fallback
 - `ELITE_LLM_BASE_URL=https://elite-llms.vercel.app/v1`
 - `ELITE_LLM_MODEL=gpt-4o-mini`
 - `MEMORY_DAYS=30`
@@ -91,7 +94,7 @@ Each game's code is isolated, so you can change one game without editing the oth
 
 - Per-user MongoDB memory.
 - Conversation/fact retention defaults to 30 days and expired entries are pruned automatically.
-- The AI backend uses the OpenAI-compatible Elite LLMs `/v1/chat/completions` endpoint.
+- The AI backend uses Dedicated LLMs as the primary OpenAI-compatible `/v1/chat/completions` provider, followed by Elite, ChatGP, Cloudflare and Ollama fallbacks.
 - `/broadcast <text>` — Owner/Sudo only. Broadcast text to registered users and known groups.
 - Reply to any message/media with `/broadcast` — Owner/Sudo only.
 - `/memory` shows saved facts.
