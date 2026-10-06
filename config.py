@@ -55,6 +55,12 @@ AI_GROUP_MODE = _bool("AI_GROUP_MODE", True)
 AI_GROUP_REPLY_ALL = _bool("AI_GROUP_REPLY_ALL", False)
 AI_DM_MODE = _bool("AI_DM_MODE", True)
 AI_DISCLOSURE = _bool("AI_DISCLOSURE", False)
+
+# Dedicated LLMs API is the primary AI provider.
+DEDICATED_API_KEY = os.getenv("DEDICATED_API_KEY", "").strip().strip('"').strip("'")
+DEDICATED_API_URL = os.getenv("DEDICATED_API_URL", "https://dedicated-ai.pages.dev/v1").strip().rstrip("/")
+DEDICATED_AI_MODEL = os.getenv("DEDICATED_AI_MODEL", "gpt-6.1-sol").strip()
+DEDICATED_TIMEOUT_SECONDS = float(os.getenv("DEDICATED_TIMEOUT_SECONDS", "10.0"))
 # Elite LLMs is OpenAI-compatible and uses /v1/chat/completions.
 ELITE_LLM_API_KEY = os.getenv("ELITE_LLM_API_KEY", "").strip().strip('"').strip("'")
 ELITE_LLM_BASE_URL = os.getenv("ELITE_LLM_BASE_URL", "https://elite-llms.vercel.app/v1").strip().rstrip("/")
