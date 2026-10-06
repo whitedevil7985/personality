@@ -19,7 +19,7 @@ from telegram.request import HTTPXRequest
 
 from config import (
     TOKEN, OWNER_ID, DEVELOPER_NAME, OWNER_PROFILE_URL, UPDATES_URL, SUPPORT_URL, AI_GROUP_MODE, AI_GROUP_REPLY_ALL, AI_DM_MODE,
-    AI_DISCLOSURE, AI_MODEL, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_AI_MODEL, CLOUDFLARE_TIMEOUT_SECONDS, OLLAMA_API_KEY, OLLAMA_API_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
+    AI_DISCLOSURE, AI_MODEL, DEDICATED_API_KEY, DEDICATED_API_URL, DEDICATED_AI_MODEL, DEDICATED_TIMEOUT_SECONDS, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_AI_MODEL, CLOUDFLARE_TIMEOUT_SECONDS, OLLAMA_API_KEY, OLLAMA_API_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
     MEMORY_DAYS, SUDO_IDS, LOGGER_CHAT_ID
 )
 from db import db, ensure_user, mark_started, track_group, get_user, add_coins, add_xp, top_users, users, groups, games, logs, ai_usage, get_game_leaderboard, save_custom_emoji, get_custom_emoji_map, record_ai_usage
@@ -225,6 +225,9 @@ async def main():
         "🟢 Status: <b>Online</b>\n"
         "⚡ Telegram polling: <b>Active</b>\n"
         "🎮 Games: <b>Ready</b>\n\n"
+        f"🎯 <b>Dedicated LLMs:</b> {'🟢 ACTIVE' if provider_status.get('dedicated') else '🔴 DOWN'}\n"
+        f"   Model: <code>{html.escape(DEDICATED_AI_MODEL or 'unset')}</code>\n"
+        f"   Key configured: <b>{'YES' if DEDICATED_API_KEY else 'NO'}</b>\n"
         f"🤖 <b>Elite LLM:</b> {'🟢 ACTIVE' if provider_status.get('elite') else '🔴 DOWN'}\n"
         f"   Model: <code>{html.escape(ELITE_LLM_MODEL or AI_MODEL or 'unset')}</code>\n"
         f"   Key configured: <b>{'YES' if ELITE_LLM_API_KEY else 'NO'}</b>\n"
