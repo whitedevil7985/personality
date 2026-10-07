@@ -64,7 +64,7 @@ from handlers.webapp import get_uno_webapp_url, uno, unojoin, get_chess_webapp_u
 from handlers.ui import kb, developer_button, home, start_menu, back, game_chat_kb, game_room_ui, log_event, _get_group_log_link, log_bot_membership, start, profile, safe_html
 from handlers.economy import toprich, balance, daily, work, _leaderboard_since, _leaderboard_label, leaderboard_kb, _render_leaderboard, leaderboard, give, target_user, _protection_until, _is_dead, rob, protect, shield, propose, _complete_proposal_callback, accept, divorce, couple, topcouples
 from handlers.moderation import is_admin, _moderation_ready, ban, unban, warn, mute, unmute, purge
-from handlers.owner import STAFF_COMMANDS, OWNER_ONLY_COMMANDS, staff_command_objects, is_owner_or_sudo, broadcast_target_kb, owner_panel_kb, owner_panel, owner_panel_command, _coin_admin_target, addcoins_admin, removecoins_admin, broadcast, addemoji, addsudo, delsudo, sudolist, auth, unauth, authlist, memory, remember_cmd, forgetme, log, aistats, owner_monitor_kb, owner_manage_kb, owner_economy_kb, owner_games_kb, owner_users_kb
+from handlers.owner import STAFF_COMMANDS, OWNER_ONLY_COMMANDS, staff_command_objects, is_owner_or_sudo, broadcast_target_kb, owner_panel_kb, owner_panel, owner_panel_command, _coin_admin_target, addcoins_admin, removecoins_admin, broadcast, addemoji, addsudo, delsudo, sudolist, auth, unauth, authlist, memory, remember_cmd, forgetme, log, aistats, api_health, owner_monitor_kb, owner_manage_kb, owner_economy_kb, owner_games_kb, owner_users_kb
 from handlers.menus import category, category_kb, help_cmd, help_menu_kb, game_menu_kb, games_cmd, game_info, GAME_ITEMS, GAME_INFO, CATEGORIES
 
 # AI service must load before chat handlers so their module globals can see ai_reply/send_vanya_reply.
@@ -106,7 +106,7 @@ async def main():
         "scribble":scribble,"kingdomwars":kingdomwars,"city":city,"room":room,"pet":pet,"vanyacity":city,"myroom":room,"mypet":pet,
         "owner":owner_panel_command,"ownerpanel":owner_panel_command,"panel":owner_panel_command,"devpanel":owner_panel_command,"broadcast":broadcast,"addcoins":addcoins_admin,"removecoins":removecoins_admin,"addemoji":addemoji,"addsudo":addsudo,"delsudo":delsudo,"sudolist":sudolist,"auth":auth,"unauth":unauth,"authlist":authlist,"stats":stats,"ping":ping,
         "ban":ban,"unban":unban,"warn":warn,"mute":mute,"unmute":unmute,"purge":purge,"chatstatus":chatstatus,"end":end_game,
-        "blacklist":blacklist,"unblacklist":unblacklist,"log":log,"aistats":aistats,
+        "blacklist":blacklist,"unblacklist":unblacklist,"log":log,"aistats":aistats,"apihealth":api_health,
     }
     for name,fn in commands.items():
         app.add_handler(CommandHandler(name,fn))
@@ -146,7 +146,7 @@ async def main():
         "unauth": "Unauthorize this group", "authlist": "List authorized groups", "ping": "Check bot latency",
         "ban": "Ban a user", "unban": "Unban a user", "warn": "Warn a user", "mute": "Mute a user",
         "unmute": "Unmute a user", "purge": "Delete recent messages", "chatstatus": "Check group chat access", "end": "End all active games in this group",
-        "blacklist": "Blacklist a user (Owner only)", "unblacklist": "Remove a user from blacklist (Owner only)", "log": "View recent logger events (Owner only)", "aistats": "Today's AI API usage by provider (Owner only)",
+        "blacklist": "Blacklist a user (Owner only)", "unblacklist": "Remove a user from blacklist (Owner only)", "log": "View recent logger events (Owner only)", "aistats": "Today's AI API usage by provider (Owner only)", "apihealth": "Live-check every configured AI API (Owner/Sudo)",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
     # /revealgrid is not part of command_list at all, so it cannot leak
