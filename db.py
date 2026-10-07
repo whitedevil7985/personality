@@ -195,6 +195,57 @@ async def next_wordseek_word(pool):
     return word
 
 
+
+async def next_wordgrid_words(pool, count=7):
+    """Return unused Wordgrid target words and persist their usage forever."""
+    normalized = []
+    seen = set()
+    for item in pool:
+        if isinstance(item, (tuple, list)):
+            word = str(item[0]).strip().upper()
+            length = int(item[1]) if len(item) > 1 else len(word)
+        else:
+            word = str(item).strip().upper()
+            length = len(word)
+        if word and word not in seen:
+            seen.add(word)
+            normalized.append((word, length))
+
+    if not normalized:
+        return []
+
+    state_id = "wordgrid_pool"
+    state = await games.find_one({"_id": state_id}) or {}
+    used = [
+        str(x).strip().upper()
+        for x in state.get("used_words", [])
+        if str(x).strip()
+    ]
+    used_set = set(used)
+    available = [item for item in normalized if item[0] not in used_set]
+
+    if not available:
+        return []
+
+    take = min(max(1, int(count)), len(available))
+    selected = random.sample(available, take)
+    used.extend(word for word, _ in selected)
+
+    await games.update_one(
+        {"_id": state_id},
+        {
+            "$set": {
+                "used_words": used,
+                "total_words": len(normalized),
+                "used_count": len(used),
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
+        upsert=True,
+    )
+    return selected
+
+
 async def save_custom_emoji(emoji_id, alternative, added_by=None):
     """Persist a Telegram custom emoji ID and its regular fallback emoji."""
     if not emoji_id:
