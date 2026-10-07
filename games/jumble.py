@@ -5,7 +5,8 @@ import time
 import asyncio
 from datetime import datetime, timezone
 
-from db import ensure_user, add_coins, record_game_result, games
+from db import ensure_user, add_coins, record_game_result, games, get_user
+from config import OWNER_ID
 
 REWARD = 25
 GAME_TIMEOUT = 90
@@ -101,6 +102,58 @@ async def _send_round(update, answer, round_number):
         "⏱️ 90 seconds\n"
         "💬 Type the answer directly!",
         parse_mode="HTML",
+    )
+
+
+async def reveal_jumble(update, context):
+    """Owner/Sudo Jumble answer reveal; never exposes the answer to groups."""
+    if not update.effective_user:
+        await update.message.reply_text("⛔ Owner/Sudo only.")
+        return
+
+    uid = update.effective_user.id
+    if uid != OWNER_ID:
+        u = await get_user(uid)
+        sudo_ids = getattr(__import__("config"), "SUDO_IDS", set())
+        if uid not in sudo_ids and not (u and u.get("is_sudo")):
+            await update.message.reply_text("⛔ Owner/Sudo only.")
+            return
+
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    game = JUMBLE_GAMES.get(chat_id)
+    if not game:
+        await update.message.reply_text("❌ No active Jumble round in this chat.")
+        return
+
+    answer = str(game.get("answer", "")).upper()
+    round_number = int(game.get("round", 1))
+    total_rounds = int(game.get("total", JUMBLE_ROUNDS))
+    scrambled = str(game.get("scrambled", "")).upper()
+
+    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_user.id,
+                text=(
+                    f"📩 <b>Jumble Answer — {html.escape(update.effective_chat.title or 'Group')}</b>\n\n"
+                    f"🔤 Scrambled: <b>{html.escape(scrambled)}</b>\n"
+                    f"🔐 Answer: <code>{html.escape(answer)}</code>\n"
+                    f"🔎 Round: <b>{round_number}/{total_rounds}</b>"
+                ),
+                parse_mode="HTML",
+            )
+            await update.message.reply_text("✅ Jumble answer sent to your private chat.")
+        except Exception:
+            await update.message.reply_text(
+                "⚠️ I couldn't DM you. Open a private chat with Vanya first, then use /revealjumble."
+            )
+        return
+
+    await update.message.reply_html(
+        "🔐 <b>Jumble Answer</b>\n\n"
+        f"🔤 Scrambled: <b>{html.escape(scrambled)}</b>\n"
+        f"🔐 Answer: <code>{html.escape(answer)}</code>\n"
+        f"🔎 Round: <b>{round_number}/{total_rounds}</b>"
     )
 
 
