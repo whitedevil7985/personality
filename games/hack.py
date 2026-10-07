@@ -1,6 +1,6 @@
 import asyncio
 import html
-import os
+import base64
 import random
 import re
 import time
@@ -94,44 +94,30 @@ async def _animate_start(message, target, ports):
 
 
 async def _send_hack_image(update, context):
-    """Send the Hack Lab image reliably from the bundle, with a public fallback."""
+    """Decode the bundled image and send it as a normal JPEG."""
     caption = "💻 <b>VANYA CYBER LAB</b> — simulated security challenge"
+    data_path = (
+        Path(__file__).resolve().parent.parent
+        / "assets"
+        / "hack_terminal_b64.txt"
+    )
 
-    candidates = [
-        Path(__file__).resolve().parent.parent / "assets" / "hack_terminal.jpg",
-        Path.cwd() / "assets" / "hack_terminal.jpg",
-    ]
-
-    last_error = None
-    for image_path in candidates:
-        if not image_path.is_file():
-            continue
-        try:
-            with image_path.open("rb") as image_handle:
-                await context.bot.send_photo(
-                    chat_id=update.effective_chat.id,
-                    photo=InputFile(image_handle, filename="hack_terminal.jpg"),
-                    caption=caption,
-                    parse_mode="HTML",
-                )
-            return True
-        except Exception as exc:
-            last_error = exc
-            print(f"[HACK] local image send error ({image_path}): {type(exc).__name__}: {exc}")
-
-    # Fallback keeps the image working even if the runtime image path is wrong.
     try:
-        await context.bot.send_photo(
-            chat_id=update.effective_chat.id,
-            photo="https://raw.githubusercontent.com/whitedevil7985/personality/main/assets/hack_terminal.jpg",
-            caption=caption,
-            parse_mode="HTML",
-        )
+        encoded = data_path.read_text(encoding="ascii").strip()
+        image_bytes = base64.b64decode(encoded, validate=True)
+        temp_path = Path("/tmp/vanya_hack_terminal.jpg")
+        temp_path.write_bytes(image_bytes)
+
+        with temp_path.open("rb") as image_handle:
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=InputFile(image_handle, filename="hack_terminal.jpg"),
+                caption=caption,
+                parse_mode="HTML",
+            )
         return True
     except Exception as exc:
-        print(f"[HACK] remote image send error: {type(exc).__name__}: {exc}")
-        if last_error:
-            print(f"[HACK] previous local error: {type(last_error).__name__}: {last_error}")
+        print(f"[HACK] bundled image send error: {type(exc).__name__}: {exc}")
         return False
 
 
