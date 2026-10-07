@@ -4,6 +4,7 @@ import os
 import random
 import re
 import time
+from pathlib import Path
 
 from telegram import InputFile
 
@@ -92,24 +93,46 @@ async def _animate_start(message, target, ports):
             print(f"[HACK] animation error: {type(exc).__name__}: {exc}")
 
 
-async def _send_hack_image(update):
-    """Send the cinematic Hack Lab image bundled with the bot."""
-    image_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "assets",
-        "hack_terminal.jpg",
-    )
-    if not os.path.exists(image_path):
-        return
+async def _send_hack_image(update, context):
+    """Send the Hack Lab image reliably from the bundle, with a public fallback."""
+    caption = "💻 <b>VANYA CYBER LAB</b> — simulated security challenge"
+
+    candidates = [
+        Path(__file__).resolve().parent.parent / "assets" / "hack_terminal.jpg",
+        Path.cwd() / "assets" / "hack_terminal.jpg",
+    ]
+
+    last_error = None
+    for image_path in candidates:
+        if not image_path.is_file():
+            continue
+        try:
+            with image_path.open("rb") as image_handle:
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=InputFile(image_handle, filename="hack_terminal.jpg"),
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+            return True
+        except Exception as exc:
+            last_error = exc
+            print(f"[HACK] local image send error ({image_path}): {type(exc).__name__}: {exc}")
+
+    # Fallback keeps the image working even if the runtime image path is wrong.
     try:
-        with open(image_path, "rb") as image_handle:
-            await update.message.reply_photo(
-                photo=InputFile(image_handle, filename="hack_terminal.jpg"),
-                caption="💻 <b>VANYA CYBER LAB</b> — simulated security challenge",
-                parse_mode="HTML",
-            )
+        await context.bot.send_photo(
+            chat_id=update.effective_chat.id,
+            photo="https://raw.githubusercontent.com/whitedevil7985/personality/main/assets/hack_terminal.jpg",
+            caption=caption,
+            parse_mode="HTML",
+        )
+        return True
     except Exception as exc:
-        print(f"[HACK] image send error: {type(exc).__name__}: {exc}")
+        print(f"[HACK] remote image send error: {type(exc).__name__}: {exc}")
+        if last_error:
+            print(f"[HACK] previous local error: {type(last_error).__name__}: {last_error}")
+        return False
 
 
 async def hack(update, context):
@@ -141,7 +164,7 @@ async def hack(update, context):
         "ready": False,
     }
 
-    await _send_hack_image(update)
+    await _send_hack_image(update, context)
 
     sent = await update.message.reply_html(
         _terminal_text("BOOTING", target, ports, extra="Preparing simulated security lab…")
