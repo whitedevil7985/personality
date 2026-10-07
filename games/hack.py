@@ -207,10 +207,8 @@ async def hack(update, context):
 
     challenge = await _next_unique_puzzle()
     if challenge is None:
-        await update.message.reply_text(
-            "🧩 <b>Hack challenge pool finished!</b> All 500 unique challenges are used. No puzzle will be repeated.",
-            parse_mode="HTML",
-        )
+        # Do not post a pool/system message in the group.
+        # The bot simply ignores /hack once the 500 unique challenges are exhausted.
         return
 
     target = f"192.0.2.{random.randint(10, 240)}"
