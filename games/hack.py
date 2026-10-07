@@ -72,62 +72,54 @@ async def _animate_start(message, target, ports):
         _terminal_text("SCANNING", target, ports, extra="Checking simulated service fingerprints…"),
         _terminal_text("BREACH GATE", target, ports, extra="Challenge gate locked. Authentication required."),
     ]
-
     for index, frame in enumerate(frames):
         try:
-            if index == 0:
-                await message.edit_text(frame, parse_mode="HTML")
-            else:
+            if index > 0:
                 await asyncio.sleep(0.55)
-                await message.edit_text(frame, parse_mode="HTML")
+            await message.edit_caption(caption=frame, parse_mode="HTML")
         except Exception as exc:
-            print(f"[HACK] animation error: {type(exc).__name__}: {exc}")
+            print(f"[HACK] caption animation error: {type(exc).__name__}: {exc}")
 
 
-async def _send_hack_image(update, context):
-    """Decode, crop and compress the Hack Lab artwork for a clean Telegram preview."""
-    caption = "💻 <b>VANYA CYBER LAB</b> — simulated security challenge"
+async def _animate_text_fallback(message, target, ports):
+    frames = [
+        _terminal_text("CONNECTING", target, ports, extra="Establishing encrypted lab channel…"),
+        _terminal_text("SCANNING", target, ports, extra="Checking simulated service fingerprints…"),
+        _terminal_text("BREACH GATE", target, ports, extra="Challenge gate locked. Authentication required."),
+    ]
+    for index, frame in enumerate(frames):
+        try:
+            if index > 0:
+                await asyncio.sleep(0.55)
+            await message.edit_text(frame, parse_mode="HTML")
+        except Exception as exc:
+            print(f"[HACK] text animation error: {type(exc).__name__}: {exc}")
+
+
+async def _send_hack_image(update, context, initial_caption):
+    """Send the sharp Hack Lab artwork once; the caption is the live game UI."""
     data_path = (
         Path(__file__).resolve().parent.parent
         / "assets"
         / "hack_terminal_b64.txt"
     )
-
     try:
         encoded = data_path.read_text(encoding="ascii").strip()
         image_bytes = base64.b64decode(encoded, validate=True)
-
-        # The original artwork is nearly square and contains tiny side text.
-        # Fit-cropping it to 16:9 keeps the central cyber-lab artwork large
-        # and readable in Telegram's chat preview.
         with Image.open(__import__("io").BytesIO(image_bytes)) as source:
             source = source.convert("RGB")
-            preview = ImageOps.fit(
-                source,
-                (960, 540),
-                method=Image.Resampling.LANCZOS,
-                centering=(0.50, 0.38),
-            )
             temp_path = Path("/tmp/vanya_hack_terminal.jpg")
-            preview.save(
-                temp_path,
-                "JPEG",
-                quality=86,
-                optimize=True,
-                progressive=True,
-            )
-
+            source.save(temp_path, "JPEG", quality=95, optimize=True, progressive=True)
         with temp_path.open("rb") as image_handle:
-            await context.bot.send_photo(
+            return await context.bot.send_photo(
                 chat_id=update.effective_chat.id,
                 photo=InputFile(image_handle, filename="hack_terminal.jpg"),
-                caption=caption,
+                caption=initial_caption,
                 parse_mode="HTML",
             )
-        return True
     except Exception as exc:
         print(f"[HACK] bundled image send error: {type(exc).__name__}: {exc}")
-        return False
+        return None
 
 
 async def hack(update, context):
@@ -149,38 +141,38 @@ async def hack(update, context):
     challenge = _new_puzzle()
     target = f"192.0.2.{random.randint(10, 240)}"
     ports = ",".join(str(p) for p in random.sample([22, 80, 443, 8080], 3))
+    boot = _terminal_text("BOOTING", target, ports, extra="Preparing simulated security lab…")
 
-    HACK_GAMES[chat_id] = {
+    game = {
         "challenge": challenge,
         "answers": tuple(str(x).casefold() for x in challenge[2]),
         "started_at": time.monotonic(),
         "target": target,
         "ports": ports,
         "ready": False,
+        "message_id": None,
     }
+    HACK_GAMES[chat_id] = game
 
-    await _send_hack_image(update, context)
+    sent = await _send_hack_image(update, context, boot)
+    if sent is None:
+        sent = await update.message.reply_html(boot)
+        await _animate_text_fallback(sent, target, ports)
+    else:
+        await _animate_start(sent, target, ports)
 
-    sent = await update.message.reply_html(
-        _terminal_text("BOOTING", target, ports, extra="Preparing simulated security lab…")
-    )
-    await _animate_start(sent, target, ports)
-
-    game = HACK_GAMES.get(chat_id)
-    if not game:
+    current = HACK_GAMES.get(chat_id)
+    if not current:
         return
 
-    game["ready"] = True
+    current["ready"] = True
+    final_text = _terminal_text("AWAITING INPUT", target, ports, challenge=challenge)
     try:
-        await sent.edit_text(
-            _terminal_text(
-                "AWAITING INPUT",
-                target,
-                ports,
-                challenge=challenge,
-            ),
-            parse_mode="HTML",
-        )
+        if getattr(sent, "photo", None):
+            await sent.edit_caption(caption=final_text, parse_mode="HTML")
+        else:
+            await sent.edit_text(final_text, parse_mode="HTML")
+        current["message_id"] = sent.message_id
     except Exception as exc:
         print(f"[HACK] final-prompt error: {type(exc).__name__}: {exc}")
 
@@ -228,15 +220,29 @@ async def hack_answer(update, context):
     await record_game_result(user.id, "HACK", REWARD, True, chat_id)
 
     target = html.escape(str(game.get("target", "SIM-LAB")))
-    await update.message.reply_html(
-        "╭━━━〔 ✅ <b>ACCESS GRANTED</b> 〕━━━╮\n"
-        f"┃ 🎯 Target: <code>{target}</code>\n"
-        "┃ 🔓 Security gate: <b>BYPASSED</b>\n"
-        "┃ 🟢 Session: <b>COMPLETE</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+    result_text = (
+        "✅ <b>ACCESS GRANTED</b>\n"
+        f"🎯 Target: <code>{target}</code>\n"
+        "🔓 Security gate: <b>BYPASSED</b>\n"
+        "🟢 Session: <b>COMPLETE</b>\n\n"
         f"👑 <b>{html.escape(user.first_name or 'Player')}</b> cracked the lab!\n"
         f"💰 Reward: <b>+{REWARD} coins</b>\n"
-        "🛡️ This was a fictional simulated security challenge.\n"
+        "🛡️ Fictional simulated security challenge.\n"
         "✨ Start another with /hack"
     )
+    try:
+        message_id = game.get("message_id")
+        if message_id:
+            await context.bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=result_text,
+                parse_mode="HTML",
+            )
+            await update.message.reply_text("✅ Access granted! Reward added.")
+        else:
+            await update.message.reply_html(result_text)
+    except Exception as exc:
+        print(f"[HACK] success edit error: {type(exc).__name__}: {exc}")
+        await update.message.reply_html(result_text)
     return True
