@@ -46,7 +46,7 @@ WORDS = _load_jumble_words()
 
 
 async def _next_unique_word():
-    """Reserve a Jumble word permanently so it is never recycled."""
+    """Reserve a Jumble word without repeats; reset the bank after exhaustion."""
     async with _JUMBLE_LOCK:
         state_id = "jumble_pool"
         state = await games.find_one({"_id": state_id}) or {}
@@ -57,7 +57,19 @@ async def _next_unique_word():
         }
         available = [word for word in WORDS if word.casefold() not in used]
         if not available:
-            return None
+            # Full bank consumed: start a fresh cycle silently.
+            await games.update_one(
+                {"_id": state_id},
+                {"$set": {
+                    "used_words": [],
+                    "used_count": 0,
+                    "total_words": len(WORDS),
+                    "cycle": int(state.get("cycle", 1)) + 1,
+                    "updated_at": datetime.now(timezone.utc),
+                }},
+                upsert=True,
+            )
+            available = list(WORDS)
 
         word = random.choice(available)
         await games.update_one(
