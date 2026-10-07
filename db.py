@@ -161,9 +161,7 @@ async def get_game_leaderboard(game="ALL", scope="global", chat_id=None, since=N
 
 
 async def next_wordseek_word(pool):
-    """Pick a Wordseek word without repeating until the whole pool is used.
-    Used words are persisted in MongoDB so Railway restarts do not reset the pool.
-    """
+    """Pick a word without repeats, then start a fresh cycle after exhaustion."""
     normalized = []
     seen = set()
     for word in pool:
@@ -180,16 +178,33 @@ async def next_wordseek_word(pool):
     used_set = set(used)
     available = [word for word in normalized if word not in used_set]
 
-    # Never recycle a previously used word. The used-word history is
-    # persisted in MongoDB, so Railway restarts/deploys cannot reset it.
+    # Once the complete bank has been consumed, silently begin a fresh cycle.
     if not available:
-        return None
+        cycle = int(state.get("cycle", 1)) + 1
+        used = []
+        available = list(normalized)
+        await games.update_one(
+            {"_id": state_id},
+            {"$set": {
+                "used_words": [],
+                "used_count": 0,
+                "total_words": len(normalized),
+                "cycle": cycle,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
 
     word = random.choice(available)
     used.append(word)
     await games.update_one(
         {"_id": state_id},
-        {"$set": {"used_words": used, "total_words": len(normalized), "updated_at": datetime.now(timezone.utc)}},
+        {"$set": {
+            "used_words": used,
+            "used_count": len(used),
+            "total_words": len(normalized),
+            "updated_at": datetime.now(timezone.utc),
+        }},
         upsert=True,
     )
     return word
