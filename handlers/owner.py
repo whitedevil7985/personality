@@ -31,6 +31,7 @@ STAFF_COMMANDS = {
     "unblacklist": "Remove a user from blacklist (Owner only)",
     "log": "View recent logger events (Owner only)",
     "aistats": "View today's AI API request usage by provider (Owner only)",
+    "apihealth": "Live-check every configured AI API (Owner/Sudo)",
     "revealgrid": "Reveal the Wordgrid answer (Owner/Sudo)",
     "revealwordseek": "Reveal the Wordseek answer (Owner/Sudo)",
 }
@@ -152,6 +153,133 @@ async def aistats(update, context):
     except Exception as exc:
         print(f"[OwnerAIStats] {type(exc).__name__}: {exc}")
         await update.effective_message.reply_text("❌ AI stats database read failed.")
+
+
+
+async def api_health(update, context):
+    """Owner/Sudo-only live health check for every configured AI provider."""
+    if not await is_owner_or_sudo(update):
+        await update.effective_message.reply_text("⛔ Owner/Sudo only.")
+        return
+
+    try:
+        from services.ai_service import (
+            _call_dedicated_api,
+            _call_elite_api,
+            _call_chatgp_api,
+            _call_cloudflare_api,
+            _call_ollama_api,
+        )
+
+        probe_text = "Reply with only: OK"
+        providers = [
+            (
+                "dedicated",
+                "Dedicated LLMs",
+                bool(DEDICATED_API_KEY and DEDICATED_API_URL),
+                _call_dedicated_api,
+            ),
+            (
+                "elite",
+                "Elite LLM",
+                bool(ELITE_LLM_API_KEY),
+                _call_elite_api,
+            ),
+            (
+                "chatgp",
+                "ChatGP",
+                bool(CHATGP_API_URL),
+                _call_chatgp_api,
+            ),
+            (
+                "cloudflare",
+                "Cloudflare Workers AI",
+                bool(CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID),
+                _call_cloudflare_api,
+            ),
+            (
+                "ollama",
+                "Ollama Cloud",
+                bool(OLLAMA_API_KEY and OLLAMA_API_URL),
+                _call_ollama_api,
+            ),
+        ]
+
+        async def run_probe(key, label, configured, fn):
+            if not configured:
+                return key, label, "NOT CONFIGURED", None
+
+            started = time.perf_counter()
+            try:
+                # Manual health probes intentionally pass no usage_context,
+                # so they never increase /aistats API-request counters.
+                answer = await asyncio.wait_for(
+                    fn(probe_text, usage_context=None),
+                    timeout=max(
+                        5.0,
+                        float(os.getenv("API_HEALTH_CHECK_TIMEOUT_SECONDS", "12.0")),
+                    ),
+                )
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                if answer:
+                    return key, label, "ACTIVE", elapsed_ms
+                return key, label, "DOWN", elapsed_ms
+            except asyncio.TimeoutError:
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                return key, label, "TIMEOUT", elapsed_ms
+            except Exception as exc:
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                print(f"[APIHealth] {label}: {type(exc).__name__}: {exc}")
+                return key, label, "DOWN", elapsed_ms
+
+        results = await asyncio.gather(
+            *(run_probe(*item) for item in providers)
+        )
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        checked_at = datetime.now(ist).strftime("%d %b %Y, %I:%M:%S %p IST")
+
+        active = sum(1 for _, _, status, _ in results if status == "ACTIVE")
+        configured = sum(1 for _, _, status, _ in results if status != "NOT CONFIGURED")
+
+        lines = [
+            "╭━━━〔 🩺 <b>AI API HEALTH</b> 〕━━━╮",
+            "┃ 🔒 <i>Owner/Sudo only</i>",
+            f"┃ 🕒 <b>Checked:</b> {html.escape(checked_at)}",
+            f"┃ ✅ <b>Working:</b> {active}/{configured or 0} configured",
+            "╰━━━━━━━━━━━━━━━━━━━━╯",
+            "",
+        ]
+
+        status_icons = {
+            "ACTIVE": "🟢",
+            "DOWN": "🔴",
+            "TIMEOUT": "🟠",
+            "NOT CONFIGURED": "⚪",
+        }
+
+        for _, label, status, elapsed_ms in results:
+            icon = status_icons.get(status, "⚪")
+            if elapsed_ms is not None:
+                lines.append(
+                    f"{icon} <b>{html.escape(label)}</b>: "
+                    f"<b>{status}</b> · <code>{elapsed_ms} ms</code>"
+                )
+            else:
+                lines.append(
+                    f"{icon} <b>{html.escape(label)}</b>: <b>{status}</b>"
+                )
+
+        lines.extend([
+            "",
+            "ℹ️ This is a live probe of the configured providers.",
+            "📊 Manual health probes are <b>not counted</b> in <code>/aistats</code>.",
+        ])
+
+        await update.effective_message.reply_html("\n".join(lines))
+    except Exception as exc:
+        print(f"[APIHealth] command failed: {type(exc).__name__}: {exc}")
+        await update.effective_message.reply_text("❌ API health check failed.")
 
 
 async def log(update, context):
