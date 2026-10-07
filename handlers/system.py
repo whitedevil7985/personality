@@ -48,56 +48,65 @@ async def answer(update, context):
 
 
 async def end_game(update, context):
-    """End all active games associated with the current Telegram group."""
+    """End active native bot-side games in the current group only."""
     chat = update.effective_chat
     if not chat or chat.type not in ("group", "supergroup"):
-        await update.message.reply_text("🎮 /end sirf group games ko end karta hai. Is command ko group mein use karo.")
+        await update.message.reply_text(
+            "🎮 /end sirf group games ko end karta hai. Is command ko group mein use karo."
+        )
         return
 
     chat_id = chat.id
     ended = []
 
-    # Native bot-side games.
+    # RPS rooms are keyed by a generated room id.
     for gid, game in list(RPS_GAMES.items()):
         if game.get("chat_id") == chat_id:
             RPS_GAMES.pop(gid, None)
             ended.append("RPS")
 
+    # Card rooms are keyed by room id and have a group_id.
     for room_id, room in list(CARD_ROOMS.items()):
         if room.get("group_id") == chat_id:
             CARD_ROOMS.pop(room_id, None)
             ended.append("Card")
 
-    if chat_id in WORDSEEK_GAMES:
-        WORDSEEK_GAMES.pop(chat_id, None)
-        ended.append("Wordseek")
+    # Per-chat text games.
+    stores = (
+        (WORDSEEK_GAMES, "Wordseek"),
+        (WORDCHAIN_GAMES, "Wordchain"),
+        (WORDSCRAMBLE_GAMES, "Wordscramble"),
+        (JUMBLE_GAMES, "Jumble"),
+        (CHARADES_GAMES, "Charades"),
+        (HACK_GAMES, "Hack"),
+    )
+    for store, label in stores:
+        if chat_id in store:
+            store.pop(chat_id, None)
+            ended.append(label)
 
-    wordgrid_active = context.application.bot_data.get("wordgrid_active", {}) if context.application else {}
+    # Wordgrid is stored in Application.bot_data rather than a module global.
+    wordgrid_active = (
+        context.application.bot_data.get("wordgrid_active", {})
+        if context.application
+        else {}
+    )
     if chat_id in wordgrid_active:
-        wordgrid_active.pop(chat_id, None)
+        active = wordgrid_active.pop(chat_id, None)
         ended.append("Wordgrid")
+        # Remove its interactive button so an ended board cannot look active.
+        message_id = active.get("message_id") if active else None
+        if message_id:
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
 
-    if chat_id in WORDCHAIN_GAMES:
-        WORDCHAIN_GAMES.pop(chat_id, None)
-        ended.append("Wordchain")
-
-    if chat_id in WORDSCRAMBLE_GAMES:
-        WORDSCRAMBLE_GAMES.pop(chat_id, None)
-        ended.append("Wordscramble")
-
-    if chat_id in JUMBLE_GAMES:
-        JUMBLE_GAMES.pop(chat_id, None)
-        ended.append("Jumble")
-
-    if chat_id in CHARADES_GAMES:
-        CHARADES_GAMES.pop(chat_id, None)
-        ended.append("Charades")
-
-    if chat_id in HACK_GAMES:
-        HACK_GAMES.pop(chat_id, None)
-        ended.append("Hack")
-
-    # Crash rounds are stored per player; each round keeps its group chat ID.
+    # Crash is keyed by player id and has an explicit chat_id + task.
     for uid, crash_game in list(CRASH_GAMES.items()):
         if crash_game.get("chat_id") == chat_id:
             CRASH_GAMES.pop(uid, None)
@@ -109,33 +118,35 @@ async def end_game(update, context):
                     pass
             ended.append("Crash")
 
-    # Legacy in-bot game dictionaries are still cleaned up for older rooms.
-    for store, label in (
-        (uno_games, "UNO"),
-        (ludo_games, "Ludo"),
-        (chess_games, "Chess"),
-    ):
-        for gid in list(store.keys()):
-            if str(gid).startswith(str(chat_id) + "-"):
-                store.pop(gid, None)
-                ended.append(label)
-
-    # Mines is stored per user; clear active rounds for users known in this group.
+    # Mines stores one round per user. Newer rounds record their group id,
+    # which lets /end safely terminate only rounds started in this group.
     try:
         mine_result = await users.update_many(
-            {"group_ids": chat_id, "mines_active": True},
-            {"$set": {"mines_active": False, "mines_set": [], "mines_safe": [], "mines_bet": 0}},
+            {"mines_active": True, "mines_chat_id": chat_id},
+            {
+                "$set": {
+                    "mines_active": False,
+                    "mines_set": [],
+                    "mines_safe": [],
+                    "mines_bet": 0,
+                    "mines_chat_id": None,
+                }
+            },
         )
         if mine_result.modified_count:
-            ended.append(f"Mines ({mine_result.modified_count} player)")
-    except Exception:
-        pass
+            ended.append(
+                f"Mines ({mine_result.modified_count} player)"
+                if mine_result.modified_count > 1
+                else "Mines"
+            )
+    except Exception as exc:
+        print(f"[END] Mines cleanup error: {type(exc).__name__}: {exc}")
 
-    # Browser Mini Apps are independent web rooms.
-    # /end intentionally does NOT stop UNO/Ludo/Chess/Scribble browser rooms.
+    # Intentionally do NOT touch UNO/Ludo/Chess/Scribble browser rooms.
+    # Those are Mini App/web rooms and /end is only for native bot-side games.
     if not ended:
         await update.message.reply_text(
-            "ℹ️ Is group mein abhi koi active game nahi mila."
+            "ℹ️ Is group mein abhi koi active bot-side game nahi mila."
         )
         return
 
@@ -143,13 +154,17 @@ async def end_game(update, context):
     for item in ended:
         key = item.split(" (", 1)[0]
         counts[key] = counts.get(key, 0) + 1
-    lines = [f"{name}: {count}" if count > 1 else name for name, count in counts.items()]
+
+    lines = [
+        f"• {name}: {count}" if count > 1 else f"• {name}"
+        for name, count in counts.items()
+    ]
 
     await update.message.reply_html(
         "🛑 <b>GAME SESSION ENDED</b>\n\n"
-        "✅ Current group ke active game sessions close kar diye gaye.\n"
-        "• " + "\n• ".join(html.escape(x) for x in lines) + "\n\n"
-        "🎮 Ab koi bhi player naya game start kar sakta hai."
+        "✅ Current group ke active bot-side game sessions close kar diye gaye.\n"
+        + "\n".join(lines)
+        + "\n\n🎮 Ab koi bhi player naya game start kar sakta hai."
     )
 
 
