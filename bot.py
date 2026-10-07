@@ -39,7 +39,7 @@ from games.chess import chess_cmd, chess_cb, chess_games
 from games.mines import mines, mines_cb
 from games.wordseek import wordseek, answer as wordseek_answer, reveal_wordseek, WORDSEEK_GAMES
 from games.wordgrid import wordgrid, wordgrid_answer, send_wordgrid, reveal_wordgrid
-from games.crash import crash, crash_cb
+from games.crash import crash, crash_cb, CRASH_GAMES
 from games.charades import charades, CHARADES_GAMES, charades_answer
 from games.wordchain import wordchain, wordchain_join, wordchain_answer, WORDCHAIN_GAMES
 from games.wordscramble import wordscramble, wordscramble_answer, WORDSCRAMBLE_GAMES
