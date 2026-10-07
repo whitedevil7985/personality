@@ -1,4 +1,5 @@
 import random
+import os
 import asyncio
 from io import BytesIO
 from typing import List, Set, Tuple
@@ -10,21 +11,42 @@ from config import OWNER_ID, SUDO_IDS
 from db import get_user, next_wordgrid_words
 
 GRID_SIZE = 8
-WORD_POOL = [
-    ("APPLE", 5), ("BRAIN", 5), ("CLOUD", 5), ("DREAM", 5),
-    ("EAGLE", 5), ("FLAME", 5), ("GRAPE", 5), ("HEART", 5),
-    ("HOUSE", 5), ("JUICE", 5), ("KNIFE", 5), ("LEMON", 5),
-    ("MANGO", 5), ("MUSIC", 5), ("OCEAN", 5), ("PEACH", 5),
-    ("PIZZA", 5), ("PLANT", 5), ("QUEEN", 5), ("RIVER", 5),
-    ("ROBOT", 5), ("SMILE", 5), ("SPACE", 5), ("STORM", 5),
-    ("SWEET", 5), ("TIGER", 5), ("TRAIN", 5), ("WATER", 5),
-    ("WORLD", 5), ("ZEBRA", 5), ("ANT", 3), ("LID", 3),
-    ("OAK", 3), ("RAY", 3), ("MINT", 4), ("GREEN", 5),
-    ("PURPLE", 6), ("LIGHT", 5), ("MAGIC", 5), ("NIGHT", 5),
-    ("PARTY", 5), ("QUICK", 5), ("SHINE", 5), ("THUNDER", 7),
-    ("SUNSET", 6), ("WINTER", 6), ("SUMMER", 6), ("FOREST", 6),
-    ("FLOWER", 6), ("GALAXY", 6), ("CASTLE", 6), ("DRAGON", 6),
-]
+
+def _load_wordgrid_words():
+    """Load 10k+ short words suitable for the 8x8 Wordgrid."""
+    fallback = [
+        ("APPLE", 5), ("BRAIN", 5), ("CLOUD", 5), ("DREAM", 5),
+        ("EAGLE", 5), ("FLAME", 5), ("GRAPE", 5), ("HEART", 5),
+        ("HOUSE", 5), ("JUICE", 5), ("KNIFE", 5), ("LEMON", 5),
+        ("MANGO", 5), ("MUSIC", 5), ("OCEAN", 5), ("PEACH", 5),
+        ("PIZZA", 5), ("PLANT", 5), ("QUEEN", 5), ("RIVER", 5),
+        ("ROBOT", 5), ("SMILE", 5), ("SPACE", 5), ("STORM", 5),
+        ("SWEET", 5), ("TIGER", 5), ("TRAIN", 5), ("WATER", 5),
+        ("WORLD", 5), ("ZEBRA", 5), ("ANT", 3), ("LID", 3),
+        ("OAK", 3), ("RAY", 3), ("MINT", 4), ("GREEN", 5),
+        ("PURPLE", 6), ("LIGHT", 5), ("MAGIC", 5), ("NIGHT", 5),
+        ("PARTY", 5), ("QUICK", 5), ("SHINE", 5), ("THUNDER", 7),
+        ("SUNSET", 6), ("WINTER", 6), ("SUMMER", 6), ("FOREST", 6),
+        ("FLOWER", 6), ("GALAXY", 6), ("CASTLE", 6), ("DRAGON", 6),
+    ]
+    path = os.path.join(os.path.dirname(__file__), "wordgrid_words.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            words = []
+            seen = set()
+            for line in handle:
+                word = line.strip().upper()
+                if not word.isalpha() or not (3 <= len(word) <= GRID_SIZE) or word in seen:
+                    continue
+                seen.add(word)
+                words.append((word, len(word)))
+        if len(words) >= 1000:
+            return words
+    except Exception as exc:
+        print(f"[Wordgrid] external word bank load failed: {type(exc).__name__}: {exc}")
+    return fallback
+
+WORD_POOL = _load_wordgrid_words()
 DIRECTIONS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
 
 _WORDGRID_LOCK = asyncio.Lock()
