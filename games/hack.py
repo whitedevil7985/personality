@@ -1,8 +1,11 @@
 import asyncio
 import html
+import os
 import random
 import re
 import time
+
+from telegram import InputFile
 
 from db import ensure_user, add_coins, record_game_result
 
@@ -89,6 +92,26 @@ async def _animate_start(message, target, ports):
             print(f"[HACK] animation error: {type(exc).__name__}: {exc}")
 
 
+async def _send_hack_image(update):
+    """Send the cinematic Hack Lab image bundled with the bot."""
+    image_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "assets",
+        "hack_terminal.jpg",
+    )
+    if not os.path.exists(image_path):
+        return
+    try:
+        with open(image_path, "rb") as image_handle:
+            await update.message.reply_photo(
+                photo=InputFile(image_handle, filename="hack_terminal.jpg"),
+                caption="💻 <b>VANYA CYBER LAB</b> — simulated security challenge",
+                parse_mode="HTML",
+            )
+    except Exception as exc:
+        print(f"[HACK] image send error: {type(exc).__name__}: {exc}")
+
+
 async def hack(update, context):
     if not update.message or not update.effective_chat or not update.effective_user:
         return
@@ -117,6 +140,8 @@ async def hack(update, context):
         "ports": ports,
         "ready": False,
     }
+
+    await _send_hack_image(update)
 
     sent = await update.message.reply_html(
         _terminal_text("BOOTING", target, ports, extra="Preparing simulated security lab…")
