@@ -180,10 +180,10 @@ async def next_wordseek_word(pool):
     used_set = set(used)
     available = [word for word in normalized if word not in used_set]
 
+    # Never recycle a previously used word. The used-word history is
+    # persisted in MongoDB, so Railway restarts/deploys cannot reset it.
     if not available:
-        used = []
-        used_set = set()
-        available = normalized[:]
+        return None
 
     word = random.choice(available)
     used.append(word)
