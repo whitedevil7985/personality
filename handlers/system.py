@@ -81,6 +81,34 @@ async def end_game(update, context):
         WORDCHAIN_GAMES.pop(chat_id, None)
         ended.append("Wordchain")
 
+    if chat_id in WORDSCRAMBLE_GAMES:
+        WORDSCRAMBLE_GAMES.pop(chat_id, None)
+        ended.append("Wordscramble")
+
+    if chat_id in JUMBLE_GAMES:
+        JUMBLE_GAMES.pop(chat_id, None)
+        ended.append("Jumble")
+
+    if chat_id in CHARADES_GAMES:
+        CHARADES_GAMES.pop(chat_id, None)
+        ended.append("Charades")
+
+    if chat_id in HACK_GAMES:
+        HACK_GAMES.pop(chat_id, None)
+        ended.append("Hack")
+
+    # Crash rounds are stored per player; each round keeps its group chat ID.
+    for uid, crash_game in list(CRASH_GAMES.items()):
+        if crash_game.get("chat_id") == chat_id:
+            CRASH_GAMES.pop(uid, None)
+            task = crash_game.get("task")
+            if task:
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+            ended.append("Crash")
+
     # Legacy in-bot game dictionaries are still cleaned up for older rooms.
     for store, label in (
         (uno_games, "UNO"),
