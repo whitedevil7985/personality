@@ -1,5 +1,7 @@
+import asyncio
 import html
 import random
+import re
 import time
 
 from db import ensure_user, add_coins, record_game_result
@@ -10,42 +12,138 @@ HACK_GAMES = {}
 
 
 def _new_puzzle():
-    puzzles = [
-        ("2, 4, 6, ?", ("8",)),
-        ("5, 10, 15, ?", ("20",)),
-        ("1, 3, 6, 10, ?", ("15",)),
-        ("10, 8, 6, ?", ("4",)),
+    """Return a solvable, fictional cybersecurity-lab challenge."""
+    challenges = [
+        ("SEQUENCE",
+         "2, 4, 8, 16, ?",
+         ("32",),
+         "Find the next value in the sequence."),
+        ("SEQUENCE",
+         "3, 6, 12, 24, ?",
+         ("48",),
+         "Find the next value in the sequence."),
+        ("SEQUENCE",
+         "1, 4, 9, 16, ?",
+         ("25",),
+         "Find the next value in the sequence."),
+        ("SEQUENCE",
+         "5, 10, 20, 40, ?",
+         ("80",),
+         "Find the next value in the sequence."),
+        ("CODE",
+         "7-2-9-4",
+         ("6",),
+         "Take the largest digit and subtract the smallest digit."),
+        ("CODE",
+         "8-3-5-1",
+         ("7",),
+         "Multiply the smallest and largest digits, then remove the last digit."),
     ]
-    return random.choice(puzzles)
+    return random.choice(challenges)
+
+
+def _terminal_text(stage, target, ports, challenge=None, extra=""):
+    lines = [
+        "╭━━━〔 💻 <b>VANYA CYBER LAB</b> 〕━━━╮",
+        f"┃ 🎯 Target: <code>{html.escape(target)}</code>",
+        f"┃ 🔌 Ports: <code>{html.escape(ports)}</code>",
+        f"┃ 🟢 Status: <b>{html.escape(stage)}</b>",
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━╯",
+        "",
+        "▣ SIMULATED SECURITY TEST",
+        "",
+    ]
+    if challenge:
+        lines.extend([
+            f"🧩 <b>Challenge:</b> {html.escape(challenge[0])}",
+            f"🔐 Code: <code>{html.escape(challenge[1])}</code>",
+            "",
+            f"💡 {html.escape(challenge[3])}",
+            "",
+            "⌨️ Type the numeric answer to continue.",
+        ])
+    else:
+        lines.extend([
+            "▸ Initializing secure test environment…",
+            "▸ Enumerating simulated services…",
+            f"▸ {html.escape(extra)}",
+        ])
+    return "\n".join(lines)
+
+
+async def _animate_start(message, target, ports):
+    frames = [
+        _terminal_text("CONNECTING", target, ports, extra="Establishing encrypted lab channel…"),
+        _terminal_text("SCANNING", target, ports, extra="Checking simulated service fingerprints…"),
+        _terminal_text("BREACH GATE", target, ports, extra="Challenge gate locked. Authentication required."),
+    ]
+
+    for index, frame in enumerate(frames):
+        try:
+            if index == 0:
+                await message.edit_text(frame, parse_mode="HTML")
+            else:
+                await asyncio.sleep(0.55)
+                await message.edit_text(frame, parse_mode="HTML")
+        except Exception as exc:
+            print(f"[HACK] animation error: {type(exc).__name__}: {exc}")
 
 
 async def hack(update, context):
-    if not update.message or not update.effective_chat:
+    if not update.message or not update.effective_chat or not update.effective_user:
         return
+
     chat_id = update.effective_chat.id
     current = HACK_GAMES.get(chat_id)
     if current and time.monotonic() - current["started_at"] < GAME_TIMEOUT:
-        await update.message.reply_text("💻 <b>Hack puzzle already running!</b> Solve the current code first.", parse_mode="HTML")
+        await update.message.reply_text(
+            "💻 <b>Cyber Lab already running!</b> Solve the current access gate first.",
+            parse_mode="HTML",
+        )
         return
 
-    puzzle, answers = _new_puzzle()
+    if current:
+        HACK_GAMES.pop(chat_id, None)
+
+    challenge = _new_puzzle()
+    target = f"192.0.2.{random.randint(10, 240)}"
+    ports = ",".join(str(p) for p in random.sample([22, 80, 443, 8080], 3))
+
     HACK_GAMES[chat_id] = {
-        "puzzle": puzzle,
-        "answers": answers,
+        "challenge": challenge,
+        "answers": tuple(str(x).casefold() for x in challenge[2]),
         "started_at": time.monotonic(),
+        "target": target,
+        "ports": ports,
     }
-    await update.message.reply_html(
-        "💻 <b>HACK PUZZLE</b>\n\n"
-        f"🔐 Decode the sequence: <code>{html.escape(puzzle)}</code>\n\n"
-        f"🏆 Reward: <b>+{REWARD} coins</b>\n"
-        "💬 Type the answer directly.\n"
-        "⏱️ 90 seconds."
+
+    sent = await update.message.reply_html(
+        _terminal_text("BOOTING", target, ports, extra="Preparing simulated security lab…")
     )
+    await _animate_start(sent, target, ports)
+
+    game = HACK_GAMES.get(chat_id)
+    if not game:
+        return
+
+    try:
+        await sent.edit_text(
+            _terminal_text(
+                "AWAITING INPUT",
+                target,
+                ports,
+                challenge=challenge,
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        print(f"[HACK] final-prompt error: {type(exc).__name__}: {exc}")
 
 
 async def hack_answer(update, context):
     if not update.message or not update.message.text or not update.effective_chat:
         return False
+
     chat_id = update.effective_chat.id
     game = HACK_GAMES.get(chat_id)
     if not game:
@@ -53,14 +151,26 @@ async def hack_answer(update, context):
 
     if time.monotonic() - game["started_at"] >= GAME_TIMEOUT:
         HACK_GAMES.pop(chat_id, None)
-        await update.message.reply_text("⏰ <b>Hack puzzle expired!</b> Start again with /hack.", parse_mode="HTML")
+        await update.message.reply_text(
+            "⏰ <b>Cyber Lab session expired!</b> Start again with /hack.",
+            parse_mode="HTML",
+        )
         return True
 
     guess = update.message.text.strip().casefold()
-    if not guess:
-        return True
-    if guess not in {str(x).casefold() for x in game["answers"]}:
-        await update.message.reply_text("❌ Access denied 😏", parse_mode="HTML")
+
+    # Ignore ordinary conversation while the hack puzzle is active.
+    # Answers are intentionally numeric, so random chat words never trigger
+    # an "Access denied" message.
+    if not re.fullmatch(r"\d{1,6}", guess):
+        return False
+
+    answers = {str(x).casefold() for x in game.get("answers", ())}
+    if guess not in answers:
+        await update.message.reply_text(
+            "🔒 <b>AUTH FAILED</b> — wrong code. Try again.",
+            parse_mode="HTML",
+        )
         return True
 
     HACK_GAMES.pop(chat_id, None)
@@ -68,10 +178,17 @@ async def hack_answer(update, context):
     await ensure_user(user)
     await add_coins(user.id, REWARD)
     await record_game_result(user.id, "HACK", REWARD, True, chat_id)
+
+    target = html.escape(str(game.get("target", "SIM-LAB")))
     await update.message.reply_html(
-        "✅ <b>ACCESS GRANTED!</b>\n\n"
-        f"👑 <b>{html.escape(user.first_name or 'Player')}</b> cracked it!\n"
+        "╭━━━〔 ✅ <b>ACCESS GRANTED</b> 〕━━━╮\n"
+        f"┃ 🎯 Target: <code>{target}</code>\n"
+        "┃ 🔓 Security gate: <b>BYPASSED</b>\n"
+        "┃ 🟢 Session: <b>COMPLETE</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"👑 <b>{html.escape(user.first_name or 'Player')}</b> cracked the lab!\n"
         f"💰 Reward: <b>+{REWARD} coins</b>\n"
+        "🛡️ This was a fictional simulated security challenge.\n"
         "✨ Start another with /hack"
     )
     return True
