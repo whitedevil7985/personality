@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from telegram import InputFile
+from PIL import Image, ImageOps
 
 from db import ensure_user, add_coins, record_game_result
 
@@ -48,30 +49,20 @@ def _new_puzzle():
 
 def _terminal_text(stage, target, ports, challenge=None, extra=""):
     lines = [
-        "╭━━━〔 💻 <b>VANYA CYBER LAB</b> 〕━━━╮",
-        f"┃ 🎯 Target: <code>{html.escape(target)}</code>",
-        f"┃ 🔌 Ports: <code>{html.escape(ports)}</code>",
-        f"┃ 🟢 Status: <b>{html.escape(stage)}</b>",
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━╯",
-        "",
-        "▣ SIMULATED SECURITY TEST",
+        "💻 <b>VANYA CYBER LAB</b>",
+        f"🎯 Target: <code>{html.escape(target)}</code>  •  🔌 <code>{html.escape(ports)}</code>",
+        f"🟢 Status: <b>{html.escape(stage)}</b>",
         "",
     ]
     if challenge:
         lines.extend([
-            f"🧩 <b>Challenge:</b> {html.escape(challenge[0])}",
-            f"🔐 Code: <code>{html.escape(challenge[1])}</code>",
-            "",
+            f"🧩 <b>{html.escape(challenge[0])}</b>",
+            f"🔐 <code>{html.escape(challenge[1])}</code>",
             f"💡 {html.escape(challenge[3])}",
-            "",
-            "⌨️ Type the numeric answer to continue.",
+            "⌨️ <b>Reply with the numeric answer.</b>",
         ])
     else:
-        lines.extend([
-            "▸ Initializing secure test environment…",
-            "▸ Enumerating simulated services…",
-            f"▸ {html.escape(extra)}",
-        ])
+        lines.append(f"▸ {html.escape(extra)}")
     return "\n".join(lines)
 
 
@@ -94,7 +85,7 @@ async def _animate_start(message, target, ports):
 
 
 async def _send_hack_image(update, context):
-    """Decode the bundled image and send it as a normal JPEG."""
+    """Decode, crop and compress the Hack Lab artwork for a clean Telegram preview."""
     caption = "💻 <b>VANYA CYBER LAB</b> — simulated security challenge"
     data_path = (
         Path(__file__).resolve().parent.parent
@@ -105,8 +96,26 @@ async def _send_hack_image(update, context):
     try:
         encoded = data_path.read_text(encoding="ascii").strip()
         image_bytes = base64.b64decode(encoded, validate=True)
-        temp_path = Path("/tmp/vanya_hack_terminal.jpg")
-        temp_path.write_bytes(image_bytes)
+
+        # The original artwork is nearly square and contains tiny side text.
+        # Fit-cropping it to 16:9 keeps the central cyber-lab artwork large
+        # and readable in Telegram's chat preview.
+        with Image.open(__import__("io").BytesIO(image_bytes)) as source:
+            source = source.convert("RGB")
+            preview = ImageOps.fit(
+                source,
+                (960, 540),
+                method=Image.Resampling.LANCZOS,
+                centering=(0.50, 0.38),
+            )
+            temp_path = Path("/tmp/vanya_hack_terminal.jpg")
+            preview.save(
+                temp_path,
+                "JPEG",
+                quality=86,
+                optimize=True,
+                progressive=True,
+            )
 
         with temp_path.open("rb") as image_handle:
             await context.bot.send_photo(
