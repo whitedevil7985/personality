@@ -134,7 +134,12 @@ async def direct_game_answer(update, context):
         or chat_id in CHARADES_GAMES
         or chat_id in HACK_GAMES
     )
-    if active_answer_game and " " in text_value and not context.args:
+    if (
+        active_answer_game
+        and " " in text_value
+        and not context.args
+        and chat_id not in CHARADES_GAMES
+    ):
         return
 
     wordgrid_active = context.application.bot_data.get("wordgrid_active", {})
