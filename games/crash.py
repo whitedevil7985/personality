@@ -77,6 +77,7 @@ async def _run_round(state, message, user):
             # Smooth accelerating curve.
             multiplier = min(crash_point, 1.00 + (elapsed * 0.10) + (elapsed ** 1.35) * 0.035)
             multiplier = round(multiplier, 2)
+            state["current_multiplier"] = multiplier
 
             if multiplier >= crash_point:
                 async with _lock(uid):
