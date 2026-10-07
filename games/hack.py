@@ -23,7 +23,7 @@ HACK_CHALLENGES = [
     ("SEQUENCE", "1, 4, 9, 16, ?", ("25",), "Find the next value in the sequence."),
     ("SEQUENCE", "5, 10, 20, 40, ?", ("80",), "Find the next value in the sequence."),
     ("CODE", "7-2-9-4", ("6",), "Take the largest digit and subtract the smallest digit."),
-    ("CODE", "8-3-5-1", ("7",), "Take the largest digit and subtract the smallest digit."),
+    ("CODE", "8-3-5-1", ("9",), "Add the first and last digit."),
     ("SEQUENCE", "2, 6, 18, 54, ?", ("162",), "Multiply each value by 3."),
     ("SEQUENCE", "100, 90, 80, 70, ?", ("60",), "Subtract 10 each time."),
     ("SEQUENCE", "1, 8, 27, 64, ?", ("125",), "Find the next cube."),
