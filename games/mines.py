@@ -68,6 +68,7 @@ async def mines(update, context):
                 "mines_set": list(mines_set),
                 "mines_safe": [],
                 "mines_bet": 0,
+                "mines_chat_id": update.effective_chat.id if update.effective_chat else None,
             }
         },
         upsert=True,
@@ -144,6 +145,7 @@ async def mines_cb(q, data):
                             "mines_safe": [],
                             "mines_set": [],
                             "mines_bet": 0,
+                            "mines_chat_id": None,
                         }
                     },
                 )
