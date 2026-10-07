@@ -80,20 +80,25 @@ async def _next_prompt():
 
     # Once the finite prompt bank is consumed, begin a fresh cycle. This keeps
     # Charades playable indefinitely while avoiding repeats within a cycle.
-    if not available:
-        used = set()
+    new_cycle = not available
+    if new_cycle:
         available = list(PROMPTS)
 
     prompt, answers = random.choice(available)
+    update_doc = {
+        "$set": {
+            "updated_at": datetime.now(timezone.utc),
+            "total_prompts": len(PROMPTS),
+        }
+    }
+    if new_cycle:
+        update_doc["$set"]["used_prompts"] = [prompt]
+    else:
+        update_doc["$addToSet"] = {"used_prompts": prompt}
+
     await games.update_one(
         {"_id": state_id},
-        {
-            "$set": {
-                "updated_at": datetime.now(timezone.utc),
-                "total_prompts": len(PROMPTS),
-            },
-            "$addToSet": {"used_prompts": prompt},
-        },
+        update_doc,
         upsert=True,
     )
     return prompt, answers
