@@ -1,4 +1,5 @@
 import html
+import os
 import random
 import asyncio
 from telegram import InlineKeyboardButton
@@ -6,13 +7,31 @@ from games.common import kb, safe_name
 from config import OWNER_ID
 from db import ensure_user, get_user, add_coins, add_xp, users, record_game_result, next_wordseek_word
 
-WORDS = [
-    "VANYA", "DELHI", "ARCADE", "CHAT", "FRIEND",
-    "MUSIC", "RAIN", "MAGIC", "SMILE", "DREAM",
-    "APPLE", "MANGO", "RIVER", "CLOUD", "HEART",
-    "TIGER", "SPACE", "ROBOT", "PARTY", "NIGHT",
-    "SUMMER", "WINTER", "FLOWER", "FOREST", "GALAXY",
-]
+def _load_wordseek_words():
+    """Load the external Wordseek bank, keeping a small fallback for safe startup."""
+    fallback = [
+        "VANYA", "DELHI", "ARCADE", "CHAT", "FRIEND",
+        "MUSIC", "RAIN", "MAGIC", "SMILE", "DREAM",
+        "APPLE", "MANGO", "RIVER", "CLOUD", "HEART",
+        "TIGER", "SPACE", "ROBOT", "PARTY", "NIGHT",
+        "SUMMER", "WINTER", "FLOWER", "FOREST", "GALAXY",
+    ]
+    path = os.path.join(os.path.dirname(__file__), "wordseek_words.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            words = [
+                line.strip().upper()
+                for line in handle
+                if line.strip().isalpha() and 4 <= len(line.strip()) <= 12
+            ]
+        words = list(dict.fromkeys(words))
+        if len(words) >= 1000:
+            return words
+    except Exception as exc:
+        print(f"[Wordseek] external word bank load failed: {type(exc).__name__}: {exc}")
+    return fallback
+
+WORDS = _load_wordseek_words()
 WORDSEEK_GAMES = {}
 _WORDSEEK_LOCK = asyncio.Lock()
 
