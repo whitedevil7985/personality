@@ -142,11 +142,12 @@ async def charades(update, context):
                 await context.bot.send_message(
                     chat_id=actor.id,
                     text=(
-                        "🎭 <b>CHARADES — YOUR TURN TO ACT!</b>\n\n"
-                        f"🎬 Act this out without speaking:\n"
-                        f"<b>{html.escape(prompt)}</b>\n\n"
-                        "⏱️ You have 90 seconds.\n"
-                        "💬 Do not type the answer in the group — just act!"
+                        "🎭 <b>DUMB CHARADES — YOUR TURN!</b>\n\n"
+                        f"🎬 <b>Secret action:</b> {html.escape(prompt)}\n\n"
+                        "🎥 Act it out for the group using a video, GIF, sticker, "
+                        "or in a group call.\n"
+                        "🚫 Do not type the secret answer in the group.\n"
+                        "⏱️ You have 90 seconds."
                     ),
                     parse_mode="HTML",
                 )
@@ -160,10 +161,12 @@ async def charades(update, context):
                 return
 
             await update.message.reply_html(
-                "🎭 <b>CHARADES STARTED!</b>\n\n"
-                f"🎬 <b>{html.escape(actor.first_name or 'Player')}</b> is acting now!\n"
-                "🙈 The secret action was sent privately to the actor.\n"
-                "💬 Everyone else: guess the action by typing it!\n"
+                "🎭 <b>DUMB CHARADES STARTED!</b>\n\n"
+                f"🎬 <b>{html.escape(actor.first_name or 'Player')}</b> is the actor!\n"
+                "🔐 The secret action is visible only to the actor in DM.\n\n"
+                "🎥 <b>Actor:</b> act it out using your camera/video, "
+                "GIF, sticker, or by acting in a group call — <b>do not type the answer</b>.\n"
+                "💬 <b>Everyone else:</b> guess the action by typing it here.\n"
                 f"💰 Reward: <b>+{REWARD} coins</b>\n"
                 "⏱️ 90 seconds."
             )
