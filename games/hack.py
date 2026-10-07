@@ -15,6 +15,7 @@ from db import ensure_user, add_coins, record_game_result, games
 REWARD = 30
 GAME_TIMEOUT = 90
 HACK_GAMES = {}
+HACK_POOL_LOCK = asyncio.Lock()
 
 
 def _build_hack_challenges():
@@ -78,25 +79,52 @@ def _build_hack_challenges():
 
 HACK_CHALLENGES = _build_hack_challenges()
 async def _next_unique_puzzle():
-    """Atomically claim one of 500 unique Hack challenges from MongoDB."""
+    """Claim one challenge without repeats, then start a fresh cycle after 500."""
     state_id = "hack_puzzle_pool_v2"
-    state = await games.find_one({"_id": state_id}) or {}
-    used = {
-        str(x).strip()
-        for x in state.get("used_ids", [])
-        if str(x).strip()
-    }
 
-    available = [
-        (challenge[0], challenge)
-        for challenge in HACK_CHALLENGES
-        if challenge[0] not in used
-    ]
-    if not available:
-        return None
+    # Keep pool selection atomic inside this bot process so the 500th and
+    # next-cycle game cannot race each other. MongoDB still persists the pool
+    # across restarts.
+    async with HACK_POOL_LOCK:
+        state = await games.find_one({"_id": state_id}) or {}
+        used = {
+            str(x).strip()
+            for x in state.get("used_ids", [])
+            if str(x).strip()
+        }
 
-    random.shuffle(available)
-    for puzzle_id, challenge in available:
+        available = [
+            (challenge[0], challenge)
+            for challenge in HACK_CHALLENGES
+            if challenge[0] not in used
+        ]
+
+        # One complete cycle = all 500 unique challenges used once.
+        # Immediately reset the persistent pool for a fresh cycle instead of
+        # posting any "pool finished" message in the group.
+        if not available:
+            next_cycle = int(state.get("cycle", 1)) + 1
+            await games.update_one(
+                {"_id": state_id},
+                {
+                    "$set": {
+                        "used_ids": [],
+                        "total_challenges": len(HACK_CHALLENGES),
+                        "cycle": next_cycle,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                },
+                upsert=True,
+            )
+            used = set()
+            available = [
+                (challenge[0], challenge)
+                for challenge in HACK_CHALLENGES
+            ]
+
+        random.shuffle(available)
+        puzzle_id, challenge = available[0]
+
         result = await games.update_one(
             {"_id": state_id, "used_ids": {"$ne": puzzle_id}},
             {
@@ -111,7 +139,9 @@ async def _next_unique_puzzle():
         if result.modified_count == 1 or result.upserted_id:
             return challenge
 
-    return None
+        # This should only be reachable if another bot process claimed the
+        # same puzzle at the exact same time.
+        return None
 
 
 def _terminal_text(stage, target, ports, challenge=None, extra=""):
