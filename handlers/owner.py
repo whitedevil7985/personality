@@ -34,12 +34,13 @@ STAFF_COMMANDS = {
     "apihealth": "Live-check every configured AI API (Owner/Sudo)",
     "revealgrid": "Reveal the Wordgrid answer (Owner/Sudo)",
     "revealwordseek": "Reveal the Wordseek answer (Owner/Sudo)",
+    "revealjumble": "Reveal the Jumble answer (Owner/Sudo)",
 }
 OWNER_ONLY_COMMANDS = {
     "owner", "ownerpanel", "panel", "devpanel",
     "addemoji", "addsudo", "delsudo", "sudolist",
     "auth", "unauth", "authlist", "blacklist", "unblacklist",
-    "revealgrid", "revealwordseek", "log", "aistats",
+    "revealgrid", "revealwordseek", "revealjumble", "log", "aistats",
 }
 
 def staff_command_objects(owner=False):
@@ -421,6 +422,7 @@ def owner_games_kb():
             InlineKeyboardButton("🔐 Wordgrid Answer", callback_data="owner:revealgrid"),
             InlineKeyboardButton("🔎 Wordseek Answer", callback_data="owner:revealwordseek"),
         ],
+        [InlineKeyboardButton("🔤 Jumble Answer", callback_data="owner:revealjumble")],
         [InlineKeyboardButton("⟵ Dashboard", callback_data="owner:home")],
     ])
 
