@@ -18,7 +18,7 @@ _WORDSEEK_LOCK = asyncio.Lock()
 
 
 async def _next_wordseek_word():
-    """Return a Wordseek word without repeating until the full pool is exhausted."""
+    """Return a Wordseek word that has never been used before."""
     async with _WORDSEEK_LOCK:
         return await next_wordseek_word(WORDS)
 
@@ -67,6 +67,12 @@ async def _start_wordseek_round(
 async def wordseek(update, context):
     chat_id = update.effective_chat.id
     answer = await _next_wordseek_word()
+    if not answer:
+        await update.message.reply_text(
+            "⚠️ Wordseek ka current word pool complete ho gaya hai. "
+            "Saare available words already use ho chuke hain — koi word repeat nahi kiya jayega."
+        )
+        return
     await _start_wordseek_round(update, answer, solved=0, total=TOTAL_WORDSEEK_WORDS)
 
 
@@ -117,8 +123,18 @@ async def answer(update, context):
         parse_mode="HTML",
     )
 
-    # Continue automatically, but keep the same 7-word game counter.
+    # Continue automatically, but never recycle a previously used word.
     next_answer = await _next_wordseek_word()
+    if not next_answer:
+        await update.message.reply_text(
+            "🏁 <b>WORDSEEK POOL FINISHED!</b>\n\n"
+            "✅ Saare available words use ho chuke hain. "
+            "Vanya koi purana word repeat nahi karegi.",
+            parse_mode="HTML",
+        )
+        WORDSEEK_GAMES.pop(chat_id, None)
+        return
+
     await _start_wordseek_round(
         update,
         next_answer,
