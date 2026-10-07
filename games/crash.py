@@ -175,6 +175,7 @@ async def crash(update, context):
             "crash_point": crash_point,
             "started_at": time.monotonic(),
             "current_multiplier": 1.00,
+            "chat_id": chat_id,
             "task": None,
         }
 
