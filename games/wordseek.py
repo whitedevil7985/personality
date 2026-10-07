@@ -88,10 +88,6 @@ async def wordseek(update, context):
     chat_id = update.effective_chat.id
     answer = await _next_wordseek_word()
     if not answer:
-        await update.message.reply_text(
-            "⚠️ Wordseek ka current word pool complete ho gaya hai. "
-            "Saare available words already use ho chuke hain — koi word repeat nahi kiya jayega."
-        )
         return
     await _start_wordseek_round(update, answer, solved=0, total=TOTAL_WORDSEEK_WORDS)
 
