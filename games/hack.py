@@ -39,7 +39,7 @@ def _build_hack_challenges():
 
     # 125 multiplication gates.
     for i in range(125):
-        n = 125 + i
+        n = 250 + i
         answer = n * 8
         prompt = f"{n}, {n * 2}, {n * 4}, ?"
         challenges.append((
@@ -51,7 +51,7 @@ def _build_hack_challenges():
 
     # 125 square-number gates.
     for i in range(125):
-        n = 5 + i
+        n = 300 + i
         answer = n * n
         prompt = f"{n - 2}², {n - 1}², {n}², ?"
         challenges.append((
@@ -63,7 +63,7 @@ def _build_hack_challenges():
 
     # 125 cube-number gates.
     for i in range(125):
-        n = 3 + i
+        n = 500 + i
         answer = n * n * n
         prompt = f"{n - 2}³, {n - 1}³, {n}³, ?"
         challenges.append((
