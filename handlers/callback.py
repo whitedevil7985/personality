@@ -81,6 +81,9 @@ async def callback(update,context):
     if data.startswith("mine:"):
         await mines_cb(q, data.split(":"))
         return
+    if data.startswith("crash:"):
+        await crash_cb(q, data.split(":"))
+        return
 
     if data.startswith("rps:"):
         await rps_cb(q, data.split(":"))
