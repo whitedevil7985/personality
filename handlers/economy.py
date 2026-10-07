@@ -313,7 +313,7 @@ async def rob(update,context):
         return
 
     try:
-        amount = int(context.args[0]) if context.args else max(1, victim_coins // 2)
+        amount = int(context.args[0]) if context.args else victim_coins
     except Exception:
         await update.message.reply_text("Usage: /rob [amount]")
         return
