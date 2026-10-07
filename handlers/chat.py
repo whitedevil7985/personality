@@ -103,12 +103,38 @@ async def gchat(update,context):
     await update.message.reply_html(f"💬 <b>{name}</b>  ›  {html.escape(text)}")
 
 async def direct_game_answer(update, context):
-    """Treat plain text as an answer while a word game is active in the chat."""
+    """Handle plain-text game answers without hijacking normal group conversation."""
     if not update.message or not update.message.text:
         return
 
     chat_id = update.effective_chat.id if update.effective_chat else None
     if chat_id is None:
+        return
+
+    # A reply to another human is member-to-member conversation, not a game guess.
+    # Replies to Vanya's own game message remain eligible for guessing.
+    if (
+        update.effective_chat.type in ("group", "supergroup")
+        and update.message.reply_to_message is not None
+        and update.message.reply_to_message.from_user is not None
+        and update.message.reply_to_message.from_user.id != context.bot.id
+    ):
+        return
+
+    text_value = update.message.text.strip()
+
+    # All current plain-text answer games use a single-token answer. Ignore
+    # normal sentences such as "Hmmm sahi h" while any of these games is active.
+    active_answer_game = (
+        chat_id in context.application.bot_data.get("wordgrid_active", {})
+        or chat_id in WORDSEEK_GAMES
+        or chat_id in WORDCHAIN_GAMES
+        or chat_id in WORDSCRAMBLE_GAMES
+        or chat_id in JUMBLE_GAMES
+        or chat_id in CHARADES_GAMES
+        or chat_id in HACK_GAMES
+    )
+    if active_answer_game and " " in text_value and not context.args:
         return
 
     wordgrid_active = context.application.bot_data.get("wordgrid_active", {})
