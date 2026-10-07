@@ -273,6 +273,9 @@ async def mention_chat(update,context):
         or chat.id in WORDSEEK_GAMES
         or chat.id in WORDCHAIN_GAMES
         or chat.id in WORDSCRAMBLE_GAMES
+        or chat.id in JUMBLE_GAMES
+        or chat.id in CHARADES_GAMES
+        or chat.id in HACK_GAMES
     ):
         return
 
