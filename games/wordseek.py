@@ -2,6 +2,7 @@ import html
 import os
 import random
 import asyncio
+import re
 from telegram import InlineKeyboardButton
 from games.common import kb, safe_name
 from config import OWNER_ID
@@ -96,6 +97,25 @@ async def wordseek(update, context):
 
 
 async def answer(update, context):
+    reply_to = getattr(update.message, "reply_to_message", None)
+    if (
+        update.effective_chat
+        and update.effective_chat.type in ("group", "supergroup")
+        and reply_to is not None
+        and reply_to.from_user is not None
+        and reply_to.from_user.id != context.bot.id
+    ):
+        return
+
+    raw_text = (update.message.text or "").strip()
+    if (
+        update.effective_chat
+        and update.effective_chat.type in ("group", "supergroup")
+        and not context.args
+        and not re.fullmatch(r"[A-Za-z]+", raw_text)
+    ):
+        return
+
     chat_id = update.effective_chat.id
     game = WORDSEEK_GAMES.get(chat_id)
     if not game:
