@@ -30,7 +30,7 @@ from games.dice import dice
 from games.coinflip import coinflip
 from games.slots import slots
 from games.card import card, cardjoin, cardstart, cardcancel, card_cb, CARD_ROOMS
-from games.jumble import jumble, JUMBLE_GAMES, jumble_answer
+from games.jumble import jumble, JUMBLE_GAMES, jumble_answer, reveal_jumble
 from games.tap import tap, tap_cb
 from games.bet import bet
 from games.uno import uno as uno_legacy, uno_cb, uno_games
@@ -111,10 +111,11 @@ async def main():
     for name,fn in commands.items():
         app.add_handler(CommandHandler(name,fn))
 
-    # /revealgrid is intentionally registered outside the public command map:
-    # the handler exists, but Telegram must never advertise it to normal users.
+    # Private answer-reveal commands are registered outside the public command map:
+    # Telegram must never advertise them to normal users.
     app.add_handler(CommandHandler("revealgrid", reveal_wordgrid))
     app.add_handler(CommandHandler("revealwordseek", reveal_wordseek))
+    app.add_handler(CommandHandler("revealjumble", reveal_jumble))
 
     # Register the full command list with Telegram so typing "/" in ANY
     # group/private chat shows Vanya's available commands (like the
@@ -149,7 +150,7 @@ async def main():
         "blacklist": "Blacklist a user (Owner only)", "unblacklist": "Remove a user from blacklist (Owner only)", "log": "View recent logger events (Owner only)", "aistats": "Today's AI API usage by provider (Owner only)", "apihealth": "Live-check every configured AI API (Owner/Sudo)",
     }
     command_list = [BotCommand(name, command_descriptions.get(name, "Vanya command")) for name in commands]
-    # /revealgrid is not part of command_list at all, so it cannot leak
+    # Private reveal commands are not part of command_list at all, so they cannot leak
     # into any public command scope.
     # /end is a GROUP-ONLY command. Keep it out of private/default
     # command menus so it never appears as a web-app/private-chat command.
