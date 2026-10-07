@@ -268,6 +268,19 @@ async def callback(update,context):
                 reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
             )
             return
+        if action == "revealjumble":
+            if not await is_owner_or_sudo(update):
+                await q.edit_message_text("⛔ <b>Owner/Sudo only.</b>", parse_mode="HTML")
+                return
+            await q.edit_message_text(
+                "🔤 <b>Jumble Answer Reveal</b>\n\n"
+                "Use <code>/revealjumble</code> inside the group where an active Jumble round is running.\n\n"
+                "The answer will be sent to your private chat and will not be shown to group members.\n"
+                "👑 <i>Owner/Sudo only.</i>",
+                parse_mode="HTML",
+                reply_markup=kb([[InlineKeyboardButton("⟵ Owner Panel", callback_data="owner:home")]])
+            )
+            return
         if action == "blacklist":
             await q.edit_message_text(
                 "🚫 <b>Blacklist</b>\n\n"
