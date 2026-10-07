@@ -37,7 +37,7 @@ def _new_puzzle():
         ("CODE",
          "8-3-5-1",
          ("7",),
-         "Multiply the smallest and largest digits, then remove the last digit."),
+         "Take the largest digit and subtract the smallest digit."),
     ]
     return random.choice(challenges)
 
@@ -115,6 +115,7 @@ async def hack(update, context):
         "started_at": time.monotonic(),
         "target": target,
         "ports": ports,
+        "ready": False,
     }
 
     sent = await update.message.reply_html(
@@ -126,6 +127,7 @@ async def hack(update, context):
     if not game:
         return
 
+    game["ready"] = True
     try:
         await sent.edit_text(
             _terminal_text(
@@ -158,6 +160,9 @@ async def hack_answer(update, context):
         return True
 
     guess = update.message.text.strip().casefold()
+
+    if not game.get("ready", False):
+        return False
 
     # Ignore ordinary conversation while the hack puzzle is active.
     # Answers are intentionally numeric, so random chat words never trigger
