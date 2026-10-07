@@ -21,7 +21,7 @@ def _mines_lock(uid):
     return lock
 
 
-def _board_markup(safe_tiles, mines_set=None, reveal_mines=False):
+def _board_markup(uid, safe_tiles, mines_set=None, reveal_mines=False):
     safe_tiles = set(safe_tiles or [])
     mines_set = set(mines_set or []) if reveal_mines else set()
 
@@ -39,12 +39,12 @@ def _board_markup(safe_tiles, mines_set=None, reveal_mines=False):
                 label = "⬜"
 
             # A mine that is already hit/revealed should not be clickable.
-            callback = f"mine:{pos}"
+            callback = f"mine:{int(uid)}:{pos}"
             row.append(InlineKeyboardButton(label, callback_data=callback))
         rows.append(row)
 
     rows.append([
-        InlineKeyboardButton("💰 Cash Out", callback_data="mine:cashout")
+        InlineKeyboardButton("💰 Cash Out", callback_data=f"mine:{int(uid)}:cashout")
     ])
     return kb(rows)
 
@@ -79,7 +79,7 @@ async def mines(update, context):
         "💎 Open safe tiles and cash out whenever you want.\n"
         f"💰 Each safe tile: <b>+{SAFE_REWARD} coins</b>\n\n"
         "⚠️ Hitting a mine ends the round.",
-        reply_markup=_board_markup([]),
+        reply_markup=_board_markup(user.id, []),
     )
 
 
@@ -91,11 +91,24 @@ async def mines_cb(q, data):
         uid = q.from_user.id
         async with _mines_lock(uid):
             parts = list(data or [])
-            if len(parts) != 2 or parts[0] != "mine":
+            if len(parts) != 3 or parts[0] != "mine":
                 await q.answer("Invalid Mines button.", show_alert=True)
                 return
 
-            action = parts[1]
+            try:
+                board_uid = int(parts[1])
+            except (TypeError, ValueError):
+                await q.answer("Invalid Mines board.", show_alert=True)
+                return
+
+            if board_uid != uid:
+                await q.answer(
+                    "⛏️ This Mines board belongs to another player.",
+                    show_alert=True,
+                )
+                return
+
+            action = parts[2]
             u = await get_user(uid)
 
             if not u or not u.get("mines_active"):
@@ -229,7 +242,7 @@ async def mines_cb(q, data):
 
             await q.answer("💎 Safe!")
             await q.edit_message_reply_markup(
-                reply_markup=_board_markup(safe),
+                reply_markup=_board_markup(uid, safe),
             )
 
     except Exception as exc:
