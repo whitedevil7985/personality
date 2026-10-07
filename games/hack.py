@@ -17,46 +17,90 @@ GAME_TIMEOUT = 90
 HACK_GAMES = {}
 
 
-HACK_CHALLENGES = [
-    ("SEQUENCE", "2, 4, 8, 16, ?", ("32",), "Find the next value in the sequence."),
-    ("SEQUENCE", "3, 6, 12, 24, ?", ("48",), "Find the next value in the sequence."),
-    ("SEQUENCE", "1, 4, 9, 16, ?", ("25",), "Find the next value in the sequence."),
-    ("SEQUENCE", "5, 10, 20, 40, ?", ("80",), "Find the next value in the sequence."),
-    ("CODE", "7-2-9-4", ("6",), "Take the largest digit and subtract the smallest digit."),
-    ("CODE", "8-3-5-1", ("9",), "Add the first and last digit."),
-    ("SEQUENCE", "2, 6, 18, 54, ?", ("162",), "Multiply each value by 3."),
-    ("SEQUENCE", "100, 90, 80, 70, ?", ("60",), "Subtract 10 each time."),
-    ("SEQUENCE", "1, 8, 27, 64, ?", ("125",), "Find the next cube."),
-    ("SEQUENCE", "2, 3, 5, 7, ?", ("11",), "Find the next prime number."),
-    ("CODE", "9-1-4-6", ("8",), "Take the largest digit and subtract the smallest digit."),
-    ("CODE", "6-2-8-3", ("6",), "Take the largest digit and subtract the smallest digit."),
-    ("SEQUENCE", "4, 8, 12, 16, ?", ("20",), "Add 4 each time."),
-    ("SEQUENCE", "81, 27, 9, 3, ?", ("1",), "Divide by 3 each time."),
-    ("SEQUENCE", "7, 14, 28, 56, ?", ("112",), "Double each value."),
-];
+def _build_hack_challenges():
+    """Build 500 deterministic, unique, solvable cyber-lab challenges."""
+    challenges = []
 
+    # 125 arithmetic-sequence gates.
+    for i in range(125):
+        answer = 1000 + i
+        step = 2 + (i % 9)
+        start_value = answer - (step * 4)
+        prompt = (
+            f"{start_value}, {start_value + step}, "
+            f"{start_value + step * 2}, {start_value + step * 3}, ?"
+        )
+        challenges.append((
+            f"SEQ-{i + 1:03d}",
+            prompt,
+            (str(answer),),
+            f"Continue the arithmetic sequence (+{step}).",
+        ))
+
+    # 125 multiplication gates.
+    for i in range(125):
+        n = 125 + i
+        answer = n * 8
+        prompt = f"{n}, {n * 2}, {n * 4}, ?"
+        challenges.append((
+            f"MUL-{i + 1:03d}",
+            prompt,
+            (str(answer),),
+            "Each value doubles. Enter the next value.",
+        ))
+
+    # 125 square-number gates.
+    for i in range(125):
+        n = 5 + i
+        answer = n * n
+        prompt = f"{n - 2}², {n - 1}², {n}², ?"
+        challenges.append((
+            f"SQ-{i + 1:03d}",
+            prompt,
+            (str(answer),),
+            f"Find the next square after {n}².",
+        ))
+
+    # 125 cube-number gates.
+    for i in range(125):
+        n = 3 + i
+        answer = n * n * n
+        prompt = f"{n - 2}³, {n - 1}³, {n}³, ?"
+        challenges.append((
+            f"CUBE-{i + 1:03d}",
+            prompt,
+            (str(answer),),
+            f"Find the next cube after {n}³.",
+        ))
+
+    return challenges
+
+
+HACK_CHALLENGES = _build_hack_challenges()
 async def _next_unique_puzzle():
-    """Atomically claim a never-used Hack challenge from MongoDB."""
-    state_id = "hack_puzzle_pool"
+    """Atomically claim one of 500 unique Hack challenges from MongoDB."""
+    state_id = "hack_puzzle_pool_v2"
     state = await games.find_one({"_id": state_id}) or {}
-    used = {str(x) for x in state.get("used_codes", [])}
+    used = {
+        str(x).strip()
+        for x in state.get("used_ids", [])
+        if str(x).strip()
+    }
 
     available = [
-        (index, challenge)
-        for index, challenge in enumerate(HACK_CHALLENGES)
-        if str(index) not in used
+        (challenge[0], challenge)
+        for challenge in HACK_CHALLENGES
+        if challenge[0] not in used
     ]
     if not available:
         return None
 
-    # A conditional update makes the claim atomic even if two groups start
-    # /hack at nearly the same time.
     random.shuffle(available)
-    for index, challenge in available:
+    for puzzle_id, challenge in available:
         result = await games.update_one(
-            {"_id": state_id, "used_codes": {"$ne": str(index)}},
+            {"_id": state_id, "used_ids": {"$ne": puzzle_id}},
             {
-                "$addToSet": {"used_codes": str(index)},
+                "$addToSet": {"used_ids": puzzle_id},
                 "$set": {
                     "total_challenges": len(HACK_CHALLENGES),
                     "updated_at": datetime.now(timezone.utc),
@@ -164,7 +208,7 @@ async def hack(update, context):
     challenge = await _next_unique_puzzle()
     if challenge is None:
         await update.message.reply_text(
-            "🧩 <b>Hack challenge pool finished!</b> No puzzle will be repeated. Ask the owner to add more challenges.",
+            "🧩 <b>Hack challenge pool finished!</b> All 500 unique challenges are used. No puzzle will be repeated.",
             parse_mode="HTML",
         )
         return
