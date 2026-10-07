@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import OWNER_ID, SUDO_IDS
-from db import get_user
+from db import get_user, next_wordgrid_words
 
 GRID_SIZE = 8
 WORD_POOL = [
@@ -76,33 +76,10 @@ def _place_word(grid: List[List[str]], word: str):
     return positions
 
 
-def _next_word_defs(context, count: int = 7):
-    """Take fresh target words without repeating until the pool is exhausted."""
-    state = context.application.bot_data
-    queue = state.setdefault("wordgrid_word_queue", [])
-
-    if len(queue) < count:
-        all_words = list(WORD_POOL)
-        used = set(state.setdefault("wordgrid_cycle_used", []))
-        remaining = [item for item in all_words if item[0] not in used]
-
-        # Start a fresh cycle only after every pool word has been used.
-        if len(remaining) < count:
-            # The current cycle is exhausted. Drop any leftover queue entries
-            # from the old cycle before starting a completely fresh cycle so
-            # no word can be selected twice during the transition.
-            queue.clear()
-            state["wordgrid_cycle_used"] = []
-            used = set()
-            remaining = all_words[:]
-
-        random.shuffle(remaining)
-        queue.extend(remaining)
-
-    selected = queue[:count]
-    del queue[:count]
-    state.setdefault("wordgrid_cycle_used", []).extend(word for word, _ in selected)
-    return selected
+async def _next_word_defs(count: int = 7):
+    """Get fresh target words from the persistent no-repeat Wordgrid pool."""
+    async with _WORDGRID_LOCK:
+        return await next_wordgrid_words(WORD_POOL, count)
 
 
 def _build_grid(word_defs=None):
@@ -382,7 +359,15 @@ async def _refresh_wordgrid_message(context, chat_id: int, active, game_over: bo
 
 
 async def send_wordgrid(message, context, user_id=None):
-    word_defs = _next_word_defs(context, 7)
+    word_defs = await _next_word_defs(7)
+    if not word_defs:
+        await message.reply_text(
+            "🏁 <b>WORDGRID POOL FINISHED!</b>\n\n"
+            "✅ Saare available target words already use ho chuke hain. "
+            "Vanya koi purana word repeat nahi karegi.",
+            parse_mode="HTML",
+        )
+        return
     grid, words, placements = _build_grid(word_defs)
     chat_id = getattr(getattr(message, "chat", None), "id", None)
     if chat_id is None:
