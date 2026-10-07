@@ -132,6 +132,7 @@ async def crash(update, context):
 
     user = update.effective_user
     uid = user.id
+    chat_id = update.effective_chat.id if update.effective_chat else None
 
     try:
         amount = int(context.args[0]) if context.args else DEFAULT_BET
