@@ -5,46 +5,69 @@ import random
 import re
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 from telegram import InputFile
 from PIL import Image, ImageOps
 
-from db import ensure_user, add_coins, record_game_result
+from db import ensure_user, add_coins, record_game_result, games
 
 REWARD = 30
 GAME_TIMEOUT = 90
 HACK_GAMES = {}
 
 
-def _new_puzzle():
-    """Return a solvable, fictional cybersecurity-lab challenge."""
-    challenges = [
-        ("SEQUENCE",
-         "2, 4, 8, 16, ?",
-         ("32",),
-         "Find the next value in the sequence."),
-        ("SEQUENCE",
-         "3, 6, 12, 24, ?",
-         ("48",),
-         "Find the next value in the sequence."),
-        ("SEQUENCE",
-         "1, 4, 9, 16, ?",
-         ("25",),
-         "Find the next value in the sequence."),
-        ("SEQUENCE",
-         "5, 10, 20, 40, ?",
-         ("80",),
-         "Find the next value in the sequence."),
-        ("CODE",
-         "7-2-9-4",
-         ("6",),
-         "Take the largest digit and subtract the smallest digit."),
-        ("CODE",
-         "8-3-5-1",
-         ("7",),
-         "Take the largest digit and subtract the smallest digit."),
+HACK_CHALLENGES = [
+    ("SEQUENCE", "2, 4, 8, 16, ?", ("32",), "Find the next value in the sequence."),
+    ("SEQUENCE", "3, 6, 12, 24, ?", ("48",), "Find the next value in the sequence."),
+    ("SEQUENCE", "1, 4, 9, 16, ?", ("25",), "Find the next value in the sequence."),
+    ("SEQUENCE", "5, 10, 20, 40, ?", ("80",), "Find the next value in the sequence."),
+    ("CODE", "7-2-9-4", ("6",), "Take the largest digit and subtract the smallest digit."),
+    ("CODE", "8-3-5-1", ("7",), "Take the largest digit and subtract the smallest digit."),
+    ("SEQUENCE", "2, 6, 18, 54, ?", ("162",), "Multiply each value by 3."),
+    ("SEQUENCE", "100, 90, 80, 70, ?", ("60",), "Subtract 10 each time."),
+    ("SEQUENCE", "1, 8, 27, 64, ?", ("125",), "Find the next cube."),
+    ("SEQUENCE", "2, 3, 5, 7, ?", ("11",), "Find the next prime number."),
+    ("CODE", "9-1-4-6", ("8",), "Take the largest digit and subtract the smallest digit."),
+    ("CODE", "6-2-8-3", ("6",), "Take the largest digit and subtract the smallest digit."),
+    ("SEQUENCE", "4, 8, 12, 16, ?", ("20",), "Add 4 each time."),
+    ("SEQUENCE", "81, 27, 9, 3, ?", ("1",), "Divide by 3 each time."),
+    ("SEQUENCE", "7, 14, 28, 56, ?", ("112",), "Double each value."),
+];
+
+async def _next_unique_puzzle():
+    """Atomically claim a never-used Hack challenge from MongoDB."""
+    state_id = "hack_puzzle_pool"
+    state = await games.find_one({"_id": state_id}) or {}
+    used = {str(x) for x in state.get("used_codes", [])}
+
+    available = [
+        (index, challenge)
+        for index, challenge in enumerate(HACK_CHALLENGES)
+        if str(index) not in used
     ]
-    return random.choice(challenges)
+    if not available:
+        return None
+
+    # A conditional update makes the claim atomic even if two groups start
+    # /hack at nearly the same time.
+    random.shuffle(available)
+    for index, challenge in available:
+        result = await games.update_one(
+            {"_id": state_id, "used_codes": {"$ne": str(index)}},
+            {
+                "$addToSet": {"used_codes": str(index)},
+                "$set": {
+                    "total_challenges": len(HACK_CHALLENGES),
+                    "updated_at": datetime.now(timezone.utc),
+                },
+            },
+            upsert=True,
+        )
+        if result.modified_count == 1 or result.upserted_id:
+            return challenge
+
+    return None
 
 
 def _terminal_text(stage, target, ports, challenge=None, extra=""):
@@ -138,7 +161,14 @@ async def hack(update, context):
     if current:
         HACK_GAMES.pop(chat_id, None)
 
-    challenge = _new_puzzle()
+    challenge = await _next_unique_puzzle()
+    if challenge is None:
+        await update.message.reply_text(
+            "🧩 <b>Hack challenge pool finished!</b> No puzzle will be repeated. Ask the owner to add more challenges.",
+            parse_mode="HTML",
+        )
+        return
+
     target = f"192.0.2.{random.randint(10, 240)}"
     ports = ",".join(str(p) for p in random.sample([22, 80, 443, 8080], 3))
     boot = _terminal_text("BOOTING", target, ports, extra="Preparing simulated security lab…")
