@@ -994,6 +994,10 @@ def chess_state(room, you=None):
         'draw':bool(room.get('draw') or (b and b.is_draw())),
         'history':room.get('history',[])[-80:],
         'last_move':room.get('last_move'),
+        'legal_moves':([
+            {'from':chesslib.square_name(m.from_square),'to':chesslib.square_name(m.to_square),'color':('white' if b.turn else 'black')}
+            for m in list(b.legal_moves)
+        ] if b else []),
         'reward_coins':int(room.get('reward_coins',0) or 0),
         'reward_points':int(room.get('reward_points',0) or 0),
         'chat':room['chat'][-30:]
