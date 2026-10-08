@@ -199,7 +199,7 @@ async def chess(update, context):
 
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("♟️ Open Chess Room", url=launch_url)],
-            [InlineKeyboardButton("👤 Join This Chess Room", **{"url": launch_url})],
+            [InlineKeyboardButton("👤 Join This Chess Room", url=launch_url)],
             [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")],
         ])
         await update.message.reply_text(
