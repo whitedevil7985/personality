@@ -128,13 +128,29 @@ function api(url,opts){return fetch(url,opts).then(r=>r.json())}
 async function ensureRoom(){
   if(room)return true;
   const gc=qs.get('gc');
-  const r=await api('/api/chess/rooms'+(gc?'?gc='+encodeURIComponent(gc):''),{method:'POST'});
-  if(!r.ok){showError(r.error||'Could not create room');return false}
-  room=String(r.room).toUpperCase();
-  history.replaceState({},'',location.pathname+'?room='+encodeURIComponent(room));
-  return true;
+  try{
+    const r=await api('/api/chess/rooms'+(gc?'?gc='+encodeURIComponent(gc):''),{method:'POST'});
+    if(!r?.ok) throw new Error(r?.error||'Chess room could not be created.');
+    room=String(r.room||'').toUpperCase();
+    if(!room) throw new Error('Server returned an empty Chess room code.');
+    // Keep Telegram's secure initData/token query intact when present.
+    const params=new URLSearchParams(location.search);
+    params.set('room',room);
+    history.replaceState({},'',location.pathname+'?'+params.toString());
+    return true;
+  }catch(err){
+    showFatal(err?.message||'Could not connect to the Chess server.');
+    return false;
+  }
 }
-function showError(msg){const el=document.querySelector('.err');if(el)el.textContent=msg}
+function showError(msg){
+  document.querySelectorAll('.err').forEach(el=>el.textContent=String(msg||''));
+}
+function showFatal(msg){
+  appBoard.innerHTML='<div class="finish"><h2>⚠️ Chess connection failed</h2><p class="status">'+esc(msg)+'</p><div class="actions"><button class="btn primary" id="retryRoom">↻ Retry</button><button class="btn" id="reloadRoom">⟳ Reload</button></div><div class="err" style="margin-top:10px"></div></div>';
+  document.getElementById('retryRoom').onclick=async()=>{appBoard.innerHTML='<div class="lobby"><h2>♟️ Reconnecting…</h2><p class="status">Trying the Chess server again.</p></div>';await ensureRoom();if(room){connect()}};
+  document.getElementById('reloadRoom').onclick=()=>location.reload();
+}
 function send(data){if(ws&&ws.readyState===1)ws.send(JSON.stringify(data))}
 function player(id){return (state?.players||[]).find(p=>String(p.id)===String(id))}
 function myPlayer(){return player(state?.you)}
@@ -182,7 +198,7 @@ function boardView(){
   document.querySelectorAll('.sq').forEach(b=>b.onclick=()=>clickSquare(b.dataset.sq));
 }
 function renderBoard(){
-  if(!state){appBoard.innerHTML='<div class="lobby"><h2>♟️ Connecting to Vanya Chess…</h2><p>Opening your secure room.</p></div>';return}
+  if(!state){appBoard.innerHTML='<div class="lobby"><h2>♟️ Connecting to Vanya Chess…</h2><p>Opening your secure room.</p><div class="err">Waiting for the game server…</div></div>';return}
   if(!state.started&& !finished()){
     appBoard.innerHTML='<div class="lobby"><div class="roombar"><div><div class="status">ROOM CODE</div><div class="room-code">'+esc(room)+'</div></div><div class="status">'+(state.players||[]).length+'/2 players</div></div>'+
       '<h2>♟️ Chess lobby</h2><p>Join the same room, then start the match. You can also add a bot.</p>'+
@@ -249,18 +265,28 @@ function openPromotion(){
   document.getElementById('modalRoot').innerHTML='<div class="modal"><div class="modal-card"><h2 style="margin:0 0 6px">Choose promotion</h2><p style="color:var(--muted);margin:0">Your pawn reached the final rank.</p><div class="promo-grid">'+icons.map((x,i)=>'<button class="promo" data-piece="'+codes[i]+'">'+x+'</button>').join('')+'</div></div></div>';
   document.querySelectorAll('.promo').forEach(b=>b.onclick=()=>{send({type:'move',uci:promotion.from+promotion.to+b.dataset.piece});promotion=null;document.getElementById('modalRoot').innerHTML='';selected=null});
 }
+let connectAttempts=0;
 function connect(){
-  if(ended)return;
+  if(ended||!room)return;
+  clearTimeout(reconnectTimer);
   const wsUrl=location.origin.replace(/^http/,'ws')+'/ws/chess/'+encodeURIComponent(room)+'?initData='+encodeURIComponent(tg?.initData||'')+'&token='+encodeURIComponent(token);
-  ws=new WebSocket(wsUrl);
-  ws.onopen=()=>send({type:'join',name:name()});
+  try{ws=new WebSocket(wsUrl)}catch(err){showFatal(err?.message||'WebSocket could not start.');return}
+  ws.onopen=()=>{connectAttempts=0;send({type:'join',name:name()})};
+  ws.onerror=()=>{showError('Chess connection error. Retrying…')};
   ws.onmessage=e=>{
     let d;try{d=JSON.parse(e.data)}catch(_){return}
     if(d.type==='error'){showError(d.message||'Chess error');return}
-    if(d.type==='state'){state=d;render()}
+    if(d.type==='state'){state=d;selected=null;render()}
     if(d.type==='game_ended'){ended=true;state=null;appBoard.innerHTML='<div class="finish"><h2>🛑 GAME ENDED</h2><p class="status">'+esc(d.message||'This room was ended from Telegram.')+'</p></div>';return}
   };
-  ws.onclose=()=>{if(!ended){clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connect,1600)}};
+  ws.onclose=()=>{
+    if(ended)return;
+    connectAttempts++;
+    const delay=Math.min(5000,800+connectAttempts*400);
+    showError('Chess server disconnected. Reconnecting…');
+    clearTimeout(reconnectTimer);
+    reconnectTimer=setTimeout(connect,delay);
+  };
 }
 (async()=>{const ok=await ensureRoom();if(ok){render();connect()}})();
 </script>
