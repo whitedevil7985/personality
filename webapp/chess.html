@@ -304,7 +304,7 @@ function connect(){
       try{ws.close()}catch(_){}
       httpMode=true; clearTimeout(httpTimer); pollHttp(); showError('WebSocket unavailable — using secure HTTP game mode.');
     }
-  },10000);
+  },3500);
   ws.onopen=()=>{
     clearTimeout(connectTimer);
     connectAttempts=0;
