@@ -216,14 +216,32 @@ async def chess(update, context):
         )
         return
 
-    # In a private Telegram Mini App, WebApp initData securely identifies the user.
+    # Create the private room and bind the first seat before launching the
+    # Mini App. This avoids depending solely on Telegram initData, which some
+    # Telegram WebViews intermittently omit and which previously left Chess
+    # stuck on "Starting Vanya Chess...".
+    try:
+        from webserver import create_chess_room_for_group, create_chess_join_token
+        room_code = await create_chess_room_for_group(None)
+        token = create_chess_join_token(room_code, update.effective_user.id)
+        if not room_code or not token:
+            raise RuntimeError("Could not create secure Chess room")
+        launch_url = _room_url(webapp_url, room_code) + "&token=" + token
+    except Exception as exc:
+        await update.message.reply_text(
+            f"⚠️ Chess room create nahi ho saka: {html.escape(str(exc))}",
+            parse_mode="HTML",
+        )
+        return
+
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("♟️ Play Chess", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton("♟️ Play Chess", web_app=WebAppInfo(url=launch_url))],
         [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")],
     ])
     await update.message.reply_text(
         "♟️ <b>Vanya Chess</b>\n\n"
-        "Create a room, invite one player, or add a bot, then play directly inside Telegram.\n\n"
+        f"Room: <code>{html.escape(room_code)}</code>\n"
+        "Secure Telegram seat ready hai. Ab opponent ko invite karo ya bot add karke play karo.\n\n"
         "🏆 Winner: <b>+750 points +750 coins</b>",
         parse_mode="HTML",
         reply_markup=keyboard,
