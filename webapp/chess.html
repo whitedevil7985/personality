@@ -161,10 +161,17 @@ function boardView(){
     const lastCls=(last.from===sq||last.to===sq)?' last':'';
     const light=((['a','b','c','d','e','f','g','h'].indexOf(f)+r)%2===0);
     const canMove=mp&&((mp.color==='white'&&state.turn==='white')||(mp.color==='black'&&state.turn==='black'));
-    let targetCls='';
-    if(selected&&canMove&&sq!==selected) targetCls=' dot';
+    const legalTargets=new Set();
+    if(selected&&canMove){
+      try{
+        const fromPiece=(state.pieces||[]).find(x=>x.square===selected)?.piece||'';
+        const moverColor=fromPiece===fromPiece.toUpperCase()?'white':'black';
+        (state.legal_moves||[]).filter(m=>m.from===selected && m.color===moverColor).forEach(m=>legalTargets.add(m.to));
+      }catch(_){}
+    }
+    const isTarget=legalTargets.has(sq) && sq!==selected;
     let inner=piece?'<span class="piece '+(piece===piece.toUpperCase()?'white-piece':'black-piece')+'">'+piece+'</span>':'';
-    if(targetCls) inner+='<span class="dot"></span>';
+    if(isTarget) inner+='<span class="'+(piece?'capture':'dot')+'"></span>';
     const rankLabel=(flipped?ri===7:ri===0)?r:'';
     const fileLabel=(flipped?fi===0:fi===7)?f:'';
     html+='<button class="sq '+(light?'light':'dark')+selectedCls+lastCls+'" data-sq="'+sq+'">'+inner+
@@ -228,6 +235,8 @@ function clickSquare(sq){
     selected=sq;boardView();return;
   }
   if(selected===sq){selected=null;boardView();return}
+  const legal=(state.legal_moves||[]).some(m=>m.from===selected&&m.to===sq);
+  if(!legal){selected=null;boardView();return}
   const source=(state.pieces||[]).find(x=>x.square===selected);
   const sourcePiece=source?.piece||'';
   const promoting=(sourcePiece==='♙'&&sq.endsWith('8'))||(sourcePiece==='♟'&&sq.endsWith('1'));
