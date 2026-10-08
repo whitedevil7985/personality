@@ -1105,6 +1105,60 @@ async def create_chess_room(request):
         code=new_code(); room=new_chess_room(); room['code']=code; room['group_id']=request_group_id(request); CHESS_ROOMS[code]=room
     return web.json_response({'ok':True,'room':code})
 
+async def chess_claim(request):
+    """Verify Telegram initData and mint a fresh signed Chess seat token."""
+    code=request.match_info['code'].upper()
+    room=CHESS_ROOMS.get(code)
+    if not room:
+        return web.json_response({'ok':False,'error':'Chess room expired. Open a fresh /chess room.'},status=404)
+
+    tg_user=verify_telegram_init_data(request.query.get('initData',''))
+    if not tg_user:
+        return web.json_response({
+            'ok':False,
+            'error':'Telegram verification is unavailable. Re-open this Chess room from Vanya.'
+        },status=401)
+
+    uid=int(tg_user['id'])
+    token=create_chess_join_token(code,uid)
+    if not token:
+        return web.json_response({'ok':False,'error':'Could not create a secure Chess seat.'},status=500)
+
+    name=(tg_user.get('first_name') or request.query.get('name') or 'Player').strip()[:32] or 'Player'
+
+    async with CHESS_LOCK:
+        existing=next((p for p in room['players'] if str(p.get('id'))==str(uid)),None)
+        if existing:
+            existing['name']=name
+            existing['telegram_id']=uid
+            existing['connected']=True
+        else:
+            if len(room['players'])>=2:
+                return web.json_response({
+                    'ok':False,
+                    'error':'Room is full. Only 2 Telegram players can join.'
+                },status=409)
+            color='white' if not any(p.get('color')=='white' for p in room['players']) else 'black'
+            existing={
+                'id':str(uid),
+                'telegram_id':uid,
+                'name':name,
+                'color':color,
+                'bot':False,
+                'connected':True,
+                'ws':None,
+            }
+            room['players'].append(existing)
+        room['updated']=time.time()
+
+    return web.json_response({
+        'ok':True,
+        'room':code,
+        'token':token,
+        'state':chess_state(room,str(uid)),
+    })
+
+
 async def chess_http_state(request):
     code=request.match_info['code'].upper()
     token=request.query.get('token','')
@@ -2094,7 +2148,7 @@ async def start_web_server():
     app.router.add_get('/',health); app.router.add_get('/health',health); app.router.add_get('/api/config',config)
     app.router.add_post('/api/rooms',create_ludo_room); app.router.add_post('/api/uno/rooms',create_uno_room); app.router.add_post('/api/chess/rooms',create_chess_room); app.router.add_post('/api/scribble/rooms',create_scribble_room); app.router.add_post('/api/kingdom/rooms',create_kingdom_room)
     app.router.add_get('/ludo',ludo_page); app.router.add_get('/ws/ludo/{code}',ludo_ws); app.router.add_get('/scribble',scribble_page); app.router.add_get('/ws/scribble/{code}',scribble_ws)
-    app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/chess-live',chess_page); app.router.add_get('/api/chess/state/{code}',chess_http_state); app.router.add_post('/api/chess/action/{code}',chess_http_action); app.router.add_get('/ws/chess/{code}',chess_ws); app.router.add_get('/kingdom-wars',kingdom_page); app.router.add_get('/ws/kingdom/{code}',kingdom_ws )
+    app.router.add_get('/uno',uno_page); app.router.add_get('/ws/uno/{code}',uno_ws); app.router.add_get('/chess',chess_page); app.router.add_get('/chess-live',chess_page); app.router.add_get('/api/chess/claim/{code}',chess_claim); app.router.add_get('/api/chess/state/{code}',chess_http_state); app.router.add_post('/api/chess/action/{code}',chess_http_action); app.router.add_get('/ws/chess/{code}',chess_ws); app.router.add_get('/kingdom-wars',kingdom_page); app.router.add_get('/ws/kingdom/{code}',kingdom_ws )
     # Vanya World aliases all point to the same 3D page; query ?tab= selects City/Room/Pet.
     world_page = lambda request: web.FileResponse(WEB/'vanya_world.html')
     app.router.add_get('/vanya-city', world_page); app.router.add_get('/world', world_page); app.router.add_get('/vanya-world', world_page)
