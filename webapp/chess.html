@@ -265,22 +265,53 @@ function openPromotion(){
   document.getElementById('modalRoot').innerHTML='<div class="modal"><div class="modal-card"><h2 style="margin:0 0 6px">Choose promotion</h2><p style="color:var(--muted);margin:0">Your pawn reached the final rank.</p><div class="promo-grid">'+icons.map((x,i)=>'<button class="promo" data-piece="'+codes[i]+'">'+x+'</button>').join('')+'</div></div></div>';
   document.querySelectorAll('.promo').forEach(b=>b.onclick=()=>{send({type:'move',uci:promotion.from+promotion.to+b.dataset.piece});promotion=null;document.getElementById('modalRoot').innerHTML='';selected=null});
 }
-let connectAttempts=0;
+let connectAttempts=0,connectTimer=null,lastWsError='';
 function connect(){
   if(ended||!room)return;
   clearTimeout(reconnectTimer);
+  clearTimeout(connectTimer);
   const wsUrl=location.origin.replace(/^http/,'ws')+'/ws/chess/'+encodeURIComponent(room)+'?initData='+encodeURIComponent(tg?.initData||'')+'&token='+encodeURIComponent(token);
   try{ws=new WebSocket(wsUrl)}catch(err){showFatal(err?.message||'WebSocket could not start.');return}
-  ws.onopen=()=>{connectAttempts=0;send({type:'join',name:name()})};
-  ws.onerror=()=>{showError('Chess connection error. Retrying…')};
+  connectTimer=setTimeout(()=>{
+    if(ws && ws.readyState!==WebSocket.OPEN){
+      lastWsError='The Chess server did not accept the connection in time.';
+      try{ws.close()}catch(_){}
+      showFatal(lastWsError+' Please open a fresh Chess room from Vanya.');
+    }
+  },10000);
+  ws.onopen=()=>{
+    clearTimeout(connectTimer);
+    connectAttempts=0;
+    lastWsError='';
+    send({type:'join',name:name()});
+  };
+  ws.onerror=()=>{
+    clearTimeout(connectTimer);
+    lastWsError='Chess WebSocket connection failed.';
+    showError(lastWsError+' Retrying…');
+  };
   ws.onmessage=e=>{
     let d;try{d=JSON.parse(e.data)}catch(_){return}
-    if(d.type==='error'){showError(d.message||'Chess error');return}
-    if(d.type==='state'){state=d;selected=null;render()}
-    if(d.type==='game_ended'){ended=true;state=null;appBoard.innerHTML='<div class="finish"><h2>🛑 GAME ENDED</h2><p class="status">'+esc(d.message||'This room was ended from Telegram.')+'</p></div>';return}
+    if(d.type==='error'){
+      clearTimeout(connectTimer);
+      lastWsError=d.message||'Chess server rejected the connection.';
+      showFatal(lastWsError);
+      try{ws.close()}catch(_){}
+      return;
+    }
+    if(d.type==='state'){
+      clearTimeout(connectTimer);
+      state=d;selected=null;render();
+    }
+    if(d.type==='game_ended'){
+      clearTimeout(connectTimer);
+      ended=true;state=null;appBoard.innerHTML='<div class="finish"><h2>🛑 GAME ENDED</h2><p class="status">'+esc(d.message||'This room was ended from Telegram.')+'</p></div>';return
+    }
   };
   ws.onclose=()=>{
+    clearTimeout(connectTimer);
     if(ended)return;
+    if(lastWsError)return;
     connectAttempts++;
     const delay=Math.min(5000,800+connectAttempts*400);
     showError('Chess server disconnected. Reconnecting…');
