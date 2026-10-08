@@ -166,9 +166,11 @@ def get_chess_webapp_url():
     if not webapp_url: return ""
     if not webapp_url.startswith(("https://", "http://")): webapp_url = "https://" + webapp_url
     webapp_url = webapp_url.rstrip("/")
-    if not webapp_url.lower().endswith("/chess"): webapp_url += "/chess"
-    # Force Telegram's in-app browser to fetch the current Chess frontend.
-    # This is intentionally bumped when the Chess client changes.
+    # Use a new frontend path so Telegram cannot reuse the old /chess WebView cache.
+    if webapp_url.lower().endswith("/chess"):
+        webapp_url = webapp_url[:-6] + "/chess-live"
+    elif not webapp_url.lower().endswith("/chess-live"):
+        webapp_url += "/chess-live"
     webapp_url += ("&" if "?" in webapp_url else "?") + "v=20261008"
     return webapp_url
 
