@@ -172,7 +172,7 @@ async function pollHttp(){
     showError('');
   }catch(e){showError(e.message||'Chess HTTP fallback is unavailable.')}
   clearTimeout(httpTimer);
-  httpTimer=setTimeout(pollHttp,1200);
+  httpTimer=setTimeout(pollHttp,600);
 }
 function send(data){
   if(ws&&ws.readyState===1&&!httpMode){ws.send(JSON.stringify(data));return}
@@ -345,7 +345,15 @@ function connect(){
     reconnectTimer=setTimeout(connect,delay);
   };
 }
-(async()=>{const ok=await ensureRoom();if(ok){render();connect()}})();
+(async()=>{
+  // Telegram WebView/Railway can keep a WebSocket stuck in CONNECTING.
+  // Chess therefore starts in the reliable HTTP realtime mode directly.
+  appBoard.innerHTML='<div class="lobby"><h2>♟️ Starting Vanya Chess…</h2><p>Opening your secure room.</p><div class="err">Connecting to the Chess server…</div></div>';
+  const ok=await ensureRoom();
+  if(!ok)return;
+  httpMode=true;
+  await pollHttp();
+})();
 </script>
 </body>
 </html>
