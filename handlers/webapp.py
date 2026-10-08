@@ -169,7 +169,7 @@ def get_chess_webapp_url():
     if not webapp_url.lower().endswith("/chess"): webapp_url += "/chess"
     # Force Telegram's in-app browser to fetch the current Chess frontend.
     # This is intentionally bumped when the Chess client changes.
-    webapp_url += ("&" if "?" in webapp_url else "?") + "v=20261008
+    webapp_url += ("&" if "?" in webapp_url else "?") + "v=20261008"
     return webapp_url
 
 async def chess(update, context):
