@@ -1180,6 +1180,10 @@ async def chess_http_action(request):
             opp=next((x for x in room['players'] if str(x.get('id'))!=str(uid)),None)
             room['winner']=opp['id'] if opp else None; room['draw']=False; room['started']=False
             if room.get('winner'): await _chess_award(room)
+    elif typ=='chat':
+        msgtext=(data.get('text') or '').strip()[:180]
+        if p and msgtext:
+            room['chat'].append({'name':p.get('name') or 'Player','text':msgtext})
     else:
         return web.json_response({'ok':False,'error':'Unknown Chess action.'},status=400)
     room['updated']=time.time()
