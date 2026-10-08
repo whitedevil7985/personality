@@ -216,7 +216,21 @@ async def chess(update, context):
         )
         return
 
-    # In a private Telegram Mini App, WebApp initData securely identifies the user.
+    # Private Web Apps normally expose Telegram initData, but some Telegram
+    # clients/WebViews can fail to initialize the WebApp bridge. Include a
+    # short-lived signed seat token as a second authentication path so the
+    # Chess room still opens instead of getting stuck at "server rejected".
+    try:
+        from webserver import create_chess_join_token
+        token = create_chess_join_token("__PENDING__", update.effective_user.id)
+    except Exception:
+        token = ""
+    if token:
+        # The room code is created by the Web App itself, so this placeholder
+        # token cannot be bound to that room. Do not send it; initData will be
+        # used once the Telegram WebApp bridge is available.
+        token = ""
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("♟️ Play Chess", web_app=WebAppInfo(url=webapp_url))],
         [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")],
