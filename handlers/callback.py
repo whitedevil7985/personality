@@ -11,6 +11,37 @@ del _core, _sys
 async def callback(update,context):
     q=update.callback_query;data=q.data
 
+    if data.startswith("cj:"):
+        room_code = data.split(":", 1)[1].strip().upper()
+        if not re.fullmatch(r"[A-HJ-NP-Z2-9]{6}", room_code):
+            await q.answer("Invalid Chess room.", show_alert=True)
+            return
+        try:
+            from webserver import CHESS_ROOMS, create_chess_join_token
+            room = CHESS_ROOMS.get(room_code)
+            if not room or room.get("ended"):
+                await q.answer("This Chess room has expired. Start a fresh /chess room.", show_alert=True)
+                return
+            if update.effective_chat and room.get("group_id") not in (None, update.effective_chat.id):
+                await q.answer("This Chess room belongs to another group.", show_alert=True)
+                return
+            token = create_chess_join_token(room_code, q.from_user.id)
+            join_url = get_chess_webapp_url().rstrip("/") + "?room=" + room_code + "&token=" + token
+            try:
+                await context.bot.send_message(
+                    chat_id=q.from_user.id,
+                    text="♟️ <b>Vanya Chess</b>\n\nYour private seat link is ready. Tap below to join this room.",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("♟️ Join Chess Room", url=join_url)]])
+                )
+                await q.answer("✅ Private Chess link sent to your DM.", show_alert=False)
+            except Exception:
+                await q.answer("Start Vanya in DM first, then tap Join again.", show_alert=True)
+        except Exception as exc:
+            print(f"[ChessJoin] {type(exc).__name__}: {exc}")
+            await q.answer("Could not create your Chess seat. Try again.", show_alert=True)
+        return
+
     if data.startswith("dailygame:"):
         await random_game_callback(update, context)
         return
