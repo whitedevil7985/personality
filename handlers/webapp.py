@@ -57,7 +57,7 @@ def _latest_group_web_room(group_id, prefix=None, code=None):
         ]
 
     for room in reversed(rooms):
-        if room.get("group_id") == group_id and not room.get("ended") and not room.get("winner"):
+        if room.get("group_id") == group_id and not room.get("ended") and not room.get("winner") and not room.get("draw"):
             return room
     return None
 
