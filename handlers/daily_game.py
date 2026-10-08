@@ -196,12 +196,16 @@ async def random_game_scheduler(bot):
                     )
                 ]])
 
+                game_label = html.escape(label)
                 text = (
-                    "🎮 <b>VANYA DAILY GAME DROP!</b> 🎮\n\n"
-                    f"👀 <b>{title}</b>, aaj ka random game aa gaya!\n\n"
-                    f"🔥 <b>{html.escape(label)}</b>\n"
-                    "🏆 Jump in and play with the group!\n\n"
-                    "👇 <b>Tap START THIS GAME</b>"
+                    "╭━━━〔 🎮 <b>VANYA DAILY DROP</b> 〕━━━╮\n"
+                    f"👋 <b>{title}</b>\n\n"
+                    "✨ <b>Today's random pick is here!</b>\n"
+                    f"🔥 <b>{game_label}</b>\n\n"
+                    "👥 <b>Gather the group & jump in!</b>\n"
+                    "⚡ Quick game • Live fun • One daily drop\n\n"
+                    "╰━━━━━━━━━━━━━━━━━━━━╯\n"
+                    "👇 <b>Tap below to PLAY NOW</b> 🎯"
                 )
 
                 try:
