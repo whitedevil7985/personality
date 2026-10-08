@@ -104,6 +104,10 @@ async def start_daily_random_game(update, context, game_key):
 
     try:
         await q.answer(f"Starting {label}…")
+        try:
+            await q.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
         proxy = SimpleNamespace(
             message=q.message,
             effective_message=q.message,
@@ -137,6 +141,13 @@ async def random_game_scheduler(bot):
             await asyncio.sleep(CHECK_INTERVAL)
             now_utc = datetime.now(timezone.utc)
             today_key = now_utc.astimezone(IST).strftime("%Y-%m-%d")
+
+            # Initialize a random daily slot for newly tracked groups.
+            active_groups = groups.find({"active": {"$ne": False}})
+            async for active_group in active_groups:
+                group_id = active_group.get("_id")
+                if group_id is not None and not active_group.get("random_game_next_at"):
+                    await _ensure_next_time(group_id, now_utc)
 
             cursor = groups.find({
                 "active": {"$ne": False},
