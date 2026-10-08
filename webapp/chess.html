@@ -120,7 +120,7 @@ button{font:inherit}
 const qs=new URLSearchParams(location.search);
 const tg=window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
-let ws=null,room=(qs.get('room')||'').toUpperCase(),token=qs.get('token')||'',state=null,selected=null,promotion=null,flipped=false,ended=false,reconnectTimer=null;
+let ws=null,httpMode=false,httpTimer=null,httpBusy=false,room=(qs.get('room')||'').toUpperCase(),token=qs.get('token')||'',state=null,selected=null,promotion=null,flipped=false,ended=false,reconnectTimer=null;
 const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const appBoard=document.getElementById('boardPanel'),appSide=document.getElementById('sidePanel');
 const name=()=>tg?.initDataUnsafe?.user?.first_name||'Player';
@@ -151,7 +151,33 @@ function showFatal(msg){
   document.getElementById('retryRoom').onclick=async()=>{appBoard.innerHTML='<div class="lobby"><h2>♟️ Reconnecting…</h2><p class="status">Trying the Chess server again.</p></div>';await ensureRoom();if(room){connect()}};
   document.getElementById('reloadRoom').onclick=()=>location.reload();
 }
-function send(data){if(ws&&ws.readyState===1)ws.send(JSON.stringify(data))}
+async function httpAction(data){
+  if(httpBusy)return;
+  httpBusy=true;
+  try{
+    const r=await fetch('/api/chess/action/'+encodeURIComponent(room)+'?token='+encodeURIComponent(token)+'&initData='+encodeURIComponent(tg?.initData||''),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),cache:'no-store'});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw new Error(d.error||'Chess action failed.');
+    if(d.state){state=d.state;render()}
+  }catch(e){showError(e.message||'Chess server request failed.')}finally{httpBusy=false}
+}
+async function pollHttp(){
+  if(!httpMode||ended||!room)return;
+  try{
+    const url='/api/chess/state/'+encodeURIComponent(room)+'?token='+encodeURIComponent(token)+'&initData='+encodeURIComponent(tg?.initData||'')+'&name='+encodeURIComponent(name());
+    const r=await fetch(url,{cache:'no-store'});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw new Error(d.error||'Chess server rejected the request.');
+    if(d.state){state=d.state;render()}
+    showError('');
+  }catch(e){showError(e.message||'Chess HTTP fallback is unavailable.')}
+  clearTimeout(httpTimer);
+  httpTimer=setTimeout(pollHttp,1200);
+}
+function send(data){
+  if(ws&&ws.readyState===1&&!httpMode){ws.send(JSON.stringify(data));return}
+  httpAction(data);
+}
 function player(id){return (state?.players||[]).find(p=>String(p.id)===String(id))}
 function myPlayer(){return player(state?.you)}
 function winnerName(){return player(state?.winner)?.name||'Winner'}
@@ -274,9 +300,9 @@ function connect(){
   try{ws=new WebSocket(wsUrl)}catch(err){showFatal(err?.message||'WebSocket could not start.');return}
   connectTimer=setTimeout(()=>{
     if(ws && ws.readyState!==WebSocket.OPEN){
-      lastWsError='The Chess server did not accept the connection in time.';
+      lastWsError='The Chess WebSocket did not respond. Switching to secure HTTP mode.';
       try{ws.close()}catch(_){}
-      showFatal(lastWsError+' Please open a fresh Chess room from Vanya.');
+      httpMode=true; clearTimeout(httpTimer); pollHttp(); showError('WebSocket unavailable — using secure HTTP game mode.');
     }
   },10000);
   ws.onopen=()=>{
@@ -287,8 +313,8 @@ function connect(){
   };
   ws.onerror=()=>{
     clearTimeout(connectTimer);
-    lastWsError='Chess WebSocket connection failed.';
-    showError(lastWsError+' Retrying…');
+    if(!state){httpMode=true;clearTimeout(httpTimer);pollHttp();showError('WebSocket unavailable — using secure HTTP game mode.');}
+    else {lastWsError='Chess WebSocket connection failed.';showError(lastWsError+' Retrying…');}
   };
   ws.onmessage=e=>{
     let d;try{d=JSON.parse(e.data)}catch(_){return}
@@ -311,7 +337,7 @@ function connect(){
   ws.onclose=()=>{
     clearTimeout(connectTimer);
     if(ended)return;
-    if(lastWsError)return;
+    if(lastWsError&&!httpMode)return;
     connectAttempts++;
     const delay=Math.min(5000,800+connectAttempts*400);
     showError('Chess server disconnected. Reconnecting…');
