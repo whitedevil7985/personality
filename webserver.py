@@ -1105,7 +1105,14 @@ async def create_chess_room(request):
         code=new_code(); room=new_chess_room(); room['code']=code; room['group_id']=request_group_id(request); CHESS_ROOMS[code]=room
     return web.json_response({'ok':True,'room':code})
 
-async def chess_page(request): return web.FileResponse(WEB/'chess.html')
+async def chess_page(request):
+    # Chess frontend changes must reach Telegram's in-app browser immediately.
+    # Prevent stale cached HTML from keeping an older WebSocket client alive.
+    response = web.FileResponse(WEB/'chess.html')
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 async def maybe_chess_bot_turn(room):
     await asyncio.sleep(.65)
