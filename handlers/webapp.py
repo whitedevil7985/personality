@@ -202,15 +202,14 @@ async def chess(update, context):
             return
 
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("♟️ Open Chess Room", url=launch_url)],
-            [InlineKeyboardButton("👤 Join This Chess Room", callback_data=f"cj:{room_code}")],
+            [InlineKeyboardButton("♟️ Join Chess Securely", callback_data=f"cj:{room_code}")],
             [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")],
         ])
         await update.message.reply_text(
             "♟️ <b>Vanya Chess</b>\n\n"
             f"Room: <code>{html.escape(room_code)}</code>\n"
-            "Tumhara seat Telegram account se securely linked hai.\n"
-            "Dusra player <code>/chessjoin</code> kare.\n\n"
+            "Tumhara Telegram seat secure link se verify hoga.\n"
+            "Har Telegram ID ko is room mein sirf 1 seat milegi.\n\n"
             "🏆 Winner: <b>+750 points +750 coins</b>",
             parse_mode="HTML",
             reply_markup=keyboard,
