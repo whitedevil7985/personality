@@ -992,7 +992,7 @@ def chess_state(room, you=None):
         'check':bool(b and b.is_check()),
         'checkmate':bool(b and b.is_checkmate()),
         'stalemate':bool(b and b.is_stalemate()),
-        'draw':bool(room.get('draw') or (b and b.is_draw())),
+        'draw':bool(room.get('draw') or (b and b.is_game_over() and not b.is_checkmate())),
         'history':room.get('history',[])[-80:],
         'last_move':room.get('last_move'),
         'legal_moves':([
