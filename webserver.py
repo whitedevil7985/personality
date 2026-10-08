@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote
 from aiohttp import web, WSMsgType
-from db import users, ensure_user, add_coins, add_xp, record_game_result
+from db import users, ensure_user, add_coins, add_xp, record_game_result, games
 try:
     import chess as chesslib
 except Exception:
@@ -1011,8 +1011,8 @@ def chess_current_player(room):
     return next((p for p in room['players'] if p['color']==color),None)
 
 async def _chess_award(room):
-    """Reward the Telegram winner once and record Chess leaderboard points."""
-    if room.get('payout_done') or not room.get('winner'):
+    """Reward the Telegram winner exactly once, even after a transient DB error."""
+    if not room.get('winner'):
         return
     winner_id = str(room.get('winner'))
     winner = next((p for p in room.get('players', []) if str(p.get('id')) == winner_id), None)
@@ -1023,22 +1023,67 @@ async def _chess_award(room):
     except (TypeError, ValueError):
         # Browser-only guests do not have a Telegram balance.
         return
-    room['payout_done'] = True
+
+    room_code = str(room.get('code') or 'unknown')
+    reward_key = f"chess:{room_code}:{numeric_uid}"
+
+    # Coin credit is guarded by a per-room marker on the user document.
+    # A retry can therefore never pay the same Chess win twice.
+    await ensure_user(type('ChessUser', (), {
+        'id': numeric_uid,
+        'first_name': winner.get('name') or 'Player',
+        'username': None,
+    })())
     try:
-        await add_coins(numeric_uid, 750)
-        await add_xp(numeric_uid, 100)
-        await record_game_result(
-            numeric_uid,
-            'CHESS',
-            points=750,
-            won=True,
-            chat_id=room.get('group_id'),
+        coin_result = await users.update_one(
+            {'_id': numeric_uid, 'chess_reward_rooms': {'$ne': room_code}},
+            {
+                '$inc': {'coins': 750},
+                '$addToSet': {'chess_reward_rooms': room_code},
+            },
         )
-        room['reward_coins'] = 750
-        room['reward_points'] = 750
     except Exception as exc:
+        print(f"[Chess][RewardCoins] {type(exc).__name__}: {exc}")
+        return
+
+    try:
+        already_paid = coin_result.modified_count == 0
+    except Exception:
+        already_paid = False
+
+    if not already_paid:
+        try:
+            await add_xp(numeric_uid, 100)
+        except Exception as exc:
+            print(f"[Chess][RewardXP] {type(exc).__name__}: {exc}")
+
+    # Leaderboard entry is also idempotent by room + winner.
+    # The write uses a deterministic _id, so retries cannot duplicate points.
+    try:
+        await games.update_one(
+            {'_id': reward_key},
+            {
+                '$setOnInsert': {
+                    'uid': numeric_uid,
+                    'game': 'CHESS',
+                    'points': 750,
+                    'wins': 1,
+                    'chat_id': room.get('group_id'),
+                    'created_at': datetime.now(timezone.utc),
+                }
+            },
+            upsert=True,
+        )
+    except Exception as exc:
+        # Coins are already protected from double credit; a future call can retry
+        # this leaderboard write safely using the same deterministic key.
         room['payout_done'] = False
-        print(f"[Chess][Reward] {type(exc).__name__}: {exc}")
+        print(f"[Chess][RewardPoints] {type(exc).__name__}: {exc}")
+        return
+
+    room['payout_done'] = True
+    room['reward_coins'] = 750
+    room['reward_points'] = 750
 
 async def create_chess_room(request):
     if chesslib is None: return web.json_response({'ok':False,'error':'Chess package unavailable'},status=500)
@@ -1132,6 +1177,12 @@ async def chess_ws(request):
                     continue
                 room['started']=True
                 room['draw']=False
+                room['winner']=None
+                room['payout_done']=False
+                room['reward_coins']=0
+                room['reward_points']=0
+                room['history']=[]
+                room['last_move']=None
                 room['updated']=time.time()
                 await broadcast_chess(room)
                 if chess_current_player(room).get('bot'):
