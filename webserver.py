@@ -1138,11 +1138,19 @@ async def chess_ws(request):
         return ws
 
     verified_user_id = token_uid if token_uid is not None else (tg_user.get('id') if tg_user else None)
-    if verified_user_id is not None:
-        session_id=str(verified_user_id)
-    else:
-        client_id=''.join(ch for ch in (request.query.get('cid') or '') if ch.isalnum() or ch in '_-')[:80]
-        session_id='guest-'+client_id if client_id else 'guest-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(12))
+
+    # Chess is a Telegram-player game. A seat must map to exactly one Telegram
+    # account; do not create anonymous browser seats that could bypass the
+    # one-player-per-Telegram-ID rule.
+    if verified_user_id is None:
+        await ws.send_json({
+            'type':'error',
+            'message':'Open Chess from Vanya in Telegram. A Telegram account is required to join a seat.'
+        })
+        await ws.close()
+        return ws
+
+    session_id=str(verified_user_id)
 
     try:
         async for msg in ws:
@@ -1152,26 +1160,63 @@ async def chess_ws(request):
             typ=data.get('type')
             if typ=='join':
                 name=(data.get('name') or (tg_user or {}).get('first_name') or '').strip()[:32]
-                if not name and verified_user_id is not None:
+                if not name:
                     try:
                         existing=await users.find_one({'_id':int(verified_user_id)},{'name':1})
                         name=(existing or {}).get('name') or ''
                     except Exception:
                         pass
                 name=name or 'Player'
-                p=next((x for x in room['players'] if x['id']==session_id),None)
+
+                # One Telegram ID = one Chess seat in this room. Reconnecting
+                # from the same account reuses that seat, but another seat can
+                # never be created for the same Telegram user.
+                duplicate=next(
+                    (x for x in room['players']
+                     if str(x.get('id')) == session_id),
+                    None
+                )
+                p=duplicate
+
                 if not p:
-                    if len(room['players'])>=2: await ws.send_json({'type':'error','message':'Room is full'}); continue
+                    if len(room['players'])>=2:
+                        await ws.send_json({'type':'error','message':'Room is full. Only 2 Telegram players can join.'})
+                        continue
                     color='white' if not any(x['color']=='white' for x in room['players']) else 'black'
-                    p={'id':session_id,'name':name,'color':color,'bot':False,'connected':True,'ws':ws}
+                    p={
+                        'id':session_id,
+                        'telegram_id':int(verified_user_id),
+                        'name':name,
+                        'color':color,
+                        'bot':False,
+                        'connected':True,
+                        'ws':ws
+                    }
                     room['players'].append(p)
-                else: p['name']=name; p['connected']=True; p['ws']=ws
-                room['updated']=time.time(); await broadcast_chess(room)
+                else:
+                    # Existing Telegram seat: reconnect/update that seat instead
+                    # of creating a second player.
+                    p['name']=name
+                    p['telegram_id']=int(verified_user_id)
+                    p['connected']=True
+                    p['ws']=ws
+
+                room['updated']=time.time()
+                await broadcast_chess(room)
             elif typ=='add_bot':
-                if room['started'] or len(room['players'])>=2: continue
+                if room['started'] or len(room['players'])>=2:
+                    continue
                 if not any(x.get('color')=='black' for x in room['players']):
                     bid='bot-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(8))
-                    room['players'].append({'id':bid,'name':'Bot Alpha','color':'black','bot':True,'connected':True,'ws':None})
+                    room['players'].append({
+                        'id':bid,
+                        'name':'Bot Alpha',
+                        'telegram_id':None,
+                        'color':'black',
+                        'bot':True,
+                        'connected':True,
+                        'ws':None
+                    })
                     await broadcast_chess(room)
             elif typ=='start':
                 if room.get('winner') or room.get('draw'):
