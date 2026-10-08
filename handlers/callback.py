@@ -11,6 +11,10 @@ del _core, _sys
 async def callback(update,context):
     q=update.callback_query;data=q.data
 
+    if data.startswith("dailygame:"):
+        await random_game_callback(update, context)
+        return
+
     if data.startswith("kingdom:join:"):
         parts=data.split(":")
         if len(parts)!=3:
