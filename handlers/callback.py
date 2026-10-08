@@ -26,7 +26,8 @@ async def callback(update,context):
                 await q.answer("This Chess room belongs to another group.", show_alert=True)
                 return
             token = create_chess_join_token(room_code, q.from_user.id)
-            join_url = get_chess_webapp_url().rstrip("/") + "?room=" + room_code + "&token=" + token
+            base_url = get_chess_webapp_url()
+            join_url = _room_url(base_url, room_code) + "&token=" + token
             try:
                 await context.bot.send_message(
                     chat_id=q.from_user.id,
