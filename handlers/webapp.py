@@ -86,6 +86,25 @@ async def _open_join_room(update, context, kind):
         return
 
     join_url = _room_url(base_url, room.get("code"))
+
+    # Group HTTPS links do not carry Telegram WebApp initData. Chess uses a
+    # short-lived signed token so the backend can bind this browser seat to
+    # the exact Telegram user who pressed /chessjoin. This makes winner
+    # rewards and leaderboard points land on the correct account.
+    if kind == "CHESS":
+        try:
+            from webserver import create_chess_join_token
+            token = create_chess_join_token(room.get("code"), update.effective_user.id)
+            if not token:
+                raise RuntimeError("Could not create Chess join token")
+            join_url += "&token=" + token
+        except Exception as exc:
+            await update.message.reply_text(
+                f"⚠️ Chess join link create nahi ho saka: {html.escape(str(exc))}",
+                parse_mode="HTML",
+            )
+            return
+
     label = f"{icon} Join {kind.title()} Room"
     await update.message.reply_text(
         f"{icon} <b>{kind.title()} room {html.escape(str(room.get('code')))} ready hai.</b>\n\n"
@@ -151,20 +170,58 @@ def get_chess_webapp_url():
     return webapp_url
 
 async def chess(update, context):
-    """Open the Vanya Chess Telegram Mini App."""
-    webapp_url=get_chess_webapp_url()
-    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
-        webapp_url += ("&" if "?" in webapp_url else "?") + "gc=" + str(update.effective_chat.id)
+    """Open the Vanya Chess Telegram Mini App with secure group-seat binding."""
+    webapp_url = get_chess_webapp_url()
     if not webapp_url or not webapp_url.startswith("https://"):
-        await update.message.reply_text("♟️ Chess Web App is not configured yet. Set CHESS_WEBAPP_URL to your public HTTPS /chess URL in Railway Variables.")
+        await update.message.reply_text(
+            "♟️ Chess Web App is not configured yet. Set CHESS_WEBAPP_URL to your public HTTPS /chess URL in Railway Variables."
+        )
         return
-    # Telegram web_app buttons are private-chat-only. In groups, use a normal
-    # HTTPS URL button so /chess@ItzVanyaBot opens the game for everyone.
-    if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
-        keyboard=InlineKeyboardMarkup([[InlineKeyboardButton("♟️ Open Chess", url=webapp_url)], [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")]])
-    else:
-        keyboard=InlineKeyboardMarkup([[InlineKeyboardButton("♟️ Play Chess", web_app=WebAppInfo(url=webapp_url))], [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")]])
-    await update.message.reply_text("♟️ <b>Vanya Chess</b>\n\nCreate a room, invite one player, or add a bot, then play directly inside Telegram.",parse_mode="HTML",reply_markup=keyboard)
+
+    chat = update.effective_chat
+    if chat and chat.type in ("group", "supergroup"):
+        try:
+            from webserver import create_chess_room_for_group, create_chess_join_token
+            room_code = await create_chess_room_for_group(chat.id)
+            token = create_chess_join_token(room_code, update.effective_user.id)
+            if not room_code or not token:
+                raise RuntimeError("Could not create Chess room")
+            launch_url = _room_url(webapp_url, room_code) + "&token=" + token
+        except Exception as exc:
+            await update.message.reply_text(
+                f"⚠️ Chess room create nahi ho saka: {html.escape(str(exc))}",
+                parse_mode="HTML",
+            )
+            return
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("♟️ Open Chess Room", url=launch_url)],
+            [InlineKeyboardButton("👤 Join This Chess Room", url=launch_url)],
+            [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")],
+        ])
+        await update.message.reply_text(
+            "♟️ <b>Vanya Chess</b>\n\n"
+            f"Room: <code>{html.escape(room_code)}</code>\n"
+            "Tumhara seat Telegram account se securely linked hai.\n"
+            "Dusra player <code>/chessjoin</code> kare.\n\n"
+            "🏆 Winner: <b>+750 points +750 coins</b>",
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return
+
+    # In a private Telegram Mini App, WebApp initData securely identifies the user.
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("♟️ Play Chess", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton("📖 How to play", callback_data="game:CHESS")],
+    ])
+    await update.message.reply_text(
+        "♟️ <b>Vanya Chess</b>\n\n"
+        "Create a room, invite one player, or add a bot, then play directly inside Telegram.\n\n"
+        "🏆 Winner: <b>+750 points +750 coins</b>",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
 
 def get_ludo_webapp_url():
     """Return one normalized HTTPS Ludo Mini App URL."""
