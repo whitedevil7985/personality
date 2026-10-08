@@ -163,15 +163,17 @@ def get_chess_webapp_url():
     if not webapp_url:
         domain = (os.getenv("MINIAPP_DOMAIN") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "avyranewup-production.up.railway.app").strip()
         webapp_url = "https://" + domain.strip("/") + "/chess"
-    if not webapp_url: return ""
-    if not webapp_url.startswith(("https://", "http://")): webapp_url = "https://" + webapp_url
+    if not webapp_url:
+        return ""
+    if not webapp_url.startswith(("https://", "http://")):
+        webapp_url = "https://" + webapp_url
     webapp_url = webapp_url.rstrip("/")
-    # Use a new frontend path so Telegram cannot reuse the old /chess WebView cache.
-    if webapp_url.lower().endswith("/chess"):
-        webapp_url = webapp_url[:-6] + "/chess-live"
-    elif not webapp_url.lower().endswith("/chess-live"):
-        webapp_url += "/chess-live"
-    webapp_url += ("&" if "?" in webapp_url else "?") + "v=20261008"
+    if not webapp_url.lower().endswith(("/chess", "/chess-live")):
+        webapp_url += "/chess"
+    # Cache-bust only the frontend version; preserve the configured route.
+    params_sep = "&" if "?" in webapp_url else "?"
+    if "v=20261008" not in webapp_url:
+        webapp_url += params_sep + "v=20261008"
     return webapp_url
 
 async def chess(update, context):
