@@ -1005,9 +1005,18 @@ def chess_state(room, you=None):
     }
 
 async def broadcast_chess(room):
-    for p in room['players']:
-        if p.get('ws') and not p['ws'].closed:
-            await p['ws'].send_json(chess_state(room,p['id']))
+    # A stale browser/deploy can leave a dead websocket object in the room.
+    # Never let one failed send break the whole Chess connection loop.
+    for p in list(room.get('players', [])):
+        ws = p.get('ws')
+        if not ws or ws.closed:
+            continue
+        try:
+            await ws.send_json(chess_state(room, p['id']))
+        except Exception as exc:
+            p['connected'] = False
+            p['ws'] = None
+            print(f"[Chess][Broadcast] {type(exc).__name__}: {exc}")
 
 def chess_current_player(room):
     if not room['board']:
@@ -1126,12 +1135,32 @@ async def maybe_chess_bot_turn(room):
     await broadcast_chess(room)
 
 async def chess_ws(request):
-    code=request.match_info['code'].upper(); room=CHESS_ROOMS.get(code)
-    if not room: return web.json_response({'ok':False,'error':'Room not found'},status=404)
-    ws=web.WebSocketResponse(heartbeat=25); await ws.prepare(request)
+    code=request.match_info['code'].upper()
+    ws=web.WebSocketResponse(heartbeat=25, max_msg_size=64 * 1024)
+    await ws.prepare(request)
 
     tg_user=verify_telegram_init_data(request.query.get('initData',''))
     token_uid=verify_chess_join_token(code,request.query.get('token',''))
+
+    # Chess rooms are intentionally in-process for live play, so a Railway
+    # deploy/restart can invalidate an older room URL. If the URL still carries
+    # a valid signed creator token (or valid Telegram Mini App initData), safely
+    # recreate that room under the same code instead of leaving the client in a
+    # reconnect loop forever.
+    room=CHESS_ROOMS.get(code)
+    if not room and (token_uid is not None or tg_user is not None):
+        async with CHESS_LOCK:
+            room=CHESS_ROOMS.get(code)
+            if not room:
+                room=new_chess_room()
+                room['code']=code
+                room['group_id']=None
+                CHESS_ROOMS[code]=room
+                print(f"[Chess] Recovered stale room {code}")
+    if not room:
+        await ws.send_json({'type':'error','message':'This Chess room expired. Open a fresh Chess room from Vanya.'})
+        await ws.close()
+        return ws
     if token_uid is not None and tg_user is not None and int(tg_user.get('id')) != int(token_uid):
         await ws.send_json({'type':'error','message':'Telegram account verification mismatch.'})
         await ws.close()
