@@ -32,7 +32,7 @@ async def callback(update,context):
                     chat_id=q.from_user.id,
                     text="♟️ <b>Vanya Chess</b>\n\nYour private seat link is ready. Tap below to join this room.",
                     parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("♟️ Join Chess Room", url=join_url)]])
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("♟️ Join Chess Room", web_app=WebAppInfo(url=join_url))]])
                 )
                 await q.answer("✅ Private Chess link sent to your DM.", show_alert=False)
             except Exception:
