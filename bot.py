@@ -190,6 +190,9 @@ async def main():
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
     app.add_handler(ChatMemberHandler(log_bot_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=-1)
     app.add_handler(CallbackQueryHandler(blacklist_callback_guard, block=True), group=-3)
+    # Daily Drop buttons get their own early callback route so the game-launch
+    # action cannot be swallowed by the generic callback router.
+    app.add_handler(CallbackQueryHandler(random_game_callback, pattern=r"^dailygame:"), group=0)
     app.add_handler(CallbackQueryHandler(callback))
 
     # Word games accept a plain typed word. This handler runs before Vanya's
