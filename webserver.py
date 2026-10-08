@@ -6,10 +6,11 @@ import asyncio
 import hashlib
 import hmac
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, unquote
 from aiohttp import web, WSMsgType
-from db import users, ensure_user, add_coins, add_xp, record_game_result, games
+from db import users, ensure_user, add_coins, add_xp, record_game_result, game_stats
 try:
     import chess as chesslib
 except Exception:
@@ -1064,7 +1065,7 @@ async def _chess_award(room):
     # Leaderboard entry is also idempotent by room + winner.
     # The write uses a deterministic _id, so retries cannot duplicate points.
     try:
-        await games.update_one(
+        await game_stats.update_one(
             {'_id': reward_key},
             {
                 '$setOnInsert': {
