@@ -675,13 +675,10 @@ async def callback(update,context):
                      "🏆 Winner: <b>+750 points +750 coins</b>")
                 if update.effective_chat and update.effective_chat.type in ("group", "supergroup"):
                     try:
-                        from webserver import create_chess_room_for_group, create_chess_join_token
+                        from webserver import create_chess_room_for_group
                         room_code = await create_chess_room_for_group(update.effective_chat.id)
-                        token = create_chess_join_token(room_code, q.from_user.id)
-                        launch_url = webapp_url.rstrip("/") + "?room=" + str(room_code) + "&token=" + str(token)
                         markup=kb([
-                            [InlineKeyboardButton("♟️ Play Chess",url=launch_url)],
-                            [InlineKeyboardButton("👤 Join This Room",url=launch_url)],
+                            [InlineKeyboardButton("♟️ Join Chess Securely",callback_data=f"cj:{room_code}")],
                             [InlineKeyboardButton("⟵ Back to Games",callback_data="cat:games")]
                         ])
                     except Exception as exc:
