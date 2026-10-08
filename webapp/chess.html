@@ -128,6 +128,24 @@ const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&
 const appBoard=document.getElementById('boardPanel'),appSide=document.getElementById('sidePanel');
 const name=()=>tg?.initDataUnsafe?.user?.first_name||'Player';
 function api(url,opts){return fetch(url,opts).then(r=>r.json())}
+async function claimSeat(){
+  if(!room)return false;
+  const init=tg?.initData||'';
+  if(!init)return false;
+  try{
+    const url='/api/chess/claim/'+encodeURIComponent(room)+'?initData='+encodeURIComponent(init)+'&name='+encodeURIComponent(name());
+    const r=await fetch(url,{cache:'no-store'});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw new Error(d.error||'Telegram verification failed.');
+    if(d.token)token=d.token;
+    if(d.state){state=d.state;render()}
+    const params=new URLSearchParams(location.search);
+    params.set('room',room);
+    params.set('token',token);
+    history.replaceState({},'',location.pathname+'?'+params.toString());
+    return true;
+  }catch(_){return false}
+}
 async function ensureRoom(){
   if(room)return true;
   const gc=qs.get('gc');
@@ -168,9 +186,18 @@ async function pollHttp(){
   if(!httpMode||ended||!room)return;
   try{
     const url='/api/chess/state/'+encodeURIComponent(room)+'?token='+encodeURIComponent(token)+'&initData='+encodeURIComponent(tg?.initData||'')+'&name='+encodeURIComponent(name());
-    const r=await fetch(url,{cache:'no-store'});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok||!d.ok)throw new Error(d.error||'Chess server rejected the request.');
+    let r=await fetch(url,{cache:'no-store'});
+    let d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok){
+      // A Telegram WebView can occasionally omit the token query during
+      // navigation. Re-claim the seat using Telegram's signed initData.
+      if(await claimSeat()){
+        const retryUrl='/api/chess/state/'+encodeURIComponent(room)+'?token='+encodeURIComponent(token)+'&initData='+encodeURIComponent(tg?.initData||'')+'&name='+encodeURIComponent(name());
+        r=await fetch(retryUrl,{cache:'no-store'});
+        d=await r.json().catch(()=>({}));
+      }
+      if(!r.ok||!d.ok)throw new Error(d.error||'Chess server rejected the request.');
+    }
     if(d.state){state=d.state;render()}
     showError('');
   }catch(e){showError(e.message||'Chess HTTP fallback is unavailable.')}
@@ -355,6 +382,7 @@ function connect(){
   const ok=await ensureRoom();
   if(!ok)return;
   httpMode=true;
+  if(!token && tg?.initData) await claimSeat();
   await pollHttp();
 })();
 </script>
