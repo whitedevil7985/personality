@@ -1136,11 +1136,19 @@ async def maybe_chess_bot_turn(room):
 
 async def chess_ws(request):
     code=request.match_info['code'].upper()
+    raw_token=request.query.get('token','')
+    raw_init_data=request.query.get('initData','')
+    print(f"[Chess][WS] connect code={code} token={'yes' if raw_token else 'no'} initData={'yes' if raw_init_data else 'no'}")
     ws=web.WebSocketResponse(heartbeat=25, max_msg_size=64 * 1024)
-    await ws.prepare(request)
+    try:
+        await ws.prepare(request)
+    except Exception as exc:
+        print(f"[Chess][WS] handshake failed code={code}: {type(exc).__name__}: {exc}")
+        raise
 
-    tg_user=verify_telegram_init_data(request.query.get('initData',''))
-    token_uid=verify_chess_join_token(code,request.query.get('token',''))
+    tg_user=verify_telegram_init_data(raw_init_data)
+    token_uid=verify_chess_join_token(code,raw_token)
+    print(f"[Chess][WS] auth code={code} token_uid={'yes' if token_uid is not None else 'no'} tg_user={'yes' if tg_user else 'no'}")
 
     # Chess rooms are intentionally in-process for live play, so a Railway
     # deploy/restart can invalidate an older room URL. If the URL still carries
