@@ -4,6 +4,8 @@ Posts one random existing bot game per active group each calendar day, including
 """
 
 import asyncio
+import html
+import os
 import random
 from datetime import datetime, timezone, timedelta
 
