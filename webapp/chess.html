@@ -1,14 +1,259 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Vanya Chess</title><style>
-:root{--bg:#0b0b1b;--panel:#17172d;--purple:#34245e;--light:#c8d5e8;--dark:#415273;--accent:#00e7e9;--gold:#f2c94c}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#080817,#10102a);font-family:system-ui,-apple-system,sans-serif;color:#fff;min-height:100vh}.top{padding:12px 14px 8px;display:flex;justify-content:space-between;align-items:center}.brand{font-weight:800;letter-spacing:4px;font-size:20px}.live{color:var(--accent);font-weight:700;font-size:12px}.room{margin:4px 8px 10px;padding:12px 14px;border-radius:14px;background:linear-gradient(90deg,#25204b,#1a1940);border:1px solid #443c73}.players{display:flex;justify-content:space-between;gap:8px}.p{flex:1;min-width:0}.name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.status{font-size:12px;color:#a7b1c8}.boardwrap{padding:8px}.board{width:min(100%,430px);margin:auto;aspect-ratio:1;display:grid;grid-template-columns:repeat(8,1fr);border:4px solid #141b30;border-radius:4px;overflow:hidden;box-shadow:0 12px 35px #0008}.sq{position:relative;display:flex;align-items:center;justify-content:center;font-size:clamp(27px,8vw,46px);cursor:pointer;user-select:none}.sq.light{background:var(--light);color:#172033}.sq.dark{background:var(--dark);color:#fff}.sq.sel{outline:4px solid var(--accent);outline-offset:-4px}.sq.target{box-shadow:inset 0 0 0 5px #00e7e988}.rank,.file{position:absolute;font-size:9px;font-weight:700;opacity:.55}.rank{right:3px;top:2px}.file{left:3px;bottom:2px}.bottom{padding:8px 14px 18px}.bar{background:#151a31;border-radius:18px;padding:12px;border:1px solid #303653}.turn{color:var(--gold);font-weight:800}.buttons{display:flex;gap:8px;margin-top:9px}.btn{flex:1;border:0;border-radius:12px;padding:12px;font-weight:800;background:#242642;color:#fff}.primary{background:#3a2d6d}.danger{background:#5c2631}.lobby{padding:16px}.code{font-family:monospace;background:#090912;padding:8px;border-radius:8px}.hidden{display:none}.chat{max-height:130px;overflow:auto;margin-top:8px;font-size:12px}.err{color:#ff8c8c;min-height:18px;font-size:12px;margin-top:6px}</style></head><body><div class="top"><div><div class="live">• LIVE</div><div class="brand">VANYA CHESS</div></div><button class="btn" id="help">?</button></div><div id="app"></div><script>
-const tg=window.Telegram?.WebApp; tg?.ready();tg?.expand();let ws=null,room=new URLSearchParams(location.search).get('room')||'',me='Player',you='',selected=null,state=null,ended=false;
-const app=document.getElementById('app');const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-async function api(u,o={}){const r=await fetch(u,o);return r.json()} async function ensure(){if(room)return;const r=await api('/api/chess/rooms'+(new URLSearchParams(location.search).get('gc')?'?gc='+encodeURIComponent(new URLSearchParams(location.search).get('gc')):''),{method:'POST'});if(r.ok){room=r.room;history.replaceState({},'',`/chess?room=${room}`)}}
-function name(){return tg?.initDataUnsafe?.user?.first_name||'Player'}
-function lobby(){app.innerHTML=`<div class="lobby"><div class="room"><div class="status">ROOM CODE</div><div class="code">${esc(room)}</div><div class="status" style="margin-top:8px">Share this room with one friend.</div></div><div id="players"></div><div class="buttons"><button class="btn" id="bot">🤖 Add Bot</button><button class="btn primary" id="start">▶ Start Game</button></div><div class="err" id="err"></div></div>`;document.getElementById('bot').onclick=()=>send({type:'add_bot'});document.getElementById('start').onclick=()=>send({type:'start'})}
-function render(){if(!state||!state.started){lobby();if(state?.players){document.getElementById('players').innerHTML=state.players.map(p=>`<div class="room"><div class="name">${esc(p.name)} <span class="status">${p.color.toUpperCase()}</span></div><div class="status">${p.connected?'● Online':'○ Offline'} ${p.bot?'• BOT':''}</div></div>`).join('')}return}app.innerHTML=`<div class="room"><div class="players">${state.players.map(p=>`<div class="p"><div class="name">${p.color==='white'?'♔':'♚'} ${esc(p.name)} ${p.id===state.you?'(You)':''}</div><div class="status">${p.connected?'● Online':'○ Offline'}</div></div>`).join('')}</div></div><div class="boardwrap"><div class="board" id="board"></div></div><div class="bottom"><div class="bar"><div class="turn">${state.winner?`🏆 ${esc(state.players.find(p=>p.id===state.winner)?.name||'Winner')} wins!`:state.turn.toUpperCase()+' TURN'} ${state.check&&!state.winner?'• CHECK':''}</div><div class="status">Room ${esc(room)} · ${state.checkmate?'Checkmate':''}</div><div class="buttons"><button class="btn danger" id="resign">🏳 Resign</button><button class="btn" id="chatbtn">💬 Chat</button></div><div class="chat">${(state.chat||[]).map(x=>`<div><b>${esc(x.name)}:</b> ${esc(x.text)}</div>`).join('')}</div><div class="err" id="err"></div></div></div>`;drawBoard();document.getElementById('resign').onclick=()=>send({type:'resign'});document.getElementById('chatbtn').onclick=()=>{const t=prompt('Message');if(t)send({type:'chat',text:t})}}
-function drawBoard(){const b=document.getElementById('board');const pieces={};(state.pieces||[]).forEach(x=>pieces[x.square]=x.piece);for(let r=7;r>=0;r--)for(let f=0;f<8;f++){const sq=String.fromCharCode(97+f)+(r+1),d=document.createElement('div');d.className='sq '+(((r+f)%2)?'dark':'light')+(selected===sq?' sel':'');d.dataset.sq=sq;d.textContent=pieces[sq]||'';const rk=document.createElement('span');rk.className='rank';rk.textContent=(f===7?r+1:'');const fl=document.createElement('span');fl.className='file';fl.textContent=(r===0?String.fromCharCode(97+f):'');d.append(rk,fl);d.onclick=()=>squareClick(sq);b.appendChild(d)}}
-function squareClick(sq){if(!state||state.winner)return;if(state.players.find(p=>p.id===state.you)?.color!==state.turn)return;if(!selected){if(!state.pieces.some(x=>x.square===sq))return;selected=sq;drawBoard();return}if(selected===sq){selected=null;drawBoard();return}send({type:'move',uci:selected+sq});selected=null}
-function send(x){if(ws?.readyState===1)ws.send(JSON.stringify(x))}
-function connect(){if(ended)return;ws=new WebSocket(`${location.origin.replace(/^http/,'ws')}/ws/chess/${encodeURIComponent(room)}?initData=${encodeURIComponent(tg?.initData||'')}`);ws.onopen=()=>send({type:'join',name:name()});ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='game_ended'){ended=true;app.innerHTML='<div class="lobby"><div class="room"><div class="code">🛑 GAME ENDED</div><div class="status">'+esc(d.message||'Ended from Telegram group.')+'</div></div></div>';try{ws.close()}catch(_){ }return}if(d.type==='error'){const el=document.getElementById('err');if(el)el.textContent=d.message;return}if(d.type==='state'){state=d;render()}};ws.onclose=()=>{if(!ended)setTimeout(connect,1600)}}
-(async()=>{await ensure();me=name();lobby();connect()})();document.getElementById('help').onclick=()=>alert('Tap a piece, then tap its destination. White moves first. Invite one player or add a bot.');
-</script></body></html>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Vanya Chess</title>
+<style>
+:root{--bg:#080817;--panel:#151528;--panel2:#1b1a35;--line:#343252;--text:#f8f8ff;--muted:#aeb0c8;--accent:#00e7e9;--gold:#f2c94c;--light:#d7dbe8;--dark:#48556f;--danger:#6d3040}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:radial-gradient(circle at top,#17163b 0,#090914 42%,#05050d 100%);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text)}
+body{min-height:100vh}
+button{font:inherit}
+.shell{width:min(1180px,100%);margin:0 auto;padding:18px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:6px 2px 14px}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,#30245e,#141429);display:grid;place-items:center;font-size:24px;border:1px solid #514579;box-shadow:0 10px 35px #0008}
+.kicker{font-size:11px;letter-spacing:2px;color:var(--accent);font-weight:800;text-transform:uppercase}
+.title{font-size:22px;font-weight:900;letter-spacing:2px}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.live{font-size:11px;color:var(--accent);font-weight:800;letter-spacing:1.4px}
+.hero{display:flex;justify-content:space-between;gap:18px;align-items:end;padding:18px 2px 16px}
+.hero h1{margin:0;font-size:clamp(30px,5vw,58px);line-height:.95;letter-spacing:-2px}
+.hero em{font-style:normal;color:var(--accent)}
+.hero p{margin:10px 0 0;color:var(--muted);max-width:620px}
+.stamp{padding:12px 14px;border:1px solid var(--line);background:#111126cc;border-radius:15px;min-width:210px}
+.stamp b{display:block;font-size:12px;letter-spacing:1px}
+.stamp small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(310px,.75fr);gap:18px}
+.card{background:linear-gradient(180deg,#17162bcc,#101024e6);border:1px solid var(--line);border-radius:20px;box-shadow:0 18px 60px #0007;backdrop-filter:blur(10px)}
+.board-card{padding:14px}
+.roombar{display:flex;justify-content:space-between;gap:10px;align-items:center;background:#111127;border:1px solid #2e2d4d;border-radius:14px;padding:10px 12px;margin-bottom:12px}
+.room-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#fff}
+.status{font-size:12px;color:var(--muted)}
+.board-stage{padding:6px}
+.board{width:min(100%,650px);margin:0 auto;aspect-ratio:1;display:grid;grid-template-columns:repeat(8,1fr);border:6px solid #111426;border-radius:10px;overflow:hidden;box-shadow:0 22px 70px #000a}
+.sq{position:relative;border:0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none}
+.sq.light{background:var(--light)}
+.sq.dark{background:var(--dark)}
+.sq.selected{outline:4px solid var(--accent);outline-offset:-4px;z-index:2}
+.sq.last{box-shadow:inset 0 0 0 999px #f2c94c28}
+.piece{font-size:clamp(30px,7vw,62px);line-height:1;text-shadow:0 3px 6px #0008}
+.white-piece{color:#fcfcff}
+.black-piece{color:#11131b}
+.dot{width:16%;height:16%;border-radius:50%;background:#00e7e9cc;box-shadow:0 0 14px #00e7e988}
+.capture{position:absolute;inset:10%;border:4px solid #00e7e9bb;border-radius:50%}
+.coord{position:absolute;font-size:9px;font-weight:800;opacity:.65;pointer-events:none}
+.rank{right:4px;top:3px}
+.file{left:4px;bottom:3px}
+.board-foot{display:flex;justify-content:space-between;gap:8px;padding:10px 2px 2px}
+.turn{font-weight:900;color:var(--gold)}
+.side{padding:16px}
+.panel-line{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:11px;letter-spacing:1px;text-transform:uppercase}
+.player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-radius:15px;border:1px solid #2e2d4b;background:#101023;margin-top:10px}
+.player.active{border-color:#00e7e955;box-shadow:0 0 0 1px #00e7e922 inset}
+.avatar{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:#272646;font-size:21px}
+.player-info{display:flex;align-items:center;gap:9px;min-width:0}
+.name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.role{font-size:11px;color:var(--muted);margin-top:2px}
+.badge{font-size:10px;color:var(--accent);font-weight:800}
+.band{display:flex;gap:10px;padding:12px;border-radius:15px;border:1px solid #343252;background:#101024;margin-top:12px}
+.band-icon{font-size:22px}
+.band-title{font-weight:800}
+.band-text{font-size:11px;color:var(--muted);margin-top:2px}
+.heading{display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px}
+.heading h2{font-size:13px;margin:0}
+.heading span{font-size:10px;color:var(--muted)}
+.moves{max-height:230px;overflow:auto;border:1px solid #2d2c48;border-radius:14px}
+.move-row{display:grid;grid-template-columns:32px 1fr 1fr;gap:4px;padding:7px 9px;border-bottom:1px solid #24233e;font-size:12px}
+.move-row:last-child{border-bottom:0}
+.move-row.latest{background:#1b193a}
+.num{color:var(--muted)}
+.latest-san{color:var(--accent);font-weight:800}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.btn{border:1px solid #343252;background:#21203c;color:#fff;border-radius:13px;padding:11px 12px;font-weight:800;cursor:pointer}
+.btn:hover{filter:brightness(1.08)}
+.btn.primary{background:#3a2d6d;border-color:#5949a4}
+.btn.danger{background:#5d2835;border-color:#7b3547}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.err{min-height:18px;color:#ff9696;font-size:11px;margin-top:8px}
+.footer{padding:15px 2px;color:#777994;font-size:10px;display:flex;justify-content:space-between;gap:8px}
+.lobby{padding:18px}
+.lobby h2{margin:0 0 6px}
+.lobby p{margin:0;color:var(--muted);font-size:13px}
+.setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.seat{border:1px solid #2e2d4b;background:#101023;border-radius:14px;padding:12px}
+.seat b{display:block}
+.seat small{color:var(--muted)}
+.finish{padding:18px}
+.reward{margin-top:14px;padding:13px;border-radius:14px;border:1px solid #574a7e;background:#1c1933}
+.reward strong{color:var(--gold)}
+.modal{position:fixed;inset:0;background:#000b;display:grid;place-items:center;padding:20px;z-index:30}
+.modal-card{width:min(430px,100%);background:#17162d;border:1px solid #423866;border-radius:20px;padding:18px;box-shadow:0 30px 100px #000b}
+.promo-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:14px}
+.promo{border:1px solid #3b375d;background:#22203e;border-radius:14px;padding:16px;font-size:35px;cursor:pointer}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.hero{align-items:start;flex-direction:column}.stamp{width:100%}}
+@media(max-width:600px){.shell{padding:10px}.title{font-size:18px}.board{border-width:4px}.side{padding:12px}.setup-grid,.actions{grid-template-columns:1fr}.hero h1{font-size:36px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div class="brand">
+      <div class="mark">♞</div>
+      <div><div class="kicker">Live Chess</div><div class="title">VANYA CHESS</div><div class="sub">One board · two players</div></div>
+    </div>
+    <div class="live">• LIVE ROOM</div>
+  </header>
+  <section class="hero">
+    <div><h1>Make your move.<br><em>Own the board.</em></h1><p>Real-time Telegram chess with secure player seats, legal moves and automatic winner rewards.</p></div>
+    <div class="stamp"><b id="modeLabel">NEW MATCH</b><small id="modeSub">Choose your opponent</small></div>
+  </section>
+  <section class="layout">
+    <div class="card board-card" id="boardPanel"></div>
+    <aside class="card side" id="sidePanel"></aside>
+  </section>
+  <footer class="footer"><span>Play kindly. Think deeply.</span><span>♟ 750 points · 750 coins to the winner</span></footer>
+</div>
+<div id="modalRoot"></div>
+<script>
+const qs=new URLSearchParams(location.search);
+const tg=window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+let ws=null,room=(qs.get('room')||'').toUpperCase(),token=qs.get('token')||'',state=null,selected=null,promotion=null,flipped=false,ended=false,reconnectTimer=null;
+const esc=s=>String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const appBoard=document.getElementById('boardPanel'),appSide=document.getElementById('sidePanel');
+const name=()=>tg?.initDataUnsafe?.user?.first_name||'Player';
+function api(url,opts){return fetch(url,opts).then(r=>r.json())}
+async function ensureRoom(){
+  if(room)return true;
+  const gc=qs.get('gc');
+  const r=await api('/api/chess/rooms'+(gc?'?gc='+encodeURIComponent(gc):''),{method:'POST'});
+  if(!r.ok){showError(r.error||'Could not create room');return false}
+  room=String(r.room).toUpperCase();
+  history.replaceState({},'',location.pathname+'?room='+encodeURIComponent(room));
+  return true;
+}
+function showError(msg){const el=document.querySelector('.err');if(el)el.textContent=msg}
+function send(data){if(ws&&ws.readyState===1)ws.send(JSON.stringify(data))}
+function player(id){return (state?.players||[]).find(p=>String(p.id)===String(id))}
+function myPlayer(){return player(state?.you)}
+function winnerName(){return player(state?.winner)?.name||'Winner'}
+function finished(){return !!(state?.winner||state?.draw||state?.ended)}
+function statusText(){
+  if(state?.winner) return winnerName()+' wins'+(state.checkmate?' by checkmate':'');
+  if(state?.draw) return state.stalemate?'Draw by stalemate':'Game drawn';
+  if(state?.check) return (state.turn||'').toUpperCase()+' is in check';
+  if(!state?.started)return state?.players?.length<2?'Waiting for another player':'Ready to start';
+  return (state.turn||'').toUpperCase()+' TURN';
+}
+function boardView(){
+  if(!state||!state.pieces)return;
+  const pieces={}; state.pieces.forEach(x=>pieces[x.square]=x.piece);
+  const last=state.last_move||{};
+  const mp=myPlayer();
+  let html='';
+  const ranks=flipped?[1,2,3,4,5,6,7,8]:[8,7,6,5,4,3,2,1];
+  const files=flipped?['h','g','f','e','d','c','b','a']:['a','b','c','d','e','f','g','h'];
+  for(let ri=0;ri<8;ri++)for(let fi=0;fi<8;fi++){
+    const r=ranks[ri],f=files[fi],sq=f+r,piece=pieces[sq]||'';
+    const selectedCls=selected===sq?' selected':'';
+    const lastCls=(last.from===sq||last.to===sq)?' last':'';
+    const light=((['a','b','c','d','e','f','g','h'].indexOf(f)+r)%2===0);
+    const canMove=mp&&((mp.color==='white'&&state.turn==='white')||(mp.color==='black'&&state.turn==='black'));
+    let targetCls='';
+    if(selected&&canMove&&sq!==selected) targetCls=' dot';
+    let inner=piece?'<span class="piece '+(piece===piece.toUpperCase()?'white-piece':'black-piece')+'">'+piece+'</span>':'';
+    if(targetCls) inner+='<span class="dot"></span>';
+    const rankLabel=(flipped?ri===7:ri===0)?r:'';
+    const fileLabel=(flipped?fi===0:fi===7)?f:'';
+    html+='<button class="sq '+(light?'light':'dark')+selectedCls+lastCls+'" data-sq="'+sq+'">'+inner+
+      (rankLabel?'<span class="coord rank">'+rankLabel+'</span>':'')+
+      (fileLabel?'<span class="coord file">'+fileLabel+'</span>':'')+'</button>';
+  }
+  document.getElementById('chessBoard').innerHTML=html;
+  document.querySelectorAll('.sq').forEach(b=>b.onclick=()=>clickSquare(b.dataset.sq));
+}
+function renderBoard(){
+  if(!state){appBoard.innerHTML='<div class="lobby"><h2>♟️ Connecting to Vanya Chess…</h2><p>Opening your secure room.</p></div>';return}
+  if(!state.started&& !finished()){
+    appBoard.innerHTML='<div class="lobby"><div class="roombar"><div><div class="status">ROOM CODE</div><div class="room-code">'+esc(room)+'</div></div><div class="status">'+(state.players||[]).length+'/2 players</div></div>'+
+      '<h2>♟️ Chess lobby</h2><p>Join the same room, then start the match. You can also add a bot.</p>'+
+      '<div class="setup-grid">'+(state.players||[]).map(p=>'<div class="seat"><b>'+esc(p.name)+'</b><small>'+p.color.toUpperCase()+(p.id===state.you?' · You':'')+(p.bot?' · BOT':'')+'</small></div>').join('')+'</div>'+
+      '<div class="actions"><button class="btn primary" id="startBtn">▶ Start game</button><button class="btn" id="botBtn">🤖 Add bot</button></div><div class="err"></div></div>';
+    document.getElementById('startBtn').onclick=()=>send({type:'start'});
+    document.getElementById('botBtn').onclick=()=>send({type:'add_bot'});
+    return;
+  }
+  appBoard.innerHTML='<div class="roombar"><div><div class="status">ROOM</div><div class="room-code">'+esc(room)+'</div></div><div class="status">'+(state.players||[]).length+' players</div></div>'+
+    '<div class="board-stage"><div class="board" id="chessBoard"></div><div class="board-foot"><span class="turn">'+esc(statusText())+'</span><span class="status">'+(state.history||[]).length+' ply</span></div></div>';
+  boardView();
+}
+function renderSide(){
+  if(!state){appSide.innerHTML='<div class="panel-line"><span>GAME</span><span>CONNECTING</span></div>';return}
+  const mp=myPlayer();
+  const winner=state.winner?player(state.winner):null;
+  const detail=state.winner?(state.reward_coins?('Winner reward credited automatically.'):winner?.bot?'Bot won — no Telegram reward.':'Game finished.'):(state.draw?'No winner reward on a draw.':state.started?'Moves are live on the server.':'Use /chessjoin in the group to enter this room.');
+  const history=state.history||[];
+  let moves='';
+  for(let i=0;i<history.length;i+=2)moves+='<div class="move-row '+(i+2>=history.length?'latest':'')+'"><span class="num">'+(Math.floor(i/2)+1)+'.</span><span class="'+(i===history.length-1?'latest-san':'')+'">'+esc(history[i]?.san||'')+'</span><span class="'+(i+1===history.length-1?'latest-san':'')+'">'+esc(history[i+1]?.san||'')+'</span></div>';
+  if(!moves)moves='<div class="move-row"><span class="num">—</span><span>Waiting…</span><span></span></div>';
+  appSide.innerHTML=
+    '<div class="panel-line"><span>YOUR SEATS</span><span>'+((state.players||[]).length)+'/2</span></div>'+
+    (state.players||[]).map(p=>'<div class="player '+((state.started&&!finished()&&((state.turn===p.color)))?'active':'')+'"><div class="player-info"><div class="avatar">'+(p.color==='white'?'♔':'♚')+'</div><div><div class="name">'+esc(p.name)+(p.id===state.you?' (You)':'')+'</div><div class="role">'+(p.bot?'Computer':'Telegram player')+' · '+p.color+'</div></div></div><div class="badge">'+(p.connected?'● Online':'○ Offline')+'</div></div>').join('')+
+    '<div class="band"><div class="band-icon">'+(state.winner?'🏆':state.draw?'🤝':state.check?'⚠️':'♟️')+'</div><div><div class="band-title">'+esc(statusText())+'</div><div class="band-text">'+esc(detail)+'</div></div></div>'+
+    (state.winner&&state.reward_coins?'<div class="reward">🏆 <strong>'+esc(winner?.name||'Winner')+'</strong> received <strong>+750 coins</strong> and <strong>+750 points</strong>.<br><span class="status">Coins → balance · Points → leaderboard</span></div>':'')+
+    '<div class="heading"><h2>Move record</h2><span>'+history.length+' PLY</span></div>'+
+    '<div class="moves">'+moves+'</div>'+
+    '<div class="actions"><button class="btn" id="flipBtn">↻ Flip board</button><button class="btn danger" id="resignBtn" '+(!state.started?'disabled':'')+'>🏳 Resign</button></div>'+
+    '<div class="actions"><button class="btn" id="chatBtn">💬 Game chat</button><button class="btn primary" id="reloadBtn">↻ Refresh</button></div>'+
+    '<div class="err"></div>';
+  document.getElementById('flipBtn').onclick=()=>{flipped=!flipped;boardView()};
+  document.getElementById('resignBtn').onclick=()=>send({type:'resign'});
+  document.getElementById('chatBtn').onclick=()=>{const t=window.prompt('Message');if(t)send({type:'chat',text:t})};
+  document.getElementById('reloadBtn').onclick=()=>location.reload();
+  document.getElementById('modeLabel').textContent=state.players?.length>=2?'LIVE MATCH':'NEW MATCH';
+  document.getElementById('modeSub').textContent=state.winner?'GAME COMPLETE':state.started?'LIVE MULTIPLAYER':'Waiting for opponent';
+}
+function render(){renderBoard();renderSide()}
+function clickSquare(sq){
+  if(!state||finished()||!state.started)return;
+  const mp=myPlayer();
+  if(!mp||state.turn!==mp.color)return;
+  const piece=(state.pieces||[]).find(x=>x.square===sq);
+  if(!selected){
+    if(!piece)return;
+    const isMine=mp.color==='white'?['♔','♕','♖','♗','♘','♙'].includes(piece.piece):['♚','♛','♜','♝','♞','♟'].includes(piece.piece);
+    if(!isMine)return;
+    selected=sq;boardView();return;
+  }
+  if(selected===sq){selected=null;boardView();return}
+  const source=(state.pieces||[]).find(x=>x.square===selected);
+  const sourcePiece=source?.piece||'';
+  const promoting=(sourcePiece==='♙'&&sq.endsWith('8'))||(sourcePiece==='♟'&&sq.endsWith('1'));
+  if(promoting){promotion={from:selected,to:sq,color:mp.color};openPromotion();return}
+  send({type:'move',uci:selected+sq});selected=null;
+}
+function openPromotion(){
+  const icons=promotion.color==='white'?['♕','♖','♗','♘']:['♛','♜','♝','♞'];
+  const codes=['q','r','b','n'];
+  document.getElementById('modalRoot').innerHTML='<div class="modal"><div class="modal-card"><h2 style="margin:0 0 6px">Choose promotion</h2><p style="color:var(--muted);margin:0">Your pawn reached the final rank.</p><div class="promo-grid">'+icons.map((x,i)=>'<button class="promo" data-piece="'+codes[i]+'">'+x+'</button>').join('')+'</div></div></div>';
+  document.querySelectorAll('.promo').forEach(b=>b.onclick=()=>{send({type:'move',uci:promotion.from+promotion.to+b.dataset.piece});promotion=null;document.getElementById('modalRoot').innerHTML='';selected=null});
+}
+function connect(){
+  if(ended)return;
+  const wsUrl=location.origin.replace(/^http/,'ws')+'/ws/chess/'+encodeURIComponent(room)+'?initData='+encodeURIComponent(tg?.initData||'')+'&token='+encodeURIComponent(token);
+  ws=new WebSocket(wsUrl);
+  ws.onopen=()=>send({type:'join',name:name()});
+  ws.onmessage=e=>{
+    let d;try{d=JSON.parse(e.data)}catch(_){return}
+    if(d.type==='error'){showError(d.message||'Chess error');return}
+    if(d.type==='state'){state=d;render()}
+    if(d.type==='game_ended'){ended=true;state=null;appBoard.innerHTML='<div class="finish"><h2>🛑 GAME ENDED</h2><p class="status">'+esc(d.message||'This room was ended from Telegram.')+'</p></div>';return}
+  };
+  ws.onclose=()=>{if(!ended){clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connect,1600)}};
+}
+(async()=>{const ok=await ensureRoom();if(ok){render();connect()}})();
+</script>
+</body>
+</html>
