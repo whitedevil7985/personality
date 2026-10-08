@@ -80,6 +80,7 @@ BOT_STARTED_AT = datetime.now(timezone.utc)
 from handlers.social import persona, rank, kill, revive, topkill, marriage, reject
 from handlers.system import stats, answer, end_game, chatstatus, ping
 from handlers.middleware import track_incoming_chat
+from handlers.daily_game import random_game_callback, random_game_scheduler
 
 
 async def main():
@@ -219,6 +220,7 @@ async def main():
     # Continue checking all configured AI providers in the background every
     # 30 minutes; each cycle is written to the same logger chat and /log store.
     ai_health_task = asyncio.create_task(_ai_health_monitor(app.bot))
+    random_game_task = asyncio.create_task(random_game_scheduler(app.bot))
     # Startup log is sent only after Telegram initialization/polling succeeds.
     await log_event(
         type("StartupContext", (), {"bot": app.bot})(),
