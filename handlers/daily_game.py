@@ -1,7 +1,6 @@
 """Daily random group-game event scheduler.
 
-Posts one random existing native bot game per active group each calendar day.
-Web Mini App games are intentionally excluded.
+Posts one random existing bot game per active group each calendar day, including Ludo and Scribble Mini Apps.
 """
 
 import asyncio
@@ -24,7 +23,7 @@ CHECK_INTERVAL = max(
     int(os.getenv("RANDOM_GAME_CHECK_INTERVAL_SECONDS", "60")),
 )
 
-# Existing native bot games only. Mini App/web games are deliberately omitted.
+# Existing bot games. Ludo and Scribble are included through their normal launch handlers.
 RANDOM_GAME_HANDLERS = {
     "dice": dice,
     "slots": slots,
@@ -40,6 +39,8 @@ RANDOM_GAME_HANDLERS = {
     "crash": crash,
     "charades": charades,
     "hack": hack,
+    "ludo": ludo,
+    "scribble": scribble,
 }
 
 RANDOM_GAME_LABELS = {
@@ -57,6 +58,8 @@ RANDOM_GAME_LABELS = {
     "crash": "🚀 Crash",
     "charades": "🎭 Charades",
     "hack": "💻 Hack",
+    "ludo": "🎲 Ludo",
+    "scribble": "🖌️ Scribble",
 }
 
 def _random_time_for_date(day):
