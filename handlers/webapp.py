@@ -172,7 +172,7 @@ def get_chess_webapp_url():
         webapp_url += "/chess"
     # Cache-bust only the frontend version; preserve the configured route.
     params_sep = "&" if "?" in webapp_url else "?"
-    if "v=20261008" not in webapp_url:
+    if "v=20261009" not in webapp_url:
         webapp_url += params_sep + "v=20261008"
     return webapp_url
 
