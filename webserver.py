@@ -895,12 +895,78 @@ CHESS_PIECES = {
 }
 
 def new_chess_room():
-    return {'code':None,'board':chesslib.Board() if chesslib else None,'players':[],
-            'started':False,'winner':None,'draw':False,'payout_done':False,
-            'chat':[],'created':time.time(),'updated':time.time(),'ended':False,'drawn_card':None}
+    return {
+        'code': None,
+        'board': chesslib.Board() if chesslib else None,
+        'players': [],
+        'started': False,
+        'winner': None,
+        'draw': False,
+        'payout_done': False,
+        'reward_coins': 0,
+        'reward_points': 0,
+        'history': [],
+        'last_move': None,
+        'chat': [],
+        'created': time.time(),
+        'updated': time.time(),
+        'ended': False,
+    }
+
+def create_chess_join_token(room_code, user_id, ttl=None):
+    """Create a signed Chess room token bound to one Telegram user ID."""
+    room_code = str(room_code or '').upper().strip()
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return ''
+    ttl = int(ttl or os.getenv('CHESS_JOIN_TOKEN_TTL_SECONDS', '21600'))
+    expires = int(time.time()) + max(300, ttl)
+    secret = (os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN') or '').encode()
+    if not secret or not room_code:
+        return ''
+    payload = f'{room_code}:{uid}:{expires}'
+    signature = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    return f'{uid}.{expires}.{signature}'
+
+def verify_chess_join_token(room_code, token):
+    """Verify a signed Chess room token and return its Telegram user ID."""
+    room_code = str(room_code or '').upper().strip()
+    try:
+        uid_s, exp_s, signature = str(token or '').split('.', 2)
+        uid = int(uid_s)
+        expires = int(exp_s)
+    except (TypeError, ValueError):
+        return None
+    if not room_code or time.time() > expires:
+        return None
+    secret = (os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN') or '').encode()
+    if not secret:
+        return None
+    payload = f'{room_code}:{uid}:{expires}'
+    expected = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    return uid if hmac.compare_digest(expected, signature) else None
+
+async def create_chess_room_for_group(group_id=None):
+    """Create a Chess room server-side so Telegram users can join securely."""
+    if chesslib is None:
+        return ''
+    async with CHESS_LOCK:
+        code = new_code()
+        room = new_chess_room()
+        room['code'] = code
+        room['group_id'] = int(group_id) if group_id is not None else None
+        CHESS_ROOMS[code] = room
+        return code
 
 def chess_player_public(p):
-    return {'id':p['id'],'name':p['name'],'color':p['color'],'bot':p.get('bot',False),'connected':p.get('connected',False)}
+    return {
+        'id':p['id'],
+        'name':p['name'],
+        'color':p['color'],
+        'bot':p.get('bot',False),
+        'connected':p.get('connected',False)
+    }
 
 def chess_state(room, you=None):
     b=room['board']
@@ -908,15 +974,30 @@ def chess_state(room, you=None):
     if b:
         for sq in chesslib.SQUARES:
             p=b.piece_at(sq)
-            if p: pieces.append({'square':chesslib.square_name(sq),'piece':CHESS_PIECES[p.symbol()]})
+            if p:
+                pieces.append({'square':chesslib.square_name(sq),'piece':CHESS_PIECES[p.symbol()]})
     turn='white' if b and b.turn else 'black'
-    return {'type':'state','room':room['code'],'started':room['started'],'winner':room['winner'],
-            'turn':turn,'fen':b.fen() if b else '', 'pieces':pieces,
-            'players':[chess_player_public(p) for p in room['players']], 'you':you,
-            'check':bool(b and b.is_check()), 'checkmate':bool(b and b.is_checkmate()),
-            'stalemate':bool(b and b.is_stalemate()),
-            'draw':bool(room.get('draw') or (b and b.is_draw())),
-            'chat':room['chat'][-30:]}
+    return {
+        'type':'state',
+        'room':room['code'],
+        'started':room['started'],
+        'ended':room.get('ended',False),
+        'winner':room['winner'],
+        'turn':turn,
+        'fen':b.fen() if b else '',
+        'pieces':pieces,
+        'players':[chess_player_public(p) for p in room['players']],
+        'you':you,
+        'check':bool(b and b.is_check()),
+        'checkmate':bool(b and b.is_checkmate()),
+        'stalemate':bool(b and b.is_stalemate()),
+        'draw':bool(room.get('draw') or (b and b.is_draw())),
+        'history':room.get('history',[])[-80:],
+        'last_move':room.get('last_move'),
+        'reward_coins':int(room.get('reward_coins',0) or 0),
+        'reward_points':int(room.get('reward_points',0) or 0),
+        'chat':room['chat'][-30:]
+    }
 
 async def broadcast_chess(room):
     for p in room['players']:
@@ -924,37 +1005,40 @@ async def broadcast_chess(room):
             await p['ws'].send_json(chess_state(room,p['id']))
 
 def chess_current_player(room):
-    if not room['board']: return None
+    if not room['board']:
+        return None
     color='white' if room['board'].turn else 'black'
     return next((p for p in room['players'] if p['color']==color),None)
-
 
 async def _chess_award(room):
     """Reward the Telegram winner once and record Chess leaderboard points."""
     if room.get('payout_done') or not room.get('winner'):
         return
-    room['payout_done'] = True
     winner_id = str(room.get('winner'))
-    for player in room.get('players', []):
-        uid = player.get('id')
-        try:
-            numeric_uid = int(uid)
-        except (TypeError, ValueError):
-            continue
-        if str(uid) != winner_id:
-            continue
-        try:
-            await add_coins(numeric_uid, 750)
-            await add_xp(numeric_uid, 100)
-            await record_game_result(
-                numeric_uid,
-                'CHESS',
-                points=750,
-                won=True,
-                chat_id=room.get('group_id'),
-            )
-        except Exception as exc:
-            print(f"[Chess][Reward] {type(exc).__name__}: {exc}")
+    winner = next((p for p in room.get('players', []) if str(p.get('id')) == winner_id), None)
+    if not winner:
+        return
+    try:
+        numeric_uid = int(winner.get('id'))
+    except (TypeError, ValueError):
+        # Browser-only guests do not have a Telegram balance.
+        return
+    room['payout_done'] = True
+    try:
+        await add_coins(numeric_uid, 750)
+        await add_xp(numeric_uid, 100)
+        await record_game_result(
+            numeric_uid,
+            'CHESS',
+            points=750,
+            won=True,
+            chat_id=room.get('group_id'),
+        )
+        room['reward_coins'] = 750
+        room['reward_points'] = 750
+    except Exception as exc:
+        room['payout_done'] = False
+        print(f"[Chess][Reward] {type(exc).__name__}: {exc}")
 
 async def create_chess_room(request):
     if chesslib is None: return web.json_response({'ok':False,'error':'Chess package unavailable'},status=500)
@@ -966,15 +1050,21 @@ async def chess_page(request): return web.FileResponse(WEB/'chess.html')
 
 async def maybe_chess_bot_turn(room):
     await asyncio.sleep(.65)
-    if room.get('ended') or not room['started'] or room['winner'] or chesslib is None: return
+    if room.get('ended') or not room['started'] or room['winner'] or room.get('draw') or chesslib is None:
+        return
     p=chess_current_player(room)
-    if not p or not p.get('bot'): return
+    if not p or not p.get('bot'):
+        return
     moves=list(room['board'].legal_moves)
-    if not moves: return
-    # prefer captures/checks when available, otherwise random legal move
+    if not moves:
+        return
     captures=[m for m in moves if room['board'].is_capture(m)]
     move=random.choice(captures or moves)
-    room['board'].push(move); room['updated']=time.time()
+    san=room['board'].san(move)
+    room['board'].push(move)
+    room['history'].append({'san':san,'color':'black'})
+    room['last_move']={'from':chesslib.square_name(move.from_square),'to':chesslib.square_name(move.to_square)}
+    room['updated']=time.time()
     if room['board'].is_checkmate():
         room['winner']=p['id']
         room['draw']=False
@@ -989,8 +1079,21 @@ async def chess_ws(request):
     code=request.match_info['code'].upper(); room=CHESS_ROOMS.get(code)
     if not room: return web.json_response({'ok':False,'error':'Room not found'},status=404)
     ws=web.WebSocketResponse(heartbeat=25); await ws.prepare(request)
+
     tg_user=verify_telegram_init_data(request.query.get('initData',''))
-    session_id=str(tg_user['id']) if tg_user else 'guest-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(12))
+    token_uid=verify_chess_join_token(code,request.query.get('token',''))
+    if token_uid is not None and tg_user is not None and int(tg_user.get('id')) != int(token_uid):
+        await ws.send_json({'type':'error','message':'Telegram account verification mismatch.'})
+        await ws.close()
+        return ws
+
+    verified_user_id = token_uid if token_uid is not None else (tg_user.get('id') if tg_user else None)
+    if verified_user_id is not None:
+        session_id=str(verified_user_id)
+    else:
+        client_id=''.join(ch for ch in (request.query.get('cid') or '') if ch.isalnum() or ch in '_-')[:80]
+        session_id='guest-'+client_id if client_id else 'guest-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(12))
+
     try:
         async for msg in ws:
             if msg.type!=WSMsgType.TEXT: continue
@@ -998,7 +1101,14 @@ async def chess_ws(request):
             except Exception: continue
             typ=data.get('type')
             if typ=='join':
-                name=(data.get('name') or (tg_user or {}).get('first_name') or 'Player')[:32]
+                name=(data.get('name') or (tg_user or {}).get('first_name') or '').strip()[:32]
+                if not name and verified_user_id is not None:
+                    try:
+                        existing=await users.find_one({'_id':int(verified_user_id)},{'name':1})
+                        name=(existing or {}).get('name') or ''
+                    except Exception:
+                        pass
+                name=name or 'Player'
                 p=next((x for x in room['players'] if x['id']==session_id),None)
                 if not p:
                     if len(room['players'])>=2: await ws.send_json({'type':'error','message':'Room is full'}); continue
@@ -1027,13 +1137,24 @@ async def chess_ws(request):
                 if chess_current_player(room).get('bot'):
                     asyncio.create_task(maybe_chess_bot_turn(room))
             elif typ=='move':
-                if not room['started'] or room['winner']: continue
+                if not room['started'] or room['winner'] or room.get('draw'): continue
                 p=next((x for x in room['players'] if x['id']==session_id),None); cur=chess_current_player(room)
-                if not p or not cur or cur['id']!=session_id: await ws.send_json({'type':'error','message':'Not your turn'}); continue
-                try: move=chesslib.Move.from_uci(data.get('uci',''))
-                except Exception: await ws.send_json({'type':'error','message':'Invalid move'}); continue
-                if move not in room['board'].legal_moves: await ws.send_json({'type':'error','message':'Illegal move'}); continue
-                room['board'].push(move); room['updated']=time.time()
+                if not p or not cur or cur['id']!=session_id:
+                    await ws.send_json({'type':'error','message':'Not your turn'})
+                    continue
+                try:
+                    move=chesslib.Move.from_uci(data.get('uci',''))
+                except Exception:
+                    await ws.send_json({'type':'error','message':'Invalid move'})
+                    continue
+                if move not in room['board'].legal_moves:
+                    await ws.send_json({'type':'error','message':'Illegal move'})
+                    continue
+                san=room['board'].san(move)
+                room['board'].push(move)
+                room['history'].append({'san':san,'color':'white' if p['color']=='white' else 'black'})
+                room['last_move']={'from':chesslib.square_name(move.from_square),'to':chesslib.square_name(move.to_square)}
+                room['updated']=time.time()
                 if room['board'].is_checkmate():
                     room['winner']=session_id
                     room['draw']=False
@@ -1043,7 +1164,10 @@ async def chess_ws(request):
                     room['draw']=True
                     room['started']=False
                 await broadcast_chess(room)
-                if room['started'] and not room['winner'] and chess_current_player(room).get('bot'): asyncio.create_task(maybe_chess_bot_turn(room))
+                if room['started'] and not room['winner'] and not room.get('draw'):
+                    nxt=chess_current_player(room)
+                    if nxt and nxt.get('bot'):
+                        asyncio.create_task(maybe_chess_bot_turn(room))
             elif typ=='resign':
                 p=next((x for x in room['players'] if x['id']==session_id),None)
                 if p:
@@ -1051,6 +1175,7 @@ async def chess_ws(request):
                     room['winner']=opp['id'] if opp else None
                     room['draw']=False
                     room['started']=False
+                    room['updated']=time.time()
                     if room.get('winner'):
                         await _chess_award(room)
                     await broadcast_chess(room)
