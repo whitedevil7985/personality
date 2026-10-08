@@ -1105,6 +1105,90 @@ async def create_chess_room(request):
         code=new_code(); room=new_chess_room(); room['code']=code; room['group_id']=request_group_id(request); CHESS_ROOMS[code]=room
     return web.json_response({'ok':True,'room':code})
 
+async def chess_http_state(request):
+    code=request.match_info['code'].upper()
+    token=request.query.get('token','')
+    init_data=request.query.get('initData','')
+    token_uid=verify_chess_join_token(code,token)
+    tg_user=verify_telegram_init_data(init_data)
+    uid=token_uid if token_uid is not None else (tg_user.get('id') if tg_user else None)
+    if uid is None:
+        return web.json_response({'ok':False,'error':'Telegram verification required.'},status=401)
+    room=CHESS_ROOMS.get(code)
+    if not room:
+        return web.json_response({'ok':False,'error':'Chess room expired. Open a fresh /chess room.'},status=404)
+    if token_uid is not None and tg_user is not None and int(token_uid)!=int(tg_user.get('id')):
+        return web.json_response({'ok':False,'error':'Telegram account verification mismatch.'},status=403)
+    name=(request.query.get('name') or (tg_user or {}).get('first_name') or 'Player').strip()[:32] or 'Player'
+    async with CHESS_LOCK:
+        p=next((x for x in room['players'] if str(x.get('id'))==str(uid)),None)
+        if not p:
+            if len(room['players'])>=2:
+                return web.json_response({'ok':False,'error':'Room is full. Only 2 players can join.'},status=409)
+            color='white' if not any(x.get('color')=='white' for x in room['players']) else 'black'
+            p={'id':str(uid),'telegram_id':int(uid),'name':name,'color':color,'bot':False,'connected':True,'ws':None}
+            room['players'].append(p)
+        else:
+            p['name']=name
+            p['connected']=True
+        room['updated']=time.time()
+    return web.json_response({'ok':True,'state':chess_state(room,str(uid))})
+
+async def chess_http_action(request):
+    code=request.match_info['code'].upper()
+    token=request.query.get('token','')
+    init_data=request.query.get('initData','')
+    token_uid=verify_chess_join_token(code,token)
+    tg_user=verify_telegram_init_data(init_data)
+    uid=token_uid if token_uid is not None else (tg_user.get('id') if tg_user else None)
+    if uid is None:
+        return web.json_response({'ok':False,'error':'Telegram verification required.'},status=401)
+    room=CHESS_ROOMS.get(code)
+    if not room:
+        return web.json_response({'ok':False,'error':'Chess room expired.'},status=404)
+    if token_uid is not None and tg_user is not None and int(token_uid)!=int(tg_user.get('id')):
+        return web.json_response({'ok':False,'error':'Telegram account verification mismatch.'},status=403)
+    try: data=await request.json()
+    except Exception: data={}
+    typ=data.get('type')
+    p=next((x for x in room['players'] if str(x.get('id'))==str(uid)),None)
+    if typ=='add_bot':
+        if room.get('started') or len(room['players'])>=2:
+            return web.json_response({'ok':False,'error':'A bot cannot be added now.'},status=409)
+        room['players'].append({'id':'bot-'+''.join(random.choice(string.ascii_lowercase+string.digits) for _ in range(8)),'name':'Bot Alpha','telegram_id':None,'color':'black','bot':True,'connected':True,'ws':None})
+    elif typ=='start':
+        if len(room['players'])<2:
+            return web.json_response({'ok':False,'error':'2 players are needed, or add a bot.'},status=409)
+        room['started']=True; room['draw']=False; room['winner']=None; room['payout_done']=False; room['reward_coins']=0; room['reward_points']=0; room['history']=[]; room['last_move']=None
+    elif typ=='move':
+        if not room.get('started') or room.get('winner') or room.get('draw'):
+            return web.json_response({'ok':False,'error':'The game is not running.'},status=409)
+        cur=chess_current_player(room)
+        if not p or not cur or str(cur.get('id'))!=str(uid):
+            return web.json_response({'ok':False,'error':'Not your turn.'},status=409)
+        try: move=chesslib.Move.from_uci(data.get('uci',''))
+        except Exception: return web.json_response({'ok':False,'error':'Invalid move.'},status=400)
+        if move not in room['board'].legal_moves:
+            return web.json_response({'ok':False,'error':'Illegal move.'},status=409)
+        san=room['board'].san(move); room['board'].push(move); room['history'].append({'san':san,'color':'white' if p['color']=='white' else 'black'}); room['last_move']={'from':chesslib.square_name(move.from_square),'to':chesslib.square_name(move.to_square)}
+        if room['board'].is_checkmate():
+            room['winner']=str(uid); room['draw']=False; room['started']=False; await _chess_award(room)
+        elif room['board'].is_game_over():
+            room['draw']=True; room['started']=False
+    elif typ=='resign':
+        if p:
+            opp=next((x for x in room['players'] if str(x.get('id'))!=str(uid)),None)
+            room['winner']=opp['id'] if opp else None; room['draw']=False; room['started']=False
+            if room.get('winner'): await _chess_award(room)
+    else:
+        return web.json_response({'ok':False,'error':'Unknown Chess action.'},status=400)
+    room['updated']=time.time()
+    await broadcast_chess(room)
+    if room.get('started') and not room.get('winner') and not room.get('draw'):
+        nxt=chess_current_player(room)
+        if nxt and nxt.get('bot'): asyncio.create_task(maybe_chess_bot_turn(room))
+    return web.json_response({'ok':True,'state':chess_state(room,str(uid))})
+
 async def chess_page(request):
     # Chess frontend changes must reach Telegram's in-app browser immediately.
     # Prevent stale cached HTML from keeping an older WebSocket client alive.
