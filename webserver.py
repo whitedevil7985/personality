@@ -48,7 +48,8 @@ def new_room(game='ludo'):
     return {
         'code': None, 'game': game, 'players': [], 'started': False, 'turn': 0,
         'positions': {}, 'winner': None, 'last_roll': 0, 'created': time.time(),
-        'updated': time.time(), 'chat': [], 'pending_roll': 0, 'movable': [], 'spectators': [], 'ended': False
+        'updated': time.time(), 'chat': [], 'pending_roll': 0, 'movable': [], 'spectators': [], 'ended': False,
+        'turn_started_at': time.time(), 'missed_turns': {}, 'turn_watchdog_task': None
     }
 
 
@@ -276,6 +277,69 @@ def apply_ludo_move(room, player, token, roll):
 def ludo_advance_turn(room):
     if room['players']:
         room['turn'] = (room['turn'] + 1) % len(room['players'])
+        room['turn_started_at'] = time.time()
+
+
+async def ludo_turn_watchdog(room):
+    """Skip a turn after 15 seconds; remove a player after 3 consecutive timeouts."""
+    while room.get('started') and not room.get('winner') and not room.get('ended'):
+        await asyncio.sleep(1)
+        player = current_player(room)
+        if not player or player.get('bot'):
+            continue
+        if time.time() - float(room.get('turn_started_at') or time.time()) < 15:
+            continue
+
+        player_id = player['id']
+        missed = room.setdefault('missed_turns', {})
+        missed[player_id] = int(missed.get(player_id, 0)) + 1
+        old_turn = room['turn']
+        ludo_reset_roll(room)
+        room['last_roll'] = 0
+
+        if missed[player_id] >= 3:
+            player_name = player.get('name') or 'Player'
+            room['players'].pop(old_turn)
+            room['positions'].pop(player_id, None)
+            missed.pop(player_id, None)
+            if not room['players']:
+                room['turn'] = 0
+                room['winner'] = None
+                room['started'] = False
+            else:
+                room['turn'] = old_turn % len(room['players'])
+                room['turn_started_at'] = time.time()
+                if len(room['players']) == 1:
+                    room['winner'] = room['players'][0]['id']
+            room['updated'] = time.time()
+            await broadcast_ludo(room, {
+                'event': 'player_removed', 'player': player_id,
+                'player_name': player_name, 'reason': '3 consecutive turns missed',
+                'missed_turns': 3,
+            })
+            if room.get('winner'):
+                winner = find_player(room, room['winner'])
+                await _ludo_award(room)
+                await broadcast_ludo(room, {
+                    'event': 'winner', 'winner': room['winner'],
+                    'winner_name': (winner or {}).get('name') or 'Player',
+                    'reward_coins': 500, 'reward_points': 500,
+                })
+                return
+            if not room['started']:
+                return
+        else:
+            ludo_advance_turn(room)
+            room['updated'] = time.time()
+            await broadcast_ludo(room, {
+                'event': 'turn_timeout', 'player': player_id,
+                'player_name': player.get('name') or 'Player',
+                'missed_turns': missed[player_id], 'timeout_seconds': 15,
+            })
+
+        next_player = current_player(room)
+        if next_player and next_player.get('bot'):
+            asyncio.create_task(maybe_ludo_bot_turn(room))
 
 
 async def _ludo_award(room):
@@ -356,8 +420,11 @@ async def maybe_ludo_bot_turn(room):
         return
 
     ludo_reset_roll(room)
-    # A capture grants the bot/player another turn, just like rolling a six.
-    if not room['winner'] and roll != 6 and not captured:
+    room.setdefault('missed_turns', {})[p['id']] = 0
+    # A capture grants another turn, just like rolling a six.
+    if not room['winner'] and (roll == 6 or captured):
+        room['turn_started_at'] = time.time()
+    elif not room['winner']:
         ludo_advance_turn(room)
     room['updated'] = time.time()
     await broadcast_ludo(room, {
@@ -489,8 +556,13 @@ async def ludo_ws(request):
                 room['turn'] = 0
                 room['last_roll'] = 0
                 room['payout_done'] = False
+                room['missed_turns'] = {}
+                room['turn_started_at'] = time.time()
                 ludo_reset_roll(room)
                 room['updated'] = time.time()
+                watchdog = room.get('turn_watchdog_task')
+                if not watchdog or watchdog.done():
+                    room['turn_watchdog_task'] = asyncio.create_task(ludo_turn_watchdog(room))
                 await broadcast_ludo(room, {'event': 'started'})
                 if current_player(room) and current_player(room).get('bot'):
                     asyncio.create_task(maybe_ludo_bot_turn(room))
@@ -542,9 +614,11 @@ async def ludo_ws(request):
                     continue
 
                 ludo_reset_roll(room)
-                # Capturing an opponent's token grants an extra turn, even
-                # when the dice roll was not a six.
-                if not room['winner'] and roll != 6 and not captured:
+                room.setdefault('missed_turns', {})[p['id']] = 0
+                # Reset the timer for an extra turn too; capture and six keep the turn.
+                if not room['winner'] and (roll == 6 or captured):
+                    room['turn_started_at'] = time.time()
+                elif not room['winner']:
                     ludo_advance_turn(room)
                 room['updated'] = time.time()
                 await broadcast_ludo(room, {
