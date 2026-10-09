@@ -643,7 +643,7 @@ async def ludo_ws(request):
                     await broadcast_ludo(room, {
                         'event': 'winner',
                         'winner': room.get('winner'),
-                        'winner_name': p.get('name') or 'Player',
+                        'winner_name': (find_player(room, room.get('winner')) or {}).get('name') or p.get('name') or 'Player',
                         'ended': True,
                         'reward_coins': 500,
                         'reward_points': 500,
