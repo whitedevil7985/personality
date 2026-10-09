@@ -356,7 +356,8 @@ async def maybe_ludo_bot_turn(room):
         return
 
     ludo_reset_roll(room)
-    if not room['winner'] and roll != 6:
+    # A capture grants the bot/player another turn, just like rolling a six.
+    if not room['winner'] and roll != 6 and not captured:
         ludo_advance_turn(room)
     room['updated'] = time.time()
     await broadcast_ludo(room, {
@@ -541,7 +542,9 @@ async def ludo_ws(request):
                     continue
 
                 ludo_reset_roll(room)
-                if not room['winner'] and roll != 6:
+                # Capturing an opponent's token grants an extra turn, even
+                # when the dice roll was not a six.
+                if not room['winner'] and roll != 6 and not captured:
                     ludo_advance_turn(room)
                 room['updated'] = time.time()
                 await broadcast_ludo(room, {
