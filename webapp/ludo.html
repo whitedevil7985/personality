@@ -219,7 +219,7 @@ function renderBoard(d){
       const oldNumber=document.getElementById(`home-number-${p.color}-${i}`);
       if(oldNumber)oldNumber.remove();
 
-      if(pos===58)return;
+      if(pos===57)return;
       const target=posXY(p.color,pos);
       if(!target)return;
 
@@ -262,7 +262,7 @@ function renderBoard(d){
     });
   }
 }
-function renderScore(d){const s=document.getElementById('score');s.innerHTML='';for(const p of d.players){const arr=d.positions[String(p.id)]||[];const done=arr.filter(v=>v===58).length;const div=document.createElement('div');div.className='pill';div.innerHTML=`<span style="color:${COLOR_FILL[p.color]}">●</span> ${escapeHtml(p.name)} · ${done}/4`;s.appendChild(div)}}
+function renderScore(d){const s=document.getElementById('score');s.innerHTML='';for(const p of d.players){const arr=d.positions[String(p.id)]||[];const done=arr.filter(v=>v===57).length;const div=document.createElement('div');div.className='pill';div.innerHTML=`<span style="color:${COLOR_FILL[p.color]}">●</span> ${escapeHtml(p.name)} · ${done}/4`;s.appendChild(div)}}
 function showRoll(n){if(!n)return;const b=document.getElementById('rollBtn');document.getElementById('diceFace').textContent=DICE[n]||'🎲';b.classList.remove('rolling');b.classList.add('show');clearTimeout(diceTimer);diceTimer=setTimeout(()=>{b.classList.remove('show')},900)}
 function resetDice(){const b=document.getElementById('rollBtn');b.classList.remove('rolling','show');document.getElementById('diceFace').textContent='🎲'}
 function showSix(){const f=document.getElementById('flash');f.classList.remove('show');void f.offsetWidth;f.classList.add('show')}
