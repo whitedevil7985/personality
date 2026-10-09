@@ -536,7 +536,10 @@ async def ludo_ws(request):
                 await broadcast_ludo(room, {'event': 'color', 'player': session_id})
 
             elif typ == 'add_bot':
-                if room['started'] or len(room['players']) >= 4:
+                # Bots are added only by an explicit Add bot button action from
+                # a human already seated in this room. Never auto-fill empty seats.
+                requester = find_player(room, session_id)
+                if not requester or requester.get('bot') or room['started'] or len(room['players']) >= 4:
                     continue
                 used = {x['color'] for x in room['players']}
                 color = next((c for c in COLORS if c not in used), None)
