@@ -583,6 +583,8 @@ async def ludo_ws(request):
                 room['updated'] = time.time()
 
                 if not room['movable']:
+                    # A roll with no legal token is still a completed turn action.
+                    room.setdefault('missed_turns', {})[p['id']] = 0
                     # On 1–5 the turn changes. On 6 the same player may roll again.
                     ludo_reset_roll(room)
                     if roll != 6:
