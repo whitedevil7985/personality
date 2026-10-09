@@ -183,8 +183,8 @@ def current_player(room):
 
 
 # Ludo rules mirror the supplied source implementation:
-# progress -1 = base, 0..51 = outer track, 52..57 = six coloured home-lane
-# cells, and 58 = centre finish.
+# progress -1 = base, 0..51 = outer track, 52..56 = five coloured home-lane
+# cells, and 57 = centre finish.
 LUDO_PATH_LEN = 52
 LUDO_PATH = [
     (6,1),(6,2),(6,3),(6,4),(6,5),
@@ -202,13 +202,15 @@ LUDO_PATH = [
 ]
 LUDO_START = {'red': 0, 'green': 13, 'yellow': 26, 'blue': 39}
 LUDO_LANES = {
-    'red': [(7,1),(7,2),(7,3),(7,4),(7,5),(7,6)],
-    'green': [(1,7),(2,7),(3,7),(4,7),(5,7),(6,7)],
-    'yellow': [(7,13),(7,12),(7,11),(7,10),(7,9),(7,8)],
-    'blue': [(13,7),(12,7),(11,7),(10,7),(9,7),(8,7)],
+    # Five coloured home-lane boxes per colour; the central 3x3 finish
+    # area begins immediately after these lanes.
+    'red': [(7,1),(7,2),(7,3),(7,4),(7,5)],
+    'green': [(1,7),(2,7),(3,7),(4,7),(5,7)],
+    'yellow': [(7,13),(7,12),(7,11),(7,10),(7,9)],
+    'blue': [(13,7),(12,7),(11,7),(10,7),(9,7)],
 }
 LUDO_SAFE = {0, 8, 13, 21, 26, 34, 39, 47}
-LUDO_FINISH = 58
+LUDO_FINISH = 57
 LUDO_HOME = -1
 
 
