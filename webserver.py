@@ -138,6 +138,8 @@ def ludo_state(room):
         'started': room['started'],
         'turn': room['turn'],
         'winner': room['winner'],
+        'ended': bool(room.get('ended') or room.get('winner')),
+        'winner_name': (find_player(room, room.get('winner')) or {}).get('name') if room.get('winner') else None,
         'last_roll': room['last_roll'],
         'pending_roll': room.get('pending_roll', 0),
         'movable': list(room.get('movable', [])),
@@ -271,6 +273,8 @@ def apply_ludo_move(room, player, token, roll):
     captured = ludo_capture(room, player, newpos)
     if all(x == LUDO_FINISH for x in arr):
         room['winner'] = player['id']
+        room['ended'] = True
+        room['updated'] = time.time()
     return True, newpos, captured
 
 
@@ -628,11 +632,19 @@ async def ludo_ws(request):
                     'captured': captured, 'roll': roll,
                 })
                 if room.get('winner'):
+                    room['ended'] = True
+                    room['started'] = True
+                    room['pending_roll'] = 0
+                    room['movable'] = []
+                    room['updated'] = time.time()
                     await _ludo_award(room)
+                    # Broadcast the terminal winner state to every player still
+                    # connected to this room so nobody remains on a live turn.
                     await broadcast_ludo(room, {
                         'event': 'winner',
                         'winner': room.get('winner'),
                         'winner_name': p.get('name') or 'Player',
+                        'ended': True,
                         'reward_coins': 500,
                         'reward_points': 500,
                     })
