@@ -57,7 +57,7 @@ const COLOR_LIGHT={green:'#d4f0dc',yellow:'#fff0bd',red:'#ffd7d2',blue:'#d6e8fa'
 const DICE=['','⚀','⚁','⚂','⚃','⚄','⚅'];
 const PATH=[[6,1],[6,2],[6,3],[6,4],[6,5],[5,6],[4,6],[3,6],[2,6],[1,6],[0,6],[0,7],[0,8],[1,8],[2,8],[3,8],[4,8],[5,8],[6,9],[6,10],[6,11],[6,12],[6,13],[6,14],[7,14],[8,14],[8,13],[8,12],[8,11],[8,10],[8,9],[9,8],[10,8],[11,8],[12,8],[13,8],[14,8],[14,7],[14,6],[13,6],[12,6],[11,6],[10,6],[9,6],[8,5],[8,4],[8,3],[8,2],[8,1],[8,0],[7,0],[6,0]];
 const START={red:0,green:13,yellow:26,blue:39};
-const LANES={red:[[7,1],[7,2],[7,3],[7,4],[7,5],[7,6]],green:[[1,7],[2,7],[3,7],[4,7],[5,7],[6,7]],yellow:[[7,13],[7,12],[7,11],[7,10],[7,9],[7,8]],blue:[[13,7],[12,7],[11,7],[10,7],[9,7],[8,7]]};
+const LANES={red:[[7,1],[7,2],[7,3],[7,4],[7,5]],green:[[1,7],[2,7],[3,7],[4,7],[5,7]],yellow:[[7,13],[7,12],[7,11],[7,10],[7,9]],blue:[[13,7],[12,7],[11,7],[10,7],[9,7]]};
 const HOME_SLOTS={red:[[80,80],[160,80],[80,160],[160,160]],green:[[440,80],[520,80],[440,160],[520,160]],yellow:[[440,440],[520,440],[440,520],[520,520]],blue:[[80,440],[160,440],[80,520],[160,520]]};
 const SAFE_INDEX=new Set([0,8,13,21,26,34,39,47]);
 let ws=null,room='',state=null,previous=null,myId='',selected='red',botUsername='ItzVanyaBot',diceTimer=null,spectator=false ,ended=false;
@@ -147,17 +147,16 @@ function drawHome(svg,color,x,y){
 function drawBoard(){const svg=document.getElementById('board');svg.innerHTML='';drawHome(svg,'red',0,0);drawHome(svg,'green',360,0);drawHome(svg,'yellow',360,360);drawHome(svg,'blue',0,360);
   PATH.forEach(([r,c],i)=>{const [cx,cy]=xy(r,c);const fill=(i===START.green?COLOR_FILL.green:i===START.yellow?COLOR_FILL.yellow:i===START.blue?COLOR_FILL.blue:i===START.red?COLOR_FILL.red:'#fffdf9');rect(svg,c*40,r*40,40,40,fill,0,'track-cell')});
   for(const [color,arr] of Object.entries(LANES))arr.forEach(([r,c])=>rect(svg,c*40,r*40,40,40,COLOR_LIGHT[color],0,'track-cell'));
-  // Source layout uses the single center cell (row 7, col 7) for the
-  // four-color finish marker. Keep the six colored home-lane cells visible
-  // around it; they must not be covered by a giant 3x3 triangle.
-  rect(svg,280,280,40,40,'#fffaf1');
-  svg.appendChild(svgEl('polygon',{points:'280,280 320,280 300,300',fill:COLOR_FILL.yellow}));
-  svg.appendChild(svgEl('polygon',{points:'320,280 320,320 300,300',fill:COLOR_FILL.blue}));
-  svg.appendChild(svgEl('polygon',{points:'320,320 280,320 300,300',fill:COLOR_FILL.red}));
-  svg.appendChild(svgEl('polygon',{points:'280,320 280,280 300,300',fill:COLOR_FILL.green}));
+  // The centre finish occupies the central 3x3 grid. Each home lane
+  // has five coloured boxes and meets this finish area directly.
+  rect(svg,240,240,120,120,'#fffaf1');
+  svg.appendChild(svgEl('polygon',{points:'240,240 300,300 240,360',fill:COLOR_FILL.red}));
+  svg.appendChild(svgEl('polygon',{points:'240,240 360,240 300,300',fill:COLOR_FILL.green}));
+  svg.appendChild(svgEl('polygon',{points:'360,240 360,360 300,300',fill:COLOR_FILL.yellow}));
+  svg.appendChild(svgEl('polygon',{points:'240,360 360,360 300,300',fill:COLOR_FILL.blue}));
   SAFE_INDEX.forEach(i=>{const [r,c]=PATH[i];const [cx,cy]=xy(r,c);const t=svgEl('text',{x:cx,y:cy+5,class:'safe-star','text-anchor':'middle'});t.textContent='★';svg.appendChild(t)});
 }
-function posXY(color,pos){if(pos<0)return null;if(pos===58)return [300,300];if(pos<=51){const idx=(START[color]+pos)%52;return xy(PATH[idx][0],PATH[idx][1])}const lane=LANES[color];const p=lane[pos-52];return p?xy(p[0],p[1]):null}
+function posXY(color,pos){if(pos<0)return null;if(pos===57)return [300,300];if(pos<=51){const idx=(START[color]+pos)%52;return xy(PATH[idx][0],PATH[idx][1])}const lane=LANES[color];const p=lane[pos-52];return p?xy(p[0],p[1]):null}
 function homeXY(color,token){return HOME_SLOTS[color][token]}
 function stackOffsets(n){if(n===1)return [[0,0]];if(n===2)return [[-9,0],[9,0]];if(n===3)return [[-9,-8],[9,-8],[0,9]];return [[-9,-9],[9,-9],[-9,9],[9,9]]}
 function tokenKey(pid,i){return 'token-'+String(pid).replace(/[^a-zA-Z0-9_-]/g,'_')+'-'+i}
