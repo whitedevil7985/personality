@@ -345,12 +345,11 @@ async def mention_chat(update,context):
     ):
         return
 
-    # Respect the group reply mode. When AI_GROUP_REPLY_ALL is disabled,
-    # Vanya only answers when addressed directly, replied to, or greeted.
-    # This prevents her from interrupting ordinary member-to-member chat.
+    # Never answer arbitrary group messages, even if a stale Railway
+    # variable enables AI_GROUP_REPLY_ALL. Only reply when Vanya is directly
+    # mentioned, a user replies to Vanya, or a supported greeting is used.
     should_reply = bool(
-        AI_GROUP_REPLY_ALL
-        or mentioned
+        mentioned
         or replied_to_bot
         or greeting
     )
