@@ -314,8 +314,8 @@ async def mention_chat(update,context):
     normalized = re.sub(r"\s+", " ", text.lower()).strip()
     greeting = bool(re.fullmatch(
         r"(?:"
-        r"(?:hi+|hello+|hey+)(?:\s+@?(?:vanya|itzvanya))?(?:\s+.*)?"
-        r"|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+)(?:\s+.*)?"
+        r"(?:hi+|hello+|hey+|hyy+)(?:\s+@?(?:vanya|itzvanya))?(?:\s+.*)?"
+        r"|@?(?:vanya|itzvanya)\s+(?:hi+|hello+|hey+|hyy+)(?:\s+.*)?"
         r"|(?:good\s+morning|good\s+night|goodnight)\s+@?(?:vanya|itzvanya)(?:\s+.*)?"
         r"|@?(?:vanya|itzvanya)\s+(?:good\s+morning|good\s+night|goodnight)(?:\s+.*)?"
         r")[\s!.?~]*",
