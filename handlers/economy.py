@@ -679,31 +679,39 @@ async def couple(update, context):
         )
 
     percent = random.randint(40, 100)
-    hearts = "💗" * max(1, min(5, (percent + 19) // 20))
-    logo = random.choice(["💞", "💘", "💝", "💟", "💗", "💖", "💕", "❤️‍🔥"])
     name_a = html.escape(a.first_name or "Player")
     name_b = html.escape(b.first_name or "Player")
     bar_filled = max(1, min(10, round(percent / 10)))
-    meter = "💖" * bar_filled + "🤍" * (10 - bar_filled)
+    meter = "💗" * bar_filled + "🤍" * (10 - bar_filled)
     if percent >= 90:
-        verdict = "Soulmate vibes! 💍✨"
+        verdict = "SOULMATE ALERT! 💍✨"
+        vibe = "Shaadi ki playlist ready rakho! 💃🕺"
     elif percent >= 75:
-        verdict = "Made for each other! 🥰"
+        verdict = "MADE FOR EACH OTHER! 🥰"
+        vibe = "Group ka cutest duo ban sakte ho! 🌹"
     elif percent >= 60:
-        verdict = "Cute couple energy! 💕"
+        verdict = "CHEMISTRY IS LOADING… 💞"
+        vibe = "Thodi masti, thoda romance! 😉"
     else:
-        verdict = "Opposites attract… maybe! 😏"
+        verdict = "UNEXPECTED LOVE STORY! 😏"
+        vibe = "Opposites attract—plot twist baaki hai! 🎬"
+    badge = random.choice(["💘 LOVE BIRDS", "💞 PERFECT PAIR?", "🌹 ROMANCE MODE", "💖 CRUSH ALERT"])
     await update.message.reply_html(
-        "╭━━━〔 💘 <b>VANYA LOVE MATCH</b> 〕━━━╮\n"
+        "╭━━━ 💌 <b>VANYA'S LOVE LAB</b> 💌 ━━━╮\n"
+        f"       <i>{badge}</i>\n"
         "╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"✨ <b>{name_a}</b>  💞  <b>{name_b}</b> ✨\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"💝 <b>Love compatibility: {percent}%</b>\n"
-        f"{meter}\n"
-        f"{hearts}\n\n"
-        f"🌹 <i>{verdict}</i>\n\n"
-        "💌 <b>Next step:</b> Reply to your match with <code>/propose</code>\n"
-        "💍 Make it official and see if they say YES! 💖"
+        "       💗✨💗✨💗\n"
+        f"   💖 <b>{name_a}</b>  ×  <b>{name_b}</b> 💖\n"
+        "       💗✨💗✨💗\n\n"
+        "┌────── 💓 <b>LOVE METER</b> 💓 ──────┐\n"
+        f"       <b>{percent}% MATCH</b>\n"
+        f"       {meter}\n"
+        "└────────────────────────────┘\n\n"
+        f"🌹 <b>{verdict}</b>\n"
+        f"✨ <i>{vibe}</i>\n\n"
+        "💌 <b>Next mission:</b> Make it official!\n"
+        "↳ Reply to your match with <code>/propose</code> 💍\n\n"
+        "<i>⚠️ Vanya ka love meter sirf masti ke liye hai!</i>"
     )
 
 async def topcouples(update, context):
