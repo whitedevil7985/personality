@@ -88,6 +88,7 @@ from services.ai_service import _set_ai_provider_status, _ai_rate_cleanup, _wait
 
 from handlers.callback import callback
 from handlers.chat import capture_owner_custom_emojis, _typing_heartbeat, chat, gchat, direct_game_answer, mention_chat
+from handlers.quote import quote_cmd
 # Process uptime starts when the bot module is loaded. These values must
 # exist before the modular system handler imports the shared runtime namespace.
 BOT_START_TIME = time.monotonic()
@@ -125,7 +126,7 @@ async def main():
          .concurrent_updates(16)
          .build())
     commands={
-        "start":start,"help":help_cmd,"profile":profile,"bal":balance,
+        "start":start,"help":help_cmd,"profile":profile,"bal":balance,"q":quote_cmd,
         "daily":daily,"work":work,"give":give,"toprich":toprich,"leaderboard":leaderboard,
         "rank":rank,"rob":rob,"protect":protect,"shield":shield,
         "kill":kill,"revive":revive,"topkill":topkill,
@@ -153,7 +154,7 @@ async def main():
     # group/private chat shows Vanya's available commands (like the
     # command suggestions shown by established bots).
     command_descriptions = {
-        "start": "Start Vanya", "help": "Open help and command categories",
+        "start": "Start Vanya", "help": "Open help and command categories", "q": "Create a stylish quote card by replying to a message",
         "profile": "View your profile", "bal": "Check your balance",
         "daily": "Claim daily coins and XP", "work": "Work for coins", "give": "Give coins to another user",
         "toprich": "Show richest users", "leaderboard": "Show the leaderboard", "rank": "Show your rank",
