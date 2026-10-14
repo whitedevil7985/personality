@@ -20,6 +20,22 @@ body{overflow-x:hidden}.app{max-width:980px;margin:auto;padding:16px 16px 90px}.
 .item.dynamic .top{display:grid;place-items:center;font-size:25px}.item.lamp .top{background:linear-gradient(135deg,#3f4e91,#6ce3ff)}.item.console .top{background:linear-gradient(135deg,#ff5fc3,#6f63ff)}.item.bed .top{background:linear-gradient(135deg,#5f6dca,#d96cff)}.room3d[data-theme="sunset"]{background:linear-gradient(180deg,#3a2341,#141124)}.room3d[data-theme="mint"]{background:linear-gradient(180deg,#183d46,#0b171c)}.pet3d.happy{animation:petjoy .75s ease 3}.pet3d.sleep{animation:petsleep 1.5s ease}.pet3d.feed{animation:petfeed .6s ease 2}@keyframes petjoy{50%{transform:translateY(-18px) rotateY(18deg) rotateZ(2deg)}}@keyframes petsleep{50%{transform:translateY(5px) rotateZ(-7deg);filter:brightness(.75)}}@keyframes petfeed{50%{transform:scale(1.09) translateY(-5px)}}@keyframes float{50%{transform:translateY(-10px)}}@keyframes bob{50%{transform:rotateY(-18deg) rotateX(3deg) translateY(-7px)}}@keyframes petfloat{50%{transform:translateY(-10px) rotateY(5deg)}}@keyframes tail{50%{transform:rotate(55deg)}}
 @media(max-width:650px){.app{padding:12px 10px 80px}.grid{grid-template-columns:1fr}.scene3d,.room3d,.pet-stage{height:330px}.city-actions{grid-template-columns:1fr 1fr}.title{font-size:17px}.stats{max-width:52%}.room{inset:12% 4% 6%}}
 </style>
+
+<style id="vanya-colorful-buttons">
+/* Shared Vanya colorful button theme: accessible gradients, clear states, and mobile-friendly taps. */
+:root{--vanya-purple:#7651e8;--vanya-pink:#e84375;--vanya-blue:#2388e8;--vanya-green:#20a957;--vanya-gold:#dca629}
+button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"],a.button,.btn,.control,.action,.primary-btn,.secondary-btn,.menu-button,.game-button{transition:filter .16s ease,transform .16s ease,box-shadow .16s ease!important}
+button:not(:disabled),[role="button"],input[type="button"]:not(:disabled),input[type="submit"]:not(:disabled),input[type="reset"]:not(:disabled),a.button,.btn,.control,.action,.primary-btn,.secondary-btn,.menu-button,.game-button{background-image:linear-gradient(135deg,rgba(255,255,255,.13),rgba(255,255,255,0))!important;box-shadow:0 5px 16px rgba(0,0,0,.20)}
+button:not(:disabled):hover,[role="button"]:hover,input[type="button"]:not(:disabled):hover,input[type="submit"]:not(:disabled):hover,input[type="reset"]:not(:disabled):hover,a.button:hover,.btn:hover,.control:hover,.action:hover,.primary-btn:hover,.secondary-btn:hover,.menu-button:hover,.game-button:hover{filter:brightness(1.13)!important;transform:translateY(-1px)}
+button:not(:disabled):active,[role="button"]:active,input[type="button"]:not(:disabled):active,input[type="submit"]:not(:disabled):active,input[type="reset"]:not(:disabled):active,a.button:active,.btn:active,.control:active,.action:active,.primary-btn:active,.secondary-btn:active,.menu-button:active,.game-button:active{transform:translateY(0) scale(.98)!important}
+button:focus-visible,[role="button"]:focus-visible,input:focus-visible,a.button:focus-visible{outline:3px solid #f4d35e!important;outline-offset:2px}
+button:disabled,input:disabled{cursor:not-allowed!important;filter:saturate(.45);opacity:.58}
+/* Preserve readable text on common action types. */
+button.primary,.btn.primary,.primary-btn,.start,.confirm,.play,.join,.create,.submit{background-color:var(--vanya-purple)}
+button.success,.btn.success,.join,.confirm,.ready,.save{border-color:rgba(32,169,87,.65)}
+button.danger,.btn.danger,.leave,.cancel,.delete{border-color:rgba(232,67,117,.7)}
+@media(prefers-reduced-motion:reduce){button,[role="button"],input,a.button{transition:none!important}}
+</style>
 </head>
 <body>
 <div class="app">
