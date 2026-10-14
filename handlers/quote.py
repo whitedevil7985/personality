@@ -1,5 +1,6 @@
 """Create a mobile-first, attractive quote card for /q replies."""
 import io
+import unicodedata
 from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
@@ -16,11 +17,13 @@ W, H = 900, 800
 
 def _font(size, bold=False):
     candidates = (
-        ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ["/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
          "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
          "DejaVuSans-Bold.ttf"]
         if bold else
-        ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
          "DejaVuSans.ttf"]
     )
@@ -41,6 +44,28 @@ def _text(draw, xy, value, font, fill, **kwargs):
     except (UnicodeEncodeError, ValueError):
         safe = value.encode("ascii", "replace").decode("ascii")
         draw.text(xy, safe, font=font, fill=fill, **kwargs)
+
+
+def _normalise_display_name(value):
+    """Turn styled Unicode alphabets into ordinary readable characters."""
+    value = unicodedata.normalize("NFKC", value or "Unknown")
+    # Remove invisible formatting/control characters that can disrupt layout.
+    value = "".join(
+        ch for ch in value
+        if unicodedata.category(ch) not in {"Cf", "Cc", "Cs"}
+    )
+    value = " ".join(value.split()).strip()
+    return value or "Unknown"
+
+
+def _truncate_to_width(draw, value, font, max_width):
+    """Keep long names inside their header area without colliding with the time."""
+    if draw.textbbox((0, 0), value, font=font)[2] <= max_width:
+        return value
+    suffix = "…"
+    while value and draw.textbbox((0, 0), value + suffix, font=font)[2] > max_width:
+        value = value[:-1]
+    return (value.rstrip() + suffix) if value else suffix
 
 
 def _measure(draw, value, font):
@@ -131,8 +156,10 @@ def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
     canvas.paste(avatar, (ax, ay), avatar_mask)
     draw = ImageDraw.Draw(canvas)
 
-    display_name = (name or "Unknown")[:25]
-    _text(draw, (177, 48), display_name, _font(38, True), "#e7a3ff")
+    name_font = _font(38, True)
+    display_name = _normalise_display_name(name)
+    display_name = _truncate_to_width(draw, display_name, name_font, 525)
+    _text(draw, (177, 48), display_name, name_font, "#e7a3ff")
     if handle:
         _text(draw, (180, 96), "@" + handle.lstrip("@")[:28],
               _font(21), "#b7c7ff")
@@ -204,7 +231,8 @@ async def quote_cmd(update, context):
         return
 
     user = target.from_user
-    name = (user.full_name if user else (target.sender_chat.title if target.sender_chat else target.chat.title)) or "Unknown"
+    raw_name = (user.full_name if user else (target.sender_chat.title if target.sender_chat else target.chat.title)) or "Unknown"
+    name = _normalise_display_name(raw_name)
     username = (user.username if user else None)
     if target.text:
         quoted_text = target.text
