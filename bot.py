@@ -100,7 +100,7 @@ from handlers.daily_game import random_game_callback, random_game_scheduler
 
 
 async def welcome_new_members(update, context):
-    """Send a short, single-line welcome when people join a group."""
+    """Send the selected welcome message when people join a group."""
     message = update.effective_message
     if not message or not message.new_chat_members:
         return
@@ -109,18 +109,10 @@ async def welcome_new_members(update, context):
             continue
         name = html.escape(member.first_name or "friend")
         mention = f'<a href="tg://user?id={member.id}">{name}</a>'
-        welcome_lines = [
-            f"🦋 GC mein welcome, {mention}! 💗✨",
-            f"🌸 Everyone, welcome {mention}! Aajao, vibe banate hain 💕",
-            f"💖 Welcome aboard, {mention}! Hope yahan achhi memories banein ✨",
-            f"🎀 Arey wah, {mention} bhi aa gaye! Welcome to the GC 🥳",
-            f"🦋 Hey {mention}, welcome to our little corner! 💗",
-        ]
         await message.reply_html(
-            random.choice(welcome_lines),
+            f"💖 Welcome aboard, {mention}! Hope yahan achhi memories banein ✨",
             do_quote=False,
         )
-
 
 async def main():
     await cleanup_expired_memory()
