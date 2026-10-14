@@ -697,12 +697,12 @@ async def couple(update, context):
         vibe = "Opposites attract—plot twist baaki hai! 🎬"
     badge = random.choice(["💘 LOVE BIRDS", "💞 PERFECT PAIR?", "🌹 ROMANCE MODE", "💖 CRUSH ALERT"])
     await update.message.reply_html(
-        f"💌 <b>VANYA'S LOVE LAB</b> • <i>{badge}</i>\\n"
-        f"💖 <b>{name_a}</b> × <b>{name_b}</b> 💖\\n"
-        f"💓 <b>LOVE METER: {percent}%</b> {meter}\\n"
-        f"🌹 <b>{verdict}</b>\\n"
-        f"✨ <i>{vibe}</i>\\n"
-        f"💍 Reply to your match: <code>/propose</code>\\n"
+        f"💌 <b>VANYA'S LOVE LAB</b> • <i>{badge}</i>\n"
+        f"💖 <b>{name_a}</b> × <b>{name_b}</b> 💖\n"
+        f"💓 <b>LOVE METER: {percent}%</b> {meter}\n"
+        f"🌹 <b>{verdict}</b>\n"
+        f"✨ <i>{vibe}</i>\n"
+        f"💍 Reply to your match: <code>/propose</code>\n"
         "<i>⚠️ Sirf masti ke liye!</i>"
     )
 
