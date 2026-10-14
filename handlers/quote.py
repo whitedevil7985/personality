@@ -53,7 +53,7 @@ def _text(draw, xy, value, font, fill, **kwargs):
 
 def _normalise_display_name(value):
     """Clean whitespace only; preserve the sender's exact Unicode name."""
-    value = str(value or "Unknown").replace("\\r", " ").replace("\\n", " ")
+    value = str(value or "Unknown").replace(chr(13), " ").replace(chr(10), " ")
     value = " ".join(value.split()).strip()
     return value or "Unknown"
 
@@ -119,7 +119,7 @@ def _font_for_cluster(cluster):
     meaningful = [
         ord(ch) for ch in cluster
         if unicodedata.category(ch) not in {"Cf", "Cc", "Cs", "Mn", "Mc", "Me"}
-        and ch not in {"\\ufe0e", "\\ufe0f"}
+        and ord(ch) not in (0xFE0E, 0xFE0F)
     ]
     if not meaningful:
         return paths[0] if paths else None
@@ -144,8 +144,8 @@ def _name_clusters(value):
         if clusters and (
             unicodedata.combining(ch)
             or category in {"Mn", "Mc", "Me", "Cf"}
-            or ch in {"\\ufe0e", "\\ufe0f"}
-            or clusters[-1].endswith("\\u200d")
+            or ord(ch) in (0xFE0E, 0xFE0F)
+            or clusters[-1].endswith(chr(0x200D))
         ):
             clusters[-1] += ch
         else:
