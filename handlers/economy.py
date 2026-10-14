@@ -478,21 +478,37 @@ async def propose(update,context):
         {"$set":{"pending_proposal":update.effective_user.id}},
     )
 
-    await update.message.reply_html(
-        "╭━━━〔 💌 <b>LOVE PROPOSAL</b> 〕━━━╮\n"
-        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f'💖 <a href="tg://user?id={update.effective_user.id}"><b>{proposer_name}</b></a> '
-        f'has a special question for <a href="tg://user?id={target.id}"><b>{target_name}</b></a>…\n\n'
-        "💍 <b>Will you be my partner?</b>\n"
-        "✨ One little choice could change your status here forever.\n\n"
-        "👇 <b>Choose your answer:</b>",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("💖 Accept", callback_data=f"proposal:accept:{target.id}:{update.effective_user.id}"),
-                InlineKeyboardButton("💔 Reject", callback_data=f"proposal:reject:{target.id}:{update.effective_user.id}"),
-            ]
-        ]),
+    proposal_caption = (
+        "💍 <b>" + proposer_name + "</b> proposes to <b>" + target_name + "</b>!\n\n"
+        "💖 <b>Do you accept?</b>"
     )
+    proposal_keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💖 Accept", callback_data=f"proposal:accept:{target.id}:{update.effective_user.id}"),
+            InlineKeyboardButton("💔 Decline", callback_data=f"proposal:reject:{target.id}:{update.effective_user.id}"),
+        ]
+    ])
+    # Show a looping romantic anime GIF above the proposal, like a Telegram media card.
+    # If the media host is unavailable, keep the proposal and its buttons working as text.
+    proposal_animation = "https://media.giphy.com/media/d1E2VyhFsxawRbeo/giphy.gif"
+    try:
+        await update.message.reply_animation(
+            animation=proposal_animation,
+            caption=proposal_caption,
+            parse_mode="HTML",
+            reply_markup=proposal_keyboard,
+        )
+    except Exception:
+        await update.message.reply_html(
+            "╭━━━〔 💌 <b>LOVE PROPOSAL</b> 〕━━━╮\n"
+            "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f'💖 <a href="tg://user?id={update.effective_user.id}"><b>{proposer_name}</b></a> '
+            f'has a special question for <a href="tg://user?id={target.id}"><b>{target_name}</b></a>…\n\n'
+            "💍 <b>Will you be my partner?</b>\n"
+            "👇 <b>Choose your answer:</b>",
+            reply_markup=proposal_keyboard,
+        )
+
 
 async def _complete_proposal_callback(q, context, action, target_id, proposer_id):
     if q.from_user.id != target_id:
