@@ -490,7 +490,7 @@ async def propose(update,context):
     ])
     # Show a looping romantic anime GIF above the proposal, like a Telegram media card.
     # If the media host is unavailable, keep the proposal and its buttons working as text.
-    proposal_animation = "https://media.giphy.com/media/d1E2VyhFsxawRbeo/giphy.gif"
+    proposal_animation = "https://media.giphy.com/media/ZETuJjEjqbDmccFYSS/giphy.gif"
     try:
         await update.message.reply_animation(
             animation=proposal_animation,
