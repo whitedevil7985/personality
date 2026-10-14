@@ -109,9 +109,15 @@ async def welcome_new_members(update, context):
             continue
         name = html.escape(member.first_name or "friend")
         mention = f'<a href="tg://user?id={member.id}">{name}</a>'
+        welcome_lines = [
+            f"🦋 GC mein welcome, {mention}! 💗✨",
+            f"🌸 Everyone, welcome {mention}! Aajao, vibe banate hain 💕",
+            f"💖 Welcome aboard, {mention}! Hope yahan achhi memories banein ✨",
+            f"🎀 Arey wah, {mention} bhi aa gaye! Welcome to the GC 🥳",
+            f"🦋 Hey {mention}, welcome to our little corner! 💗",
+        ]
         await message.reply_html(
-            f"🦋 A new soul has entered the GC! 💗 Welcome, {mention} — "
-            "ab party shuru karte hain! 🥳🌸",
+            random.choice(welcome_lines),
             do_quote=False,
         )
 
