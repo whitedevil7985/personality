@@ -1,6 +1,5 @@
-"""Generate a readable neon quote card when /q is used as a reply."""
+"""Create a compact, readable quote bubble for /q replies."""
 import io
-import textwrap
 from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
@@ -11,9 +10,8 @@ globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")
 del _core, _sys
 
 
-# A near-square card is shown much larger in Telegram's chat preview than a
-# wide banner. Text sizes are intentionally large for mobile readability.
-W, H = 1000, 1120
+# Compact landscape layout: close to a chat bubble, not a giant poster.
+W, H = 1000, 400
 
 
 def _font(size, bold=False):
@@ -30,57 +28,39 @@ def _font(size, bold=False):
         try:
             return ImageFont.truetype(path, size=size)
         except (OSError, ValueError):
-            continue
-    # Important: default Pillow bitmap font is tiny if no size is passed.
-    # Pillow 10+ includes a scalable bundled font; use it as a safe fallback.
+            pass
+    # Avoid Pillow's tiny default bitmap font when system fonts are absent.
     try:
         return ImageFont.load_default(size=size)
     except TypeError:
         return ImageFont.load_default()
 
 
-def _draw_text(draw, xy, text, font, fill, **kwargs):
+def _text(draw, xy, value, font, fill, **kwargs):
     try:
-        draw.text(xy, text, font=font, fill=fill, **kwargs)
+        draw.text(xy, value, font=font, fill=fill, **kwargs)
     except (UnicodeEncodeError, ValueError):
-        # Some minimal containers lack emoji glyphs. Preserve readable text
-        # rather than letting one unsupported character break card creation.
-        safe = text.encode("ascii", "replace").decode("ascii")
-        draw.text(xy, safe, font=font, fill=fill, **kwargs)
+        # Keep the card renderable on minimal hosts without emoji glyphs.
+        draw.text(xy, value.encode("ascii", "replace").decode("ascii"),
+                  font=font, fill=fill, **kwargs)
 
 
-def _rounded_gradient(size, left, right, radius):
-    w, h = size
-    base = Image.new("RGB", size, left)
-    d = ImageDraw.Draw(base)
-    for x in range(w):
-        t = x / max(1, w - 1)
-        color = tuple(int(left[i] * (1 - t) + right[i] * t) for i in range(3))
-        d.line((x, 0, x, h), fill=color)
-    mask = Image.new("L", size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
-    return base, mask
-
-
-def _wrap_by_width(draw, text, font, max_width, max_lines=5):
-    text = " ".join((text or "").split())
-    if not text:
-        return ["(empty message)"]
-    words = textwrap.wrap(text, width=70, break_long_words=True, break_on_hyphens=True)
-    lines = []
-    current = ""
+def _fit_lines(draw, value, font, max_width, max_lines=3):
+    value = " ".join((value or "").split()) or "(empty message)"
+    words = value.split(" ")
+    lines, current = [], ""
     for word in words:
         candidate = f"{current} {word}".strip()
         try:
             width = draw.textbbox((0, 0), candidate, font=font)[2]
         except Exception:
-            width = len(candidate) * 32
+            width = len(candidate) * 25
         if width <= max_width:
             current = candidate
-        else:
-            if current:
-                lines.append(current)
-            current = word
+            continue
+        if current:
+            lines.append(current)
+        current = word
     if current:
         lines.append(current)
     if len(lines) > max_lines:
@@ -89,40 +69,35 @@ def _wrap_by_width(draw, text, font, max_width, max_lines=5):
     return lines
 
 
-def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
-    # Dark navy backdrop, with a soft purple-to-cyan glow.
-    img = Image.new("RGB", (W, H), "#090b1c")
-    bgdraw = ImageDraw.Draw(img)
-    for x in range(W):
-        t = x / max(1, W - 1)
-        color = (int(11 + 14*t), int(8 + 10*t), int(28 + 37*t))
-        bgdraw.line((x, 0, x, H), fill=color)
+def _gradient(size, start, end):
+    width, height = size
+    img = Image.new("RGB", size, start)
+    d = ImageDraw.Draw(img)
+    for x in range(width):
+        p = x / max(1, width - 1)
+        c = tuple(round(start[i] * (1-p) + end[i] * p) for i in range(3))
+        d.line((x, 0, x, height), fill=c)
+    return img
 
+
+def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
+    canvas = Image.new("RGB", (W, H), "#0c1025")
+    # Soft colored glow tucked behind the message bubble.
     glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse((-170, 130, 410, 690), fill=(218, 45, 255, 100))
-    gd.ellipse((650, 20, 1170, 700), fill=(0, 205, 255, 85))
-    glow = glow.filter(ImageFilter.GaussianBlur(90))
-    img = Image.alpha_composite(img.convert("RGBA"), glow)
+    gd.ellipse((-110, 35, 400, 420), fill=(219, 54, 238, 105))
+    gd.ellipse((580, -70, 1110, 380), fill=(17, 194, 246, 95))
+    glow = glow.filter(ImageFilter.GaussianBlur(65))
+    canvas = Image.alpha_composite(canvas.convert("RGBA"), glow)
 
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((27, 27, 973, 1093), radius=42,
-                           fill=(12, 15, 40, 245), outline=(169, 86, 255, 255), width=4)
-    draw.rounded_rectangle((38, 38, 962, 1082), radius=34,
-                           outline=(49, 210, 255, 210), width=2)
+    draw = ImageDraw.Draw(canvas)
+    draw.rounded_rectangle((14, 14, W-14, H-14), radius=34,
+                           fill=(15, 18, 43, 244), outline=(146, 99, 255, 245), width=3)
+    draw.rounded_rectangle((22, 22, W-22, H-22), radius=29,
+                           outline=(58, 215, 255, 170), width=2)
 
-    # Restrained sparkles keep the quote text as the visual focus.
-    for x, y, r, c in [
-        (86, 250, 6, "#ff86ed"), (908, 250, 6, "#6bf4ff"),
-        (905, 865, 7, "#c49aff"), (92, 875, 5, "#6bf4ff"),
-        (500, 78, 4, "#ff91e8"), (825, 1012, 5, "#79e8ff"),
-    ]:
-        draw.ellipse((x-r, y-r, x+r, y+r), fill=c)
-    draw.line((880, 280, 880, 310), fill="#ff9deb", width=4)
-    draw.line((865, 295, 895, 295), fill="#ff9deb", width=4)
-
-    # Sender avatar, with a monogram fallback if Telegram has no public photo.
-    ax, ay, ar = 78, 78, 150
+    # Compact sender header.
+    ax, ay, ar = 42, 38, 88
     avatar = None
     if avatar_bytes:
         try:
@@ -131,77 +106,63 @@ def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
         except Exception:
             avatar = None
     if avatar is None:
-        avatar = Image.new("RGB", (ar, ar), "#32245f")
-        ad = ImageDraw.Draw(avatar)
+        avatar = Image.new("RGB", (ar, ar), "#493071")
         initials = (name[:1] or "?").upper()
-        f = _font(66, True)
-        box = ad.textbbox((0, 0), initials, font=f)
-        _draw_text(ad, ((ar-(box[2]-box[0]))//2, (ar-(box[3]-box[1]))//2-8),
-                   initials, f, "#ffffff")
+        ad = ImageDraw.Draw(avatar)
+        f = _font(44, True)
+        bbox = ad.textbbox((0, 0), initials, font=f)
+        _text(ad, ((ar-(bbox[2]-bbox[0]))//2, (ar-(bbox[3]-bbox[1]))//2-4),
+              initials, f, "#ffffff")
     avatar_mask = Image.new("L", (ar, ar), 0)
     ImageDraw.Draw(avatar_mask).ellipse((0, 0, ar-1, ar-1), fill=255)
-    draw.ellipse((ax-6, ay-6, ax+ar+6, ay+ar+6), outline="#77f4ff", width=6)
-    img.paste(avatar, (ax, ay), avatar_mask)
-    draw = ImageDraw.Draw(img)
+    draw.ellipse((ax-4, ay-4, ax+ar+4, ay+ar+4), outline="#70efff", width=4)
+    canvas.paste(avatar, (ax, ay), avatar_mask)
+    draw = ImageDraw.Draw(canvas)
 
-    _draw_text(draw, (260, 91), name[:25], _font(50, True), "#e7a2ff")
+    _text(draw, (150, 39), name[:25], _font(39, True), "#e8a4ff")
     if handle:
-        _draw_text(draw, (263, 157), "@" + handle.lstrip("@")[:28],
-                   _font(27), "#a8c5ff")
-    _draw_text(draw, (265, 208), "QUOTED MESSAGE", _font(22, True), "#8eefff")
+        _text(draw, (152, 86), "@" + handle.lstrip("@")[:30],
+              _font(21), "#afc2ff")
+    draw.rounded_rectangle((824, 49, 948, 98), radius=23,
+                           fill=(38, 60, 124, 245), outline=(97, 220, 255, 210), width=2)
+    _text(draw, (846, 59), time_label, _font(23, True), "#ffffff")
 
-    # High-contrast time pill.
-    draw.rounded_rectangle((752, 103, 918, 161), radius=28,
-                           fill=(35, 61, 126, 245), outline=(92, 214, 255, 230), width=2)
-    _draw_text(draw, (778, 116), time_label, _font(29, True), "#ffffff")
+    # Main gradient bubble: no oversized title, no footer or empty space.
+    bubble = _gradient((914, 220), (234, 144, 225), (145, 229, 242))
+    mask = Image.new("L", bubble.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, 913, 219), radius=28, fill=255)
+    canvas.paste(bubble, (43, 146), mask)
+    draw = ImageDraw.Draw(canvas)
+    draw.rounded_rectangle((43, 146, 957, 366), radius=28,
+                           outline=(255, 232, 255, 235), width=2)
+    draw.rounded_rectangle((66, 174, 74, 235), radius=4, fill="#ffffff")
 
-    # Large, legible quote panel.
-    grad, mask = _rounded_gradient((860, 535), (195, 65, 230), (23, 160, 225), 38)
-    grad_rgba = grad.convert("RGBA")
-    overlay = Image.new("RGBA", grad_rgba.size, (12, 11, 42, 58))
-    grad_rgba = Image.alpha_composite(grad_rgba, overlay)
-    img.paste(grad_rgba, (70, 300), mask)
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((70, 300, 930, 835), radius=38,
-                           outline=(245, 220, 255, 245), width=4)
-
-    draw.rounded_rectangle((104, 345, 116, 420), radius=6, fill="#ffffff")
-    _draw_text(draw, (142, 350), "THE ORIGINAL MESSAGE", _font(24, True), "#fff2ff")
-
-    quote_font = _font(64, True)
-    lines = _wrap_by_width(draw, quoted_text, quote_font, 730, max_lines=5)
-    # Vertically center the quote lines, while leaving the title above.
-    line_height = 80
-    max_quote_height = line_height * len(lines)
-    y = 425 + max(0, (345 - max_quote_height) // 2)
+    quote_font = _font(48, True)
+    lines = _fit_lines(draw, quoted_text[:520], quote_font, 825, max_lines=3)
+    line_height = 56
+    block_height = line_height * len(lines)
+    y = 174 + max(0, (164 - block_height) // 2)
     for line in lines:
-        _draw_text(draw, (142, y), line, quote_font, "#ffffff",
-                   stroke_width=1, stroke_fill=(38, 24, 96))
+        _text(draw, (98, y), line, quote_font, "#27194f",
+              stroke_width=0)
         y += line_height
 
-    # Branding/footer.
-    draw.line((75, 895, 925, 895), fill=(111, 103, 214, 210), width=2)
-    _draw_text(draw, (84, 938), "✦  VANYA QUOTE CARD", _font(29, True), "#e1c6ff")
-    _draw_text(draw, (84, 988), "REAL WORDS  •  BETTER VIBES", _font(22, True), "#83edff")
-    draw.ellipse((861, 952, 892, 983), outline="#ff8be9", width=4)
-    draw.ellipse((888, 972, 911, 995), outline="#9b8cff", width=4)
-
     output = io.BytesIO()
-    img.convert("RGB").save(output, format="PNG", optimize=True)
+    canvas.convert("RGB").save(output, format="PNG", optimize=True)
     output.seek(0)
     output.name = "vanya_quote.png"
     return output
 
 
 async def quote_cmd(update, context):
-    """Reply with /q to turn the replied-to message into a readable quote card."""
+    """Reply with /q to turn the replied-to message into a compact quote bubble."""
     message = update.effective_message
     if not message:
         return
     target = message.reply_to_message
     if not target:
         await message.reply_text(
-            "💜 Kisi message par reply karke /q likho, main uska stylish quote card bana dungi."
+            "💜 Kisi message par reply karke /q likho, main uska compact quote card bana dungi."
         )
         return
 
