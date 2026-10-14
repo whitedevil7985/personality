@@ -1,4 +1,4 @@
-"""Create a compact, readable quote bubble for /q replies."""
+"""Create a mobile-friendly, readable quote card for /q replies."""
 import io
 from datetime import datetime
 
@@ -10,8 +10,9 @@ globals().update({k: v for k, v in vars(_core).items() if not k.startswith("__")
 del _core, _sys
 
 
-# Compact landscape layout: close to a chat bubble, not a giant poster.
-W, H = 1000, 400
+# Near-square ratio gives the card more height on phones; large fonts remain
+# clear after Telegram scales the image to the screen width.
+W, H = 900, 660
 
 
 def _font(size, bold=False):
@@ -29,7 +30,6 @@ def _font(size, bold=False):
             return ImageFont.truetype(path, size=size)
         except (OSError, ValueError):
             pass
-    # Avoid Pillow's tiny default bitmap font when system fonts are absent.
     try:
         return ImageFont.load_default(size=size)
     except TypeError:
@@ -40,12 +40,11 @@ def _text(draw, xy, value, font, fill, **kwargs):
     try:
         draw.text(xy, value, font=font, fill=fill, **kwargs)
     except (UnicodeEncodeError, ValueError):
-        # Keep the card renderable on minimal hosts without emoji glyphs.
         draw.text(xy, value.encode("ascii", "replace").decode("ascii"),
                   font=font, fill=fill, **kwargs)
 
 
-def _fit_lines(draw, value, font, max_width, max_lines=3):
+def _fit_lines(draw, value, font, max_width, max_lines=4):
     value = " ".join((value or "").split()) or "(empty message)"
     words = value.split(" ")
     lines, current = [], ""
@@ -54,7 +53,7 @@ def _fit_lines(draw, value, font, max_width, max_lines=3):
         try:
             width = draw.textbbox((0, 0), candidate, font=font)[2]
         except Exception:
-            width = len(candidate) * 25
+            width = len(candidate) * 28
         if width <= max_width:
             current = candidate
             continue
@@ -82,22 +81,21 @@ def _gradient(size, start, end):
 
 def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
     canvas = Image.new("RGB", (W, H), "#0c1025")
-    # Soft colored glow tucked behind the message bubble.
     glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
-    gd.ellipse((-110, 35, 400, 420), fill=(219, 54, 238, 105))
-    gd.ellipse((580, -70, 1110, 380), fill=(17, 194, 246, 95))
-    glow = glow.filter(ImageFilter.GaussianBlur(65))
+    gd.ellipse((-120, 30, 330, 490), fill=(219, 54, 238, 112))
+    gd.ellipse((540, -55, 1010, 500), fill=(17, 194, 246, 100))
+    glow = glow.filter(ImageFilter.GaussianBlur(68))
     canvas = Image.alpha_composite(canvas.convert("RGBA"), glow)
 
     draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle((14, 14, W-14, H-14), radius=34,
-                           fill=(15, 18, 43, 244), outline=(146, 99, 255, 245), width=3)
-    draw.rounded_rectangle((22, 22, W-22, H-22), radius=29,
-                           outline=(58, 215, 255, 170), width=2)
+    draw.rounded_rectangle((13, 13, W-13, H-13), radius=32,
+                           fill=(15, 18, 43, 247), outline=(146, 99, 255, 245), width=3)
+    draw.rounded_rectangle((22, 22, W-22, H-22), radius=26,
+                           outline=(58, 215, 255, 185), width=2)
 
-    # Compact sender header.
-    ax, ay, ar = 42, 38, 88
+    # Sender header; all elements stay away from the image edges.
+    ax, ay, ar = 43, 39, 88
     avatar = None
     if avatar_bytes:
         try:
@@ -109,7 +107,7 @@ def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
         avatar = Image.new("RGB", (ar, ar), "#493071")
         initials = (name[:1] or "?").upper()
         ad = ImageDraw.Draw(avatar)
-        f = _font(44, True)
+        f = _font(43, True)
         bbox = ad.textbbox((0, 0), initials, font=f)
         _text(ad, ((ar-(bbox[2]-bbox[0]))//2, (ar-(bbox[3]-bbox[1]))//2-4),
               initials, f, "#ffffff")
@@ -119,33 +117,36 @@ def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
     canvas.paste(avatar, (ax, ay), avatar_mask)
     draw = ImageDraw.Draw(canvas)
 
-    _text(draw, (150, 39), name[:25], _font(39, True), "#e8a4ff")
+    _text(draw, (151, 39), name[:22], _font(36, True), "#e8a4ff")
     if handle:
-        _text(draw, (152, 86), "@" + handle.lstrip("@")[:30],
-              _font(21), "#afc2ff")
-    draw.rounded_rectangle((824, 49, 948, 98), radius=23,
-                           fill=(38, 60, 124, 245), outline=(97, 220, 255, 210), width=2)
-    _text(draw, (846, 59), time_label, _font(23, True), "#ffffff")
+        _text(draw, (153, 82), "@" + handle.lstrip("@")[:26],
+              _font(20), "#afc2ff")
+    draw.rounded_rectangle((724, 53, 858, 100), radius=22,
+                           fill=(38, 60, 124, 245), outline=(97, 220, 255, 220), width=2)
+    _text(draw, (745, 64), time_label, _font(23, True), "#ffffff")
 
-    # Main gradient bubble: no oversized title, no footer or empty space.
-    bubble = _gradient((914, 220), (234, 144, 225), (145, 229, 242))
+    # Quote panel uses nearly the full width and a taller message area for phones.
+    bubble = _gradient((814, 386), (234, 144, 225), (145, 229, 242))
     mask = Image.new("L", bubble.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, 913, 219), radius=28, fill=255)
-    canvas.paste(bubble, (43, 146), mask)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, 813, 385), radius=28, fill=255)
+    canvas.paste(bubble, (43, 151), mask)
     draw = ImageDraw.Draw(canvas)
-    draw.rounded_rectangle((43, 146, 957, 366), radius=28,
+    draw.rounded_rectangle((43, 151, 857, 537), radius=28,
                            outline=(255, 232, 255, 235), width=2)
-    draw.rounded_rectangle((66, 174, 74, 235), radius=4, fill="#ffffff")
+    draw.rounded_rectangle((66, 181, 74, 246), radius=4, fill="#ffffff")
 
-    quote_font = _font(48, True)
-    lines = _fit_lines(draw, quoted_text[:520], quote_font, 825, max_lines=3)
-    line_height = 56
+    quote_font = _font(49, True)
+    lines = _fit_lines(draw, quoted_text[:650], quote_font, 720, max_lines=4)
+    line_height = 61
     block_height = line_height * len(lines)
-    y = 174 + max(0, (164 - block_height) // 2)
+    y = 219 + max(0, (270 - block_height) // 2)
     for line in lines:
-        _text(draw, (98, y), line, quote_font, "#27194f",
-              stroke_width=0)
+        _text(draw, (98, y), line, quote_font, "#27194f")
         y += line_height
+
+    # Small signature on the card; avoid a large footer that wastes mobile space.
+    _text(draw, (52, 575), "✦  VANYA QUOTE", _font(21, True), "#e1c6ff")
+    _text(draw, (560, 575), "BETTER VIBES", _font(19, True), "#83edff")
 
     output = io.BytesIO()
     canvas.convert("RGB").save(output, format="PNG", optimize=True)
@@ -155,14 +156,14 @@ def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
 
 
 async def quote_cmd(update, context):
-    """Reply with /q to turn the replied-to message into a compact quote bubble."""
+    """Reply with /q to turn the replied-to message into a mobile-friendly quote card."""
     message = update.effective_message
     if not message:
         return
     target = message.reply_to_message
     if not target:
         await message.reply_text(
-            "💜 Kisi message par reply karke /q likho, main uska compact quote card bana dungi."
+            "💜 Kisi message par reply karke /q likho, main uska stylish quote card bana dungi."
         )
         return
 
