@@ -681,10 +681,29 @@ async def couple(update, context):
     percent = random.randint(40, 100)
     hearts = "💗" * max(1, min(5, (percent + 19) // 20))
     logo = random.choice(["💞", "💘", "💝", "💟", "💗", "💖", "💕", "❤️‍🔥"])
+    name_a = html.escape(a.first_name or "Player")
+    name_b = html.escape(b.first_name or "Player")
+    bar_filled = max(1, min(10, round(percent / 10)))
+    meter = "💖" * bar_filled + "🤍" * (10 - bar_filled)
+    if percent >= 90:
+        verdict = "Soulmate vibes! 💍✨"
+    elif percent >= 75:
+        verdict = "Made for each other! 🥰"
+    elif percent >= 60:
+        verdict = "Cute couple energy! 💕"
+    else:
+        verdict = "Opposites attract… maybe! 😏"
     await update.message.reply_html(
-        f"{logo} <b>{html.escape(a.first_name or 'Player')} × {html.escape(b.first_name or 'Player')}</b> {logo}\n"
-        f"{hearts} <b>Compatibility: {percent}%</b>\n\n"
-        "✨ Want to make it official? Reply with <code>/propose</code> to your match!"
+        "╭━━━〔 💘 <b>VANYA LOVE MATCH</b> 〕━━━╮\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"✨ <b>{name_a}</b>  💞  <b>{name_b}</b> ✨\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"💝 <b>Love compatibility: {percent}%</b>\n"
+        f"{meter}\n"
+        f"{hearts}\n\n"
+        f"🌹 <i>{verdict}</i>\n\n"
+        "💌 <b>Next step:</b> Reply to your match with <code>/propose</code>\n"
+        "💍 Make it official and see if they say YES! 💖"
     )
 
 async def topcouples(update, context):
@@ -710,7 +729,14 @@ async def topcouples(update, context):
     if not rows:
         await update.message.reply_text("💕 No couples yet. Try replying to someone with /propose first!")
         return
-    text = "🏆 <b>Top Couples</b>\n\n" + "\n".join(
-        f"{i}. 💞 {html.escape(a)} × {html.escape(b)}" for i, (a, b) in enumerate(rows, 1)
-    )
-    await update.message.reply_html(text)
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [
+        "╭━━━〔 💞 <b>VANYA COUPLE HALL OF FAME</b> 〕━━━╮",
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯",
+        "",
+    ]
+    for i, (a, b) in enumerate(rows, 1):
+        medal = medals[i - 1] if i <= 3 else f"<b>{i}.</b>"
+        lines.append(f"{medal} 💗 <b>{html.escape(a)}</b>  ×  <b>{html.escape(b)}</b> 💗")
+    lines.extend(["", "🌹 <i>Love stories made in this group.</i>", "💌 Use /couple to find your match!"])
+    await update.message.reply_html("\n".join(lines))
