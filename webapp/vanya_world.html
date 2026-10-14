@@ -36,7 +36,19 @@ button.success,.btn.success,.join,.confirm,.ready,.save{border-color:rgba(32,169
 button.danger,.btn.danger,.leave,.cancel,.delete{border-color:rgba(232,67,117,.7)}
 @media(prefers-reduced-motion:reduce){button,[role="button"],input,a.button{transition:none!important}}
 </style>
-</head>
+<style id="vanya-colorful-buttons-v3">
+:root{--vanya-purple:#7651e8;--vanya-pink:#e84375;--vanya-blue:#2388e8;--vanya-green:#19a957;--vanya-orange:#e9872d;--vanya-teal:#119d9a}
+button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"],select,.button,.btn,.control,.action,.primary-btn,.secondary-btn,.menu-button,.game-button,a.button{color:#fff!important;border:1px solid rgba(255,255,255,.18)!important;border-radius:10px!important;background-color:var(--vanya-purple)!important;background-image:linear-gradient(135deg,rgba(255,255,255,.15),rgba(255,255,255,0))!important;box-shadow:0 4px 12px rgba(0,0,0,.20)!important;transition:filter .16s ease,transform .16s ease!important}
+button:nth-of-type(6n + 2),input[type="button"]:nth-of-type(6n + 2){background-color:var(--vanya-pink)!important}
+button:nth-of-type(6n + 3),input[type="button"]:nth-of-type(6n + 3){background-color:var(--vanya-blue)!important}
+button:nth-of-type(6n + 4),input[type="button"]:nth-of-type(6n + 4){background-color:var(--vanya-green)!important}
+button:nth-of-type(6n + 5),input[type="button"]:nth-of-type(6n + 5){background-color:var(--vanya-orange)!important}
+button:nth-of-type(6n),input[type="button"]:nth-of-type(6n){background-color:var(--vanya-teal)!important}
+button:disabled,input:disabled,select:disabled{background-color:#626777!important;color:#fff!important;cursor:not-allowed!important;filter:saturate(.45);opacity:.68}
+button:not(:disabled):hover,[role="button"]:hover,input[type="button"]:not(:disabled):hover,input[type="submit"]:not(:disabled):hover,input[type="reset"]:not(:disabled):hover,.button:hover,.btn:hover,.control:hover,.action:hover,.primary-btn:hover,.secondary-btn:hover,.menu-button:hover,.game-button:hover,a.button:hover{filter:brightness(1.12)!important;transform:translateY(-1px)}
+button:focus-visible,[role="button"]:focus-visible,input:focus-visible,select:focus-visible,a.button:focus-visible{outline:3px solid #f4d35e!important;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){button,[role="button"],input,a.button{transition:none!important}}
+</style></head>
 <body>
 <div class="app">
   <div class="top"><div class="brand"><div class="avatar">💜</div><div><div class="title">Vanya World</div><div class="sub">Delhi • your little 3D universe</div></div></div><div class="stats"><div class="pill">🪙 <span id="coins">0</span></div><div class="pill">⭐ Lv.<span id="level">1</span></div></div></div>
