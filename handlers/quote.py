@@ -1,7 +1,12 @@
 """Create a mobile-first, attractive quote card for /q replies."""
+import glob
 import io
+import os
 import unicodedata
 from datetime import datetime
+from functools import lru_cache
+
+from fontTools.ttLib import TTFont
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
 
@@ -47,25 +52,149 @@ def _text(draw, xy, value, font, fill, **kwargs):
 
 
 def _normalise_display_name(value):
-    """Turn styled Unicode alphabets into ordinary readable characters."""
-    value = unicodedata.normalize("NFKC", value or "Unknown")
-    # Remove invisible formatting/control characters that can disrupt layout.
-    value = "".join(
-        ch for ch in value
-        if unicodedata.category(ch) not in {"Cf", "Cc", "Cs"}
-    )
+    """Clean whitespace only; preserve the sender's exact Unicode name."""
+    value = str(value or "Unknown").replace("\\r", " ").replace("\\n", " ")
     value = " ".join(value.split()).strip()
     return value or "Unknown"
 
 
-def _truncate_to_width(draw, value, font, max_width):
-    """Keep long names inside their header area without colliding with the time."""
-    if draw.textbbox((0, 0), value, font=font)[2] <= max_width:
-        return value
-    suffix = "…"
-    while value and draw.textbbox((0, 0), value + suffix, font=font)[2] > max_width:
-        value = value[:-1]
-    return (value.rstrip() + suffix) if value else suffix
+@lru_cache(maxsize=1)
+def _name_font_paths():
+    """List ordinary fonts first, then fonts with broad symbol/math coverage."""
+    base = [
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMath-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+    ]
+    extra = []
+    for pattern in (
+        "/usr/share/fonts/truetype/noto/*Math*.ttf",
+        "/usr/share/fonts/truetype/noto/*Symbols*.ttf",
+        "/usr/share/fonts/truetype/noto/*Sans*.ttf",
+        "/usr/share/fonts/truetype/noto/*Serif*.ttf",
+        "/usr/share/fonts/truetype/noto/*Mono*.ttf",
+        "/usr/share/fonts/opentype/noto/*.otf",
+    ):
+        extra.extend(glob.glob(pattern))
+    # Extra packs occasionally place uncommon alphabets in separate font files.
+    paths = []
+    for path in base + sorted(extra):
+        if path not in paths and os.path.isfile(path):
+            paths.append(path)
+    return tuple(paths)
+
+
+@lru_cache(maxsize=256)
+def _font_cmap(path):
+    """Return codepoints supported by a font, using its real Unicode cmap."""
+    try:
+        font = TTFont(path, lazy=True)
+        points = set()
+        for table in font["cmap"].tables:
+            if table.isUnicode():
+                points.update(table.cmap.keys())
+        font.close()
+        return frozenset(points)
+    except Exception:
+        return frozenset()
+
+
+@lru_cache(maxsize=512)
+def _load_name_font(path, size):
+    try:
+        return ImageFont.truetype(path, size=size)
+    except (OSError, ValueError):
+        return _font(size, False)
+
+
+def _font_for_cluster(cluster):
+    """Pick a font that actually contains this name character/character cluster."""
+    paths = _name_font_paths()
+    meaningful = [
+        ord(ch) for ch in cluster
+        if unicodedata.category(ch) not in {"Cf", "Cc", "Cs", "Mn", "Mc", "Me"}
+        and ch not in {"\\ufe0e", "\\ufe0f"}
+    ]
+    if not meaningful:
+        return paths[0] if paths else None
+
+    best_path = paths[0] if paths else None
+    best_count = -1
+    for path in paths:
+        cmap = _font_cmap(path)
+        count = sum(codepoint in cmap for codepoint in meaningful)
+        if count > best_count:
+            best_count, best_path = count, path
+        if count == len(meaningful):
+            return path
+    return best_path
+
+
+def _name_clusters(value):
+    """Keep combining marks and joined glyph sequences attached to their base."""
+    clusters = []
+    for ch in value:
+        category = unicodedata.category(ch)
+        if clusters and (
+            unicodedata.combining(ch)
+            or category in {"Mn", "Mc", "Me", "Cf"}
+            or ch in {"\\ufe0e", "\\ufe0f"}
+            or clusters[-1].endswith("\\u200d")
+        ):
+            clusters[-1] += ch
+        else:
+            clusters.append(ch)
+    return clusters
+
+
+def _name_runs(value, size):
+    runs = []
+    for cluster in _name_clusters(value):
+        path = _font_for_cluster(cluster)
+        if not path:
+            path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if runs and runs[-1][0] == path:
+            runs[-1][1] += cluster
+        else:
+            runs.append([path, cluster])
+    measured = []
+    width = 0
+    for path, text in runs:
+        font = _load_name_font(path, size)
+        measured.append((text, font))
+        try:
+            width += font.getlength(text)
+        except Exception:
+            width += _measure(ImageDraw.Draw(Image.new("RGB", (1, 1))), text, font)
+    return measured, width
+
+
+def _draw_display_name(draw, value, x, y, max_width, base_size=38):
+    """Render every original character with a glyph-capable font; never truncate."""
+    value = _normalise_display_name(value)
+    chosen_runs = None
+    chosen_width = 0
+    chosen_size = 16
+    for size in range(base_size, 15, -2):
+        runs, width = _name_runs(value, size)
+        chosen_runs, chosen_width, chosen_size = runs, width, size
+        if width <= max_width:
+            break
+
+    cursor = x
+    for text, font in chosen_runs or []:
+        _text(draw, (round(cursor), y), text, font, "#e7a3ff", stroke_width=0)
+        try:
+            cursor += font.getlength(text)
+        except Exception:
+            cursor += len(text) * chosen_size
+    return chosen_width
 
 
 def _measure(draw, value, font):
@@ -156,10 +285,9 @@ def _make_quote_card(name, handle, quoted_text, time_label, avatar_bytes=None):
     canvas.paste(avatar, (ax, ay), avatar_mask)
     draw = ImageDraw.Draw(canvas)
 
-    name_font = _font(38, True)
-    display_name = _normalise_display_name(name)
-    display_name = _truncate_to_width(draw, display_name, name_font, 525)
-    _text(draw, (177, 48), display_name, name_font, "#e7a3ff")
+    # Preserve the account's exact Unicode name and draw uncommon glyphs
+    # using whichever installed font truly supports each character.
+    _draw_display_name(draw, name, 177, 48, 525, base_size=38)
     if handle:
         _text(draw, (180, 96), "@" + handle.lstrip("@")[:28],
               _font(21), "#b7c7ff")
@@ -231,8 +359,8 @@ async def quote_cmd(update, context):
         return
 
     user = target.from_user
-    raw_name = (user.full_name if user else (target.sender_chat.title if target.sender_chat else target.chat.title)) or "Unknown"
-    name = _normalise_display_name(raw_name)
+    # Do not NFKC-normalize the sender name: that changes stylized Unicode.
+    name = (user.full_name if user else (target.sender_chat.title if target.sender_chat else target.chat.title)) or "Unknown"
     username = (user.username if user else None)
     if target.text:
         quoted_text = target.text
