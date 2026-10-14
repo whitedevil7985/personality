@@ -19,6 +19,22 @@ button,.field{border:1px solid #343d69;background:var(--panel2);color:var(--text
 .help{font-size:11px;line-height:1.45;color:var(--muted)}.toast{position:fixed;left:50%;bottom:18px;transform:translate(-50%,120px);opacity:0;transition:.2s;background:#1d2440;border:1px solid #3a4675;color:#fff;padding:10px 14px;border-radius:12px;z-index:50;box-shadow:0 16px 35px rgba(0,0,0,.32)}.toast.show{transform:translate(-50%,0);opacity:1}
 @media(max-width:960px){.app{padding:12px}.layout{grid-template-columns:1fr}.side{min-height:0}.sharebtn{display:inline-flex}.title{font-size:23px}}@media(max-width:640px){.header{align-items:flex-start}.roompill{padding:8px 10px}.roomhint{display:none}.toolbar{gap:6px}.code{width:105px}.group span{display:none}.range{width:90px}.layout{gap:8px}.boardcard{padding:8px}.side{padding:10px}.chat{min-height:230px}}
 </style>
+
+<style id="vanya-colorful-buttons">
+/* Shared Vanya colorful button theme: accessible gradients, clear states, and mobile-friendly taps. */
+:root{--vanya-purple:#7651e8;--vanya-pink:#e84375;--vanya-blue:#2388e8;--vanya-green:#20a957;--vanya-gold:#dca629}
+button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"],a.button,.btn,.control,.action,.primary-btn,.secondary-btn,.menu-button,.game-button{transition:filter .16s ease,transform .16s ease,box-shadow .16s ease!important}
+button:not(:disabled),[role="button"],input[type="button"]:not(:disabled),input[type="submit"]:not(:disabled),input[type="reset"]:not(:disabled),a.button,.btn,.control,.action,.primary-btn,.secondary-btn,.menu-button,.game-button{background-image:linear-gradient(135deg,rgba(255,255,255,.13),rgba(255,255,255,0))!important;box-shadow:0 5px 16px rgba(0,0,0,.20)}
+button:not(:disabled):hover,[role="button"]:hover,input[type="button"]:not(:disabled):hover,input[type="submit"]:not(:disabled):hover,input[type="reset"]:not(:disabled):hover,a.button:hover,.btn:hover,.control:hover,.action:hover,.primary-btn:hover,.secondary-btn:hover,.menu-button:hover,.game-button:hover{filter:brightness(1.13)!important;transform:translateY(-1px)}
+button:not(:disabled):active,[role="button"]:active,input[type="button"]:not(:disabled):active,input[type="submit"]:not(:disabled):active,input[type="reset"]:not(:disabled):active,a.button:active,.btn:active,.control:active,.action:active,.primary-btn:active,.secondary-btn:active,.menu-button:active,.game-button:active{transform:translateY(0) scale(.98)!important}
+button:focus-visible,[role="button"]:focus-visible,input:focus-visible,a.button:focus-visible{outline:3px solid #f4d35e!important;outline-offset:2px}
+button:disabled,input:disabled{cursor:not-allowed!important;filter:saturate(.45);opacity:.58}
+/* Preserve readable text on common action types. */
+button.primary,.btn.primary,.primary-btn,.start,.confirm,.play,.join,.create,.submit{background-color:var(--vanya-purple)}
+button.success,.btn.success,.join,.confirm,.ready,.save{border-color:rgba(32,169,87,.65)}
+button.danger,.btn.danger,.leave,.cancel,.delete{border-color:rgba(232,67,117,.7)}
+@media(prefers-reduced-motion:reduce){button,[role="button"],input,a.button{transition:none!important}}
+</style>
 </head>
 <body>
 <div class="app">
