@@ -99,6 +99,23 @@ from handlers.middleware import track_incoming_chat
 from handlers.daily_game import random_game_callback, random_game_scheduler
 
 
+async def welcome_new_members(update, context):
+    """Send a short, single-line welcome when people join a group."""
+    message = update.effective_message
+    if not message or not message.new_chat_members:
+        return
+    for member in message.new_chat_members:
+        if member.is_bot:
+            continue
+        name = html.escape(member.first_name or "friend")
+        mention = f'<a href="tg://user?id={member.id}">{name}</a>'
+        await message.reply_html(
+            f"🦋 A new soul has entered the GC! 💗 Welcome, {mention} — "
+            "ab party shuru karte hain! 🥳🌸",
+            do_quote=False,
+        )
+
+
 async def main():
     await cleanup_expired_memory()
     web_runner = await start_web_server()
@@ -204,6 +221,7 @@ async def main():
     app.add_handler(MessageHandler(filters.ALL, blacklist_message_guard, block=True), group=-3)
     app.add_handler(MessageHandler(filters.ALL, capture_owner_custom_emojis, block=False), group=-2)
     app.add_handler(MessageHandler(filters.ALL, track_incoming_chat, block=False), group=-1)
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members), group=0)
     app.add_handler(ChatMemberHandler(log_bot_membership, ChatMemberHandler.MY_CHAT_MEMBER), group=-1)
     app.add_handler(CallbackQueryHandler(blacklist_callback_guard, block=True), group=-3)
     # Daily Drop buttons get their own early callback route so the game-launch
