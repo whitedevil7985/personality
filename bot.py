@@ -17,6 +17,22 @@ from telegram import (
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, ContextTypes, filters
 from telegram.request import HTTPXRequest
 
+# Telegram Bot API 9.4+ supports native coloured inline buttons.
+# Route all button creation through this factory so every bot keyboard gets a style.
+from telegram import InlineKeyboardButton as _TelegramInlineKeyboardButton
+
+def InlineKeyboardButton(text, *args, **kwargs):
+    """Create a Telegram button with a native colour unless explicitly styled."""
+    if "style" not in kwargs:
+        label = str(text).casefold()
+        if any(word in label for word in ("cancel", "delete", "remove", "leave", "reject", "back", "close", "stop", "unblacklist")):
+            kwargs["style"] = "danger"
+        elif any(word in label for word in ("play", "join", "start", "confirm", "save", "accept", "create", "ready", "enter", "claim")):
+            kwargs["style"] = "success"
+        else:
+            kwargs["style"] = "primary"
+    return _TelegramInlineKeyboardButton(text, *args, **kwargs)
+
 from config import (
     TOKEN, OWNER_ID, DEVELOPER_NAME, OWNER_PROFILE_URL, UPDATES_URL, SUPPORT_URL, AI_GROUP_MODE, AI_GROUP_REPLY_ALL, AI_DM_MODE,
     AI_DISCLOSURE, AI_MODEL, DEDICATED_API_KEY, DEDICATED_API_URL, DEDICATED_AI_MODEL, DEDICATED_TIMEOUT_SECONDS, ELITE_LLM_API_KEY, ELITE_LLM_BASE_URL, ELITE_LLM_MODEL, CHATGP_API_KEY, CHATGP_API_URL, CHATGP_TIMEOUT_SECONDS, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_AI_MODEL, CLOUDFLARE_TIMEOUT_SECONDS, OLLAMA_API_KEY, OLLAMA_API_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS, MAX_HISTORY, MEMORY_ENABLED, MAX_MEMORY,
