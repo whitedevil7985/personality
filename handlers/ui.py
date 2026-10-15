@@ -37,7 +37,6 @@ def start_menu():
         [InlineKeyboardButton("🥂 Updates ↗", url=UPDATES_URL),
          InlineKeyboardButton("🛠 Support ↗", url=SUPPORT_URL)],
         [InlineKeyboardButton("🌆 Vanya World", callback_data="world:city")],
-        [developer_button()],
         [InlineKeyboardButton("➕ Add me to your group", url="https://t.me/ItzVanyaBot?startgroup=true")],
         [InlineKeyboardButton("⌫ Back to start", callback_data="home")],
     ])
