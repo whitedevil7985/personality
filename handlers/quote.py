@@ -80,6 +80,8 @@ def _name_font_paths():
         "/usr/share/fonts/truetype/noto/*Serif*.ttf",
         "/usr/share/fonts/truetype/noto/*Mono*.ttf",
         "/usr/share/fonts/opentype/noto/*.otf",
+        "/usr/share/fonts/opentype/stix/*.otf",
+        "/usr/share/fonts/opentype/stix-word/*.otf",
     ):
         extra.extend(glob.glob(pattern))
     # Extra packs occasionally place uncommon alphabets in separate font files.
